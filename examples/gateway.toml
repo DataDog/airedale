@@ -1,0 +1,22 @@
+# example gateway.toml
+# ---------------------------------------------------------------------------
+# Maps provider names to gateway routing settings.
+# Pass this file via --gateway-config, or omit it to use provider default APIs
+# (ANTHROPIC_API_KEY / OPENAI_API_KEY environment variables).
+
+[providers.anthropic]
+# All Claude traffic routes through this base URL.
+base_url = "https://ai-gateway.example.com"
+# Shell command whose stdout yields a bearer token (JWT or raw string).
+# Run on first use and cached for 30 minutes.
+credentials_helper = "mytool auth token --datacenter us1"
+# Static extra headers merged into every request for this provider.
+headers = { source = "evals", "org-id" = "42", provider = "anthropic" }
+
+[providers.openai]
+base_url = "https://ai-gateway.example.com/v1"
+# Alternative to credentials_helper: read a static key from the environment.
+# Uncomment to use instead of credentials_helper.
+# api_key_env = "MY_OPENAI_GATEWAY_KEY"
+credentials_helper = "mytool auth token --datacenter us1"
+headers = { source = "evals", provider = "openai" }

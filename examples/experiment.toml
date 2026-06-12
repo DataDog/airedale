@@ -1,0 +1,89 @@
+# example experiment.toml
+# ---------------------------------------------------------------------------
+# Required: LLMObs ml_app and project name.
+project = "my-evals"
+description = "Example evaluation suite"
+
+# Required: provider-qualified models to evaluate.
+models = ["anthropic/claude-sonnet-4-6", "openai/gpt-4.1"]
+
+# Optional: judge model for rubric scoring (default shown).
+judge_model = "anthropic/claude-sonnet-4-6"
+
+# Optional: stable dataset name (defaults to `project`).
+dataset_name = "my-evals"
+
+# Optional: how many times to run each (model, scenario, task) cell.
+runs = 1
+
+# Optional: defaults applied to every scenario unless overridden per-scenario.
+[defaults]
+max_turns = 64
+effort = "medium"
+
+# ---------------------------------------------------------------------------
+# Scenarios: named runtime environments for the model.
+# ---------------------------------------------------------------------------
+
+# Scenario A: full MCP orchestrator with an HTTP MCP server.
+[scenarios.fat-mcp]
+description = "Full MCP orchestrator tool"
+system_prompt = "Prefer MCP tools over internal knowledge."
+skills = ["./skills/apm"]
+allowed_builtin_tools = ["Read", "Grep", "Glob"]
+max_turns = 64
+effort = "medium"
+
+# HTTP-transport MCP server with optional auto-start.
+[scenarios.fat-mcp.mcp_servers.apm]
+url = "http://localhost:8000/mcp"
+headers = { source = "evals" }
+bearer_token_env_var = "APM_MCP_TOKEN"
+tool_names = ["search_apm_libraries", "get_apm_docs"]
+# Optional managed auto-start (started only when the health check fails).
+start_command = "python -m my_mcp_server"
+start_env = { MCP_MODE = "both" }
+health_url = "http://localhost:8000/health"
+
+# Scenario B: minimal scenario using only built-in tools (no MCP).
+[scenarios.builtin-only]
+description = "Model answers with built-in tools only; no MCP servers."
+allowed_builtin_tools = ["Read", "Grep"]
+max_turns = 32
+effort = "low"
+
+# Scenario C: stdio-transport MCP server launched directly by the agent SDK.
+[scenarios.local-tools]
+description = "Stdio MCP server for local tool access."
+
+[scenarios.local-tools.mcp_servers.tools]
+command = "python"
+args = ["-m", "my_stdio_server"]
+env = { TOOL_MODE = "read-only" }
+tool_names = ["do_thing"]
+
+# ---------------------------------------------------------------------------
+# Tasks: prompts + evaluation criteria.
+# ---------------------------------------------------------------------------
+
+[[tasks]]
+id = "ssi_overview"
+description = "[glossary] SSI definition"
+prompt = "What is Single Step Instrumentation (SSI)?"
+context = "Answer in the context of Datadog APM language instrumentation."
+criteria = [
+    "Correctly defines Single Step Instrumentation",
+    "Mentions that it instruments without modifying application code",
+    "Names at least two supported languages",
+]
+latency_threshold_ms = 30000
+
+[[tasks]]
+id = "otel_vs_dd"
+description = "[comparison] OpenTelemetry vs Datadog tracing"
+prompt = "Compare OpenTelemetry and Datadog native tracing for a Python service."
+criteria = [
+    "Explains the OpenTelemetry semantic conventions approach",
+    "Describes Datadog's proprietary tracing SDK",
+    "Notes interoperability between the two",
+]
