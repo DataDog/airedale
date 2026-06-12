@@ -1,0 +1,72 @@
+[project]
+name = "dd-ai-devx-evals"
+version = "0.1.0"
+description = "Config-driven evaluation harness for agentic LLM runs, reporting to Datadog LLM Observability Experiments"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Datadog, Inc." }]
+keywords = ["llm", "evals", "datadog", "llmobs", "mcp", "agents", "observability"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Testing",
+]
+dependencies = [
+    "ddtrace>=4.3.4",
+    "anthropic>=0.84.0",
+    "openai>=1.0.1",
+    "claude-agent-sdk==0.2.82",
+    "openai-codex>=0.1.0b2",
+    "mcp>=1.27.0",
+    "httpx>=0.28.1",
+    "rich>=13.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.4.2",
+    "pytest-asyncio>=0.23.8",
+    "pytest-mock>=3.15.1",
+    "ruff>=0.1.15",
+]
+
+[project.scripts]
+dd-ai-devx-evals = "dd_ai_devx_evals.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/DataDog/dd-ai-devx-evals"
+Repository = "https://github.com/DataDog/dd-ai-devx-evals"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dd_ai_devx_evals"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+fix = true
+exclude = [".git", ".venv", "venv", "__pycache__", "build", "dist", ".pytest_cache"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "N", "UP", "B", "C4", "SIM", "TCH"]
+ignore = ["E501", "B008", "B905"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["dd_ai_devx_evals"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

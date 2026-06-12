@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.uv-cache/
+uv.lock
+
+# Local config / secrets
+.env
+*.local.toml
+
+# Editor
+.vscode/
+.idea/
+.DS_Store
+
+# Eval run artifacts
+*.log
