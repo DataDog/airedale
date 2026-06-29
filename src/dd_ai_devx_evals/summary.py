@@ -65,10 +65,10 @@ def _row_latency_ms(row: dict[str, Any]) -> float:
         return 0.0
     for key in ("latency_ms", "duration_ms"):
         value = row.get(key)
-        if isinstance(value, (int, float)):
+        if isinstance(value, int | float):
             return float(value)
     duration = row.get("duration")
-    if isinstance(duration, (int, float)):
+    if isinstance(duration, int | float):
         # ``duration`` is conventionally nanoseconds on LLMObs spans.
         return float(duration) / 1e6
     return 0.0

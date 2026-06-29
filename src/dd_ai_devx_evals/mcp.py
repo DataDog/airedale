@@ -373,7 +373,7 @@ def _toml_value(value: Any) -> str:
         return _toml_string(value)
     if isinstance(value, bool):
         return "true" if value else "false"
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return str(value)
     if isinstance(value, Mapping):
         return "{" + ", ".join(f"{_toml_key(str(key))} = {_toml_value(item)}" for key, item in value.items()) + "}"
