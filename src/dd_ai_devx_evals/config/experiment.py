@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -96,6 +97,51 @@ class McpServerConfig:
 
 
 @dataclass(frozen=True)
+class RestoreStep:
+    """`git restore --source=<from_ref> -- <paths...>` inside the workspace."""
+
+    from_ref: str
+    paths: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class RemoveStep:
+    """Delete files/dirs matching glob ``paths`` from the workspace."""
+
+    paths: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class WriteStep:
+    """Create/overwrite a file in the workspace.
+
+    Exactly one of ``content`` (inline) or ``source_path`` (a file copied in,
+    already resolved to an absolute path at load time) is set.
+    """
+
+    path: str
+    content: str | None = None
+    source_path: str | None = None
+
+
+WorkdirStep = RestoreStep | RemoveStep | WriteStep
+
+
+@dataclass(frozen=True)
+class WorkdirConfig:
+    """Scenario working-directory configuration.
+
+    ``repo`` is ``"self"`` (the git repo containing ``experiment.toml``), a git
+    URL, or an absolute local path (local paths are resolved against the config
+    dir at load time). ``None`` means start from an empty directory.
+    """
+
+    repo: str | None = None
+    ref: str | None = None
+    steps: tuple[WorkdirStep, ...] = ()
+
+
+@dataclass(frozen=True)
 class ScenarioConfig:
     """Configuration for a scenario runtime.
 
@@ -114,6 +160,7 @@ class ScenarioConfig:
     max_turns: int | None = None
     effort: str | None = None
     mcp_servers: tuple[McpServerConfig, ...] = ()
+    workdir: WorkdirConfig | None = None
 
 
 @dataclass(frozen=True)
@@ -188,6 +235,7 @@ _SCENARIO_KEYS = {
     "max_turns",
     "effort",
     "mcp_servers",
+    "workdir",
 }
 _DEFAULTS_KEYS = {
     "max_turns",
@@ -196,7 +244,156 @@ _DEFAULTS_KEYS = {
     "skills",
     "allowed_builtin_tools",
     "mcp_servers",
+    "workdir",
 }
+_WORKDIR_KEYS = {"repo", "ref", "steps"}
+_RESTORE_STEP_KEYS = {"op", "from", "paths"}
+_REMOVE_STEP_KEYS = {"op", "paths"}
+_WRITE_STEP_KEYS = {"op", "path", "content", "source"}
+
+
+def _looks_like_git_url(value: str) -> bool:
+    """Return True for remote git sources (``scheme://...`` or ``user@host:path``)."""
+    if "://" in value:
+        return True
+    return bool(re.match(r"^[\w.+-]+@[\w.-]+:", value))
+
+
+def _git_toplevel(config_dir: Path) -> str | None:
+    """Return the git toplevel containing ``config_dir``, or None if not a repo."""
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(config_dir), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    toplevel = result.stdout.strip()
+    return toplevel or None
+
+
+def _require_str_paths(value: Any, *, where: str) -> tuple[str, ...]:
+    """Validate a non-empty list of string pathspecs."""
+    if not isinstance(value, (list, tuple)) or not value:
+        raise ConfigError(f"{where} 'paths' must be a non-empty list of strings")
+    paths: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise ConfigError(f"{where} 'paths' entries must be strings")
+        paths.append(item)
+    return tuple(paths)
+
+
+def _validate_workspace_relative_path(path: str, *, where: str) -> None:
+    """Reject absolute paths and ``..`` escapes for a workspace-relative path."""
+    from pathlib import PurePosixPath
+
+    if not path:
+        raise ConfigError(f"{where} 'path' must be a non-empty string")
+    pure = PurePosixPath(path)
+    if pure.is_absolute() or Path(path).is_absolute():
+        raise ConfigError(f"{where} 'path' must be relative to the workspace, got absolute '{path}'")
+    if ".." in pure.parts:
+        raise ConfigError(f"{where} 'path' must not escape the workspace with '..': '{path}'")
+
+
+def _parse_workdir_step(name: str, index: int, raw: Any, *, config_dir: Path, has_repo: bool) -> WorkdirStep:
+    """Parse and validate a single workdir step table."""
+    where = f"Scenario '{name}' workdir step #{index + 1}"
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{where} must be a table")
+    op = raw.get("op")
+    if not isinstance(op, str):
+        raise ConfigError(f"{where} must define a string 'op'")
+
+    if op == "restore":
+        unknown = set(raw.keys()) - _RESTORE_STEP_KEYS
+        if unknown:
+            raise ConfigError(f"{where} (restore) has unknown keys: {', '.join(sorted(unknown))}")
+        if not has_repo:
+            raise ConfigError(f"{where} uses 'restore' but the workdir has no 'repo' to restore from")
+        from_ref = raw.get("from")
+        if not isinstance(from_ref, str) or not from_ref:
+            raise ConfigError(f"{where} (restore) must define a non-empty 'from' ref")
+        paths = _require_str_paths(raw.get("paths"), where=f"{where} (restore)")
+        return RestoreStep(from_ref=from_ref, paths=paths)
+
+    if op == "remove":
+        unknown = set(raw.keys()) - _REMOVE_STEP_KEYS
+        if unknown:
+            raise ConfigError(f"{where} (remove) has unknown keys: {', '.join(sorted(unknown))}")
+        paths = _require_str_paths(raw.get("paths"), where=f"{where} (remove)")
+        return RemoveStep(paths=paths)
+
+    if op == "write":
+        unknown = set(raw.keys()) - _WRITE_STEP_KEYS
+        if unknown:
+            raise ConfigError(f"{where} (write) has unknown keys: {', '.join(sorted(unknown))}")
+        path = raw.get("path")
+        if not isinstance(path, str):
+            raise ConfigError(f"{where} (write) must define a string 'path'")
+        _validate_workspace_relative_path(path, where=f"{where} (write)")
+        has_content = "content" in raw
+        has_source = "source" in raw
+        if has_content == has_source:
+            raise ConfigError(f"{where} (write) must define exactly one of 'content' or 'source'")
+        if has_content:
+            content = raw.get("content")
+            if not isinstance(content, str):
+                raise ConfigError(f"{where} (write) 'content' must be a string")
+            return WriteStep(path=path, content=content, source_path=None)
+        source = raw.get("source")
+        if not isinstance(source, str):
+            raise ConfigError(f"{where} (write) 'source' must be a string")
+        source_path = str((config_dir / source).resolve())
+        return WriteStep(path=path, content=None, source_path=source_path)
+
+    raise ConfigError(f"{where} has unknown op '{op}' (expected 'restore', 'remove', or 'write')")
+
+
+def _parse_workdir(name: str, raw: Any, *, config_dir: Path) -> WorkdirConfig:
+    """Parse and validate a scenario (or defaults) ``workdir`` block."""
+    where = f"Scenario '{name}' workdir"
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{where} must be a table")
+    unknown = set(raw.keys()) - _WORKDIR_KEYS
+    if unknown:
+        raise ConfigError(f"{where} has unknown keys: {', '.join(sorted(unknown))}")
+
+    repo_raw = raw.get("repo")
+    repo: str | None = None
+    if repo_raw is not None:
+        if not isinstance(repo_raw, str) or not repo_raw:
+            raise ConfigError(f"{where} 'repo' must be a non-empty string")
+        if repo_raw == "self":
+            # Validate eagerly so dry-run also catches a config outside any repo.
+            if _git_toplevel(config_dir) is None:
+                raise ConfigError(f'{where} sets repo="self" but the config directory is not inside a git repository')
+            repo = "self"
+        elif _looks_like_git_url(repo_raw):
+            repo = repo_raw
+        else:
+            repo = str((config_dir / repo_raw).resolve())
+
+    ref = raw.get("ref")
+    if ref is not None and not isinstance(ref, str):
+        raise ConfigError(f"{where} 'ref' must be a string")
+
+    raw_steps = raw.get("steps", [])
+    if not isinstance(raw_steps, (list, tuple)):
+        raise ConfigError(f"{where} 'steps' must be an array of tables")
+    steps = tuple(
+        _parse_workdir_step(name, index, step, config_dir=config_dir, has_repo=repo is not None)
+        for index, step in enumerate(raw_steps)
+    )
+
+    return WorkdirConfig(repo=repo, ref=ref, steps=steps)
 
 
 def _parse_mcp_server(name: str, config: dict[str, Any]) -> McpServerConfig:
@@ -264,6 +461,8 @@ def _parse_scenario(
     defaults: dict[str, Any],
     skill_registry: dict[str, str],
     mcp_registry: dict[str, McpServerConfig],
+    *,
+    config_dir: Path,
 ) -> ScenarioConfig:
     """Parse scenario config from TOML data, applying defaults.
 
@@ -298,6 +497,10 @@ def _parse_scenario(
     max_turns = config.get("max_turns") or defaults.get("max_turns")
     effort = config.get("effort") or defaults.get("effort")
 
+    # Scenario workdir wins entirely over the [defaults] workdir (no merge).
+    workdir_raw = config["workdir"] if "workdir" in config else defaults.get("workdir")
+    workdir = _parse_workdir(name, workdir_raw, config_dir=config_dir) if workdir_raw is not None else None
+
     return ScenarioConfig(
         name=name,
         description=config.get("description"),
@@ -307,6 +510,7 @@ def _parse_scenario(
         max_turns=max_turns,
         effort=effort,
         mcp_servers=mcp_servers,
+        workdir=workdir,
     )
 
 
@@ -391,7 +595,11 @@ def load_experiment(path: str | Path) -> ExperimentConfig:
     # Parse scenarios
     scenarios = []
     for scenario_name, scenario_config in data["scenarios"].items():
-        scenarios.append(_parse_scenario(scenario_name, scenario_config, defaults, skill_registry, mcp_registry))
+        scenarios.append(
+            _parse_scenario(
+                scenario_name, scenario_config, defaults, skill_registry, mcp_registry, config_dir=config_dir
+            )
+        )
 
     # Parse tasks. The `tasks` table is keyed by task id ([tasks.<id>]); TOML
     # forbids duplicate keys, so ids are unique by construction.

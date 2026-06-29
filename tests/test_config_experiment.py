@@ -354,6 +354,284 @@ class TestLoadExperimentValid:
 
 
 # ---------------------------------------------------------------------------
+# workdir
+# ---------------------------------------------------------------------------
+
+
+def _init_git_repo(path: Path) -> None:
+    """Initialize a throwaway local git repo (offline; harness mechanism)."""
+    import os
+    import subprocess
+
+    path.mkdir(parents=True, exist_ok=True)
+    env = {**os.environ, "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null"}
+    subprocess.run(["git", "init", "-q"], cwd=path, check=True, env=env)
+
+
+class TestWorkdir:
+    def test_repo_self_resolves_in_git_repo(self, tmp_path):
+        _init_git_repo(tmp_path)
+        toml = """
+        project = "p"
+        models = ["anthropic/claude-3-haiku-20240307"]
+        [scenarios.s1.workdir]
+        repo = "self"
+        ref = "main"
+        [tasks.t1]
+        prompt = "p"
+        criteria = ["c"]
+        """
+        config = load_experiment(write_toml(tmp_path, toml))
+        wd = config.scenarios[0].workdir
+        assert wd is not None
+        assert wd.repo == "self"
+        assert wd.ref == "main"
+        assert wd.steps == ()
+
+    def test_repo_self_outside_git_repo_errors(self, tmp_path):
+        toml = """
+        project = "p"
+        models = ["anthropic/claude-3-haiku-20240307"]
+        [scenarios.s1.workdir]
+        repo = "self"
+        [tasks.t1]
+        prompt = "p"
+        criteria = ["c"]
+        """
+        # tmp_path is not a git repo (and pytest tmp dirs are outside this repo).
+        with pytest.raises(ConfigError, match="not inside a git repository"):
+            load_experiment(write_toml(tmp_path, toml))
+
+    def test_repo_url_kept_verbatim(self, tmp_path):
+        toml = """
+        project = "p"
+        models = ["anthropic/claude-3-haiku-20240307"]
+        [scenarios.s1.workdir]
+        repo = "https://github.com/example/repo.git"
+        [tasks.t1]
+        prompt = "p"
+        criteria = ["c"]
+        """
+        config = load_experiment(write_toml(tmp_path, toml))
+        assert config.scenarios[0].workdir.repo == "https://github.com/example/repo.git"
+
+    def test_repo_local_path_resolved_against_config_dir(self, tmp_path):
+        toml = """
+        project = "p"
+        models = ["anthropic/claude-3-haiku-20240307"]
+        [scenarios.s1.workdir]
+        repo = "./fixture-repo"
+        [tasks.t1]
+        prompt = "p"
+        criteria = ["c"]
+        """
+        config = load_experiment(write_toml(tmp_path, toml))
+        assert config.scenarios[0].workdir.repo == str((tmp_path / "fixture-repo").resolve())
+
+    def test_no_repo_starts_empty(self, tmp_path):
+        toml = """
+        project = "p"
+        models = ["anthropic/claude-3-haiku-20240307"]
+        [scenarios.s1.workdir]
+        [[scenarios.s1.workdir.steps]]
+        op = "write"
+        path = "main.py"
+        content = "print('hi')\\n"
+        [tasks.t1]
+        prompt = "p"
+        criteria = ["c"]
+        """
+        config = load_experiment(write_toml(tmp_path, toml))
+        wd = config.scenarios[0].workdir
+        assert wd.repo is None
+        assert len(wd.steps) == 1
+
+    def test_all_step_types_parsed(self, tmp_path):
+        _init_git_repo(tmp_path)
+        toml = """
+        project = "p"
+        models = ["anthropic/claude-3-haiku-20240307"]
+        [scenarios.s1.workdir]
+        repo = "self"
+        ref = "v2.3.0"
+        [[scenarios.s1.workdir.steps]]
+        op = "restore"
+        from = "v2.2.0"
+        paths = ["src/api/**", "README.md"]
+        [[scenarios.s1.workdir.steps]]
+        op = "remove"
+        paths = ["secrets/**"]
+        [[scenarios.s1.workdir.steps]]
+        op = "write"
+        path = "NOTES.md"
+        content = "evaluate"
+        [[scenarios.s1.workdir.steps]]
+        op = "write"
+        path = "fixtures/input.json"
+        source = "./fixtures/input.json"
+        [tasks.t1]
+        prompt = "p"
+        criteria = ["c"]
+        """
+        from dd_ai_devx_evals.config.experiment import RemoveStep, RestoreStep, WriteStep
+
+        config = load_experiment(write_toml(tmp_path, toml))
+        steps = config.scenarios[0].workdir.steps
+        assert isinstance(steps[0], RestoreStep)
+        assert steps[0].from_ref == "v2.2.0"
+        assert steps[0].paths == ("src/api/**", "README.md")
+        assert isinstance(steps[1], RemoveStep)
+        assert steps[1].paths == ("secrets/**",)
+        assert isinstance(steps[2], WriteStep)
+        assert steps[2].content == "evaluate"
+        assert steps[2].source_path is None
+        assert isinstance(steps[3], WriteStep)
+        assert steps[3].content is None
+        assert steps[3].source_path == str((tmp_path / "fixtures" / "input.json").resolve())
+
+    def test_workdir_defaultable_and_override_entirely(self, tmp_path):
+        toml = """
+        project = "p"
+        models = ["anthropic/claude-3-haiku-20240307"]
+        [defaults.workdir]
+        repo = "https://github.com/example/base.git"
+        [scenarios.inherits]
+        [scenarios.override.workdir]
+        repo = "https://github.com/example/other.git"
+        [tasks.t1]
+        prompt = "p"
+        criteria = ["c"]
+        """
+        config = load_experiment(write_toml(tmp_path, toml))
+        by_name = {s.name: s for s in config.scenarios}
+        assert by_name["inherits"].workdir.repo == "https://github.com/example/base.git"
+        assert by_name["override"].workdir.repo == "https://github.com/example/other.git"
+
+    def test_restore_without_repo_errors(self, tmp_path):
+        toml = """
+        project = "p"
+        models = ["anthropic/claude-3-haiku-20240307"]
+        [scenarios.s1.workdir]
+        [[scenarios.s1.workdir.steps]]
+        op = "restore"
+        from = "main"
+        paths = ["x"]
+        [tasks.t1]
+        prompt = "p"
+        criteria = ["c"]
+        """
+        with pytest.raises(ConfigError, match="no 'repo' to restore from"):
+            load_experiment(write_toml(tmp_path, toml))
+
+    def test_write_path_absolute_rejected(self, tmp_path):
+        toml = """
+        project = "p"
+        models = ["anthropic/claude-3-haiku-20240307"]
+        [scenarios.s1.workdir]
+        [[scenarios.s1.workdir.steps]]
+        op = "write"
+        path = "/etc/passwd"
+        content = "x"
+        [tasks.t1]
+        prompt = "p"
+        criteria = ["c"]
+        """
+        with pytest.raises(ConfigError, match="absolute"):
+            load_experiment(write_toml(tmp_path, toml))
+
+    def test_write_path_dotdot_rejected(self, tmp_path):
+        toml = """
+        project = "p"
+        models = ["anthropic/claude-3-haiku-20240307"]
+        [scenarios.s1.workdir]
+        [[scenarios.s1.workdir.steps]]
+        op = "write"
+        path = "../escape.txt"
+        content = "x"
+        [tasks.t1]
+        prompt = "p"
+        criteria = ["c"]
+        """
+        with pytest.raises(ConfigError, match="escape"):
+            load_experiment(write_toml(tmp_path, toml))
+
+    def test_write_both_content_and_source_rejected(self, tmp_path):
+        toml = """
+        project = "p"
+        models = ["anthropic/claude-3-haiku-20240307"]
+        [scenarios.s1.workdir]
+        [[scenarios.s1.workdir.steps]]
+        op = "write"
+        path = "f.txt"
+        content = "x"
+        source = "./f.txt"
+        [tasks.t1]
+        prompt = "p"
+        criteria = ["c"]
+        """
+        with pytest.raises(ConfigError, match="exactly one of 'content' or 'source'"):
+            load_experiment(write_toml(tmp_path, toml))
+
+    def test_write_neither_content_nor_source_rejected(self, tmp_path):
+        toml = """
+        project = "p"
+        models = ["anthropic/claude-3-haiku-20240307"]
+        [scenarios.s1.workdir]
+        [[scenarios.s1.workdir.steps]]
+        op = "write"
+        path = "f.txt"
+        [tasks.t1]
+        prompt = "p"
+        criteria = ["c"]
+        """
+        with pytest.raises(ConfigError, match="exactly one of 'content' or 'source'"):
+            load_experiment(write_toml(tmp_path, toml))
+
+    def test_unknown_op_rejected(self, tmp_path):
+        toml = """
+        project = "p"
+        models = ["anthropic/claude-3-haiku-20240307"]
+        [scenarios.s1.workdir]
+        [[scenarios.s1.workdir.steps]]
+        op = "frobnicate"
+        [tasks.t1]
+        prompt = "p"
+        criteria = ["c"]
+        """
+        with pytest.raises(ConfigError, match="unknown op"):
+            load_experiment(write_toml(tmp_path, toml))
+
+    def test_unknown_step_key_rejected(self, tmp_path):
+        toml = """
+        project = "p"
+        models = ["anthropic/claude-3-haiku-20240307"]
+        [scenarios.s1.workdir]
+        [[scenarios.s1.workdir.steps]]
+        op = "remove"
+        paths = ["x"]
+        bogus = 1
+        [tasks.t1]
+        prompt = "p"
+        criteria = ["c"]
+        """
+        with pytest.raises(ConfigError, match="unknown keys"):
+            load_experiment(write_toml(tmp_path, toml))
+
+    def test_unknown_workdir_key_rejected(self, tmp_path):
+        toml = """
+        project = "p"
+        models = ["anthropic/claude-3-haiku-20240307"]
+        [scenarios.s1.workdir]
+        bogus = "x"
+        [tasks.t1]
+        prompt = "p"
+        criteria = ["c"]
+        """
+        with pytest.raises(ConfigError, match="workdir has unknown keys"):
+            load_experiment(write_toml(tmp_path, toml))
+
+
+# ---------------------------------------------------------------------------
 # Error cases
 # ---------------------------------------------------------------------------
 
