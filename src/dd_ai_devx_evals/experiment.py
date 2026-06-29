@@ -13,7 +13,6 @@ results are collected into :class:`ExperimentRunSummary` objects and rendered by
 from __future__ import annotations
 
 import asyncio
-import tempfile
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -27,6 +26,7 @@ from dd_ai_devx_evals.progress import ProgressReporter
 from dd_ai_devx_evals.scoring import RubricEvaluator
 from dd_ai_devx_evals.summary import ExperimentSummary, print_summary
 from dd_ai_devx_evals.types import ModelSpec, slugify
+from dd_ai_devx_evals.workdir import WorkspaceManager
 
 if TYPE_CHECKING:
     from dd_ai_devx_evals.config.experiment import ExperimentConfig, ScenarioConfig, TaskConfig
@@ -94,7 +94,7 @@ async def run_experiments(
     managed_specs = _managed_server_specs(selected_scenarios)
 
     try:
-        async with managed_servers(managed_specs):
+        async with WorkspaceManager(config_dir=config.config_dir) as workspace_manager, managed_servers(managed_specs):
             # A single semaphore bounds concurrent cells across the whole matrix.
             # ``jobs == 1`` therefore runs everything sequentially.
             semaphore = asyncio.Semaphore(max(1, jobs))
@@ -110,6 +110,7 @@ async def run_experiments(
                         runs=effective_runs,
                         fail_fast=fail_fast,
                         progress=progress,
+                        workspace_manager=workspace_manager,
                     )
 
             summaries = list(await asyncio.gather(*(_bounded(cell) for cell in matrix)))
@@ -130,13 +131,15 @@ async def _run_cell(
     runs: int,
     fail_fast: bool,
     progress: ProgressReporter,
+    workspace_manager: WorkspaceManager,
 ) -> ExperimentRunSummary:
     """Run one matrix cell as a single LLMObs experiment.
 
     The cell's ``runs`` repetitions execute sequentially (``jobs=1`` on the
     LLMObs experiment); cross-cell concurrency is governed by the caller's global
     semaphore so that the total number of in-flight agent runs stays within the
-    configured ``jobs``.
+    configured ``jobs``. A fresh workspace (and runner) is created per repetition
+    by ``experiment_task``, which LLMObs invokes once per (record × run).
     """
     model, scenario, task = cell
     experiment_name = _experiment_name(scenario, model, task)
@@ -147,11 +150,10 @@ async def _run_cell(
 
     cell_mcp_servers = [McpServerSpec.from_config(server) for server in scenario.mcp_servers]
 
-    with tempfile.TemporaryDirectory(prefix="dd-ai-devx-eval-") as cwd:
-        runner = create_runner(model, scenario=scenario, gateway=gateway, cwd=cwd)
-
-        async def experiment_task(input_data: dict[str, Any], cfg: dict[str, Any] | None = None) -> dict[str, Any]:
-            await progress.message(f"running {model.label} / {scenario.name} / {task.id}")
+    async def experiment_task(input_data: dict[str, Any], cfg: dict[str, Any] | None = None) -> dict[str, Any]:
+        await progress.message(f"running {model.label} / {scenario.name} / {task.id}")
+        async with workspace_manager.workspace(scenario.workdir) as cwd:
+            runner = create_runner(model, scenario=scenario, gateway=gateway, cwd=str(cwd))
             result = await runner.run(
                 model=model,
                 system_prompt=system_prompt,
@@ -160,38 +162,38 @@ async def _run_cell(
                 harness=scenario.name,
                 progress=progress.message,
             )
-            _annotate_experiment_usage(result, scenario=scenario.name, model=model.label, task=task.id)
-            return result.to_output_data()
+        _annotate_experiment_usage(result, scenario=scenario.name, model=model.label, task=task.id)
+        return result.to_output_data()
 
-        experiment_task.__name__ = "dd_ai_devx_eval_task"
+    experiment_task.__name__ = "dd_ai_devx_eval_task"
 
-        experiment = LLMObs.async_experiment(
-            name=experiment_name,
-            task=experiment_task,
-            dataset=dataset_module.dataset_for_task(dataset, task),
-            evaluators=[RubricEvaluator(judge_model=judge_model, gateway=gateway)],
-            project_name=config.project,
-            description=f"{scenario.name} / {model.label} / {task.id}",
-            tags={
-                "scenario": scenario.name,
-                "model_name": model.label,
-                "task_slug": task.id,
-                "judge_model": judge_model,
-            },
-            config={
-                "model_name": model.label,
-                "scenario": scenario.name,
-                "task": task.id,
-                "judge_model": judge_model,
-                "mcp_servers": [server.to_safe_dict() for server in cell_mcp_servers],
-                "gateway_enabled": gateway is not None,
-            },
-            runs=runs,
-        )
-        await progress.message(f"starting {experiment_name}")
-        result = await experiment.run(jobs=1, raise_errors=fail_fast)
-        LLMObs.flush()
-        progress.advance(f"finished {model.label} / {scenario.name} / {task.id}")
+    experiment = LLMObs.async_experiment(
+        name=experiment_name,
+        task=experiment_task,
+        dataset=dataset_module.dataset_for_task(dataset, task),
+        evaluators=[RubricEvaluator(judge_model=judge_model, gateway=gateway)],
+        project_name=config.project,
+        description=f"{scenario.name} / {model.label} / {task.id}",
+        tags={
+            "scenario": scenario.name,
+            "model_name": model.label,
+            "task_slug": task.id,
+            "judge_model": judge_model,
+        },
+        config={
+            "model_name": model.label,
+            "scenario": scenario.name,
+            "task": task.id,
+            "judge_model": judge_model,
+            "mcp_servers": [server.to_safe_dict() for server in cell_mcp_servers],
+            "gateway_enabled": gateway is not None,
+        },
+        runs=runs,
+    )
+    await progress.message(f"starting {experiment_name}")
+    result = await experiment.run(jobs=1, raise_errors=fail_fast)
+    LLMObs.flush()
+    progress.advance(f"finished {model.label} / {scenario.name} / {task.id}")
 
     return ExperimentRunSummary(
         experiment_name=experiment_name,

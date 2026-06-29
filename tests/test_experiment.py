@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from dd_ai_devx_evals.config.experiment import McpServerConfig, ScenarioConfig, TaskConfig
+import asyncio
+
+from dd_ai_devx_evals.config.experiment import ExperimentConfig, McpServerConfig, ScenarioConfig, TaskConfig
 from dd_ai_devx_evals.experiment import _experiment_name, _managed_server_specs, _normalize_filter
 from dd_ai_devx_evals.types import ModelSpec
 
@@ -123,3 +125,108 @@ class TestManagedServerSpecs:
         specs = _managed_server_specs([scenario])
         assert len(specs) == 1
         assert specs[0].name == "mgd"
+
+
+# ---------------------------------------------------------------------------
+# per-run workspaces (_run_cell)
+# ---------------------------------------------------------------------------
+
+
+class TestPerRunWorkspaces:
+    def test_fresh_workspace_and_runner_per_run(self, tmp_path, monkeypatch):
+        from dd_ai_devx_evals import experiment as exp_mod
+        from dd_ai_devx_evals.progress import ProgressReporter
+        from dd_ai_devx_evals.types import HarnessResult, UsageMetrics
+        from dd_ai_devx_evals.workdir import WorkspaceManager
+
+        runs = 3
+
+        class FakeExperiment:
+            url = "http://example/exp"
+
+            def __init__(self, task, n):
+                self._task = task
+                self._n = n
+
+            async def run(self, jobs=1, raise_errors=False):
+                # LLMObs invokes the task once per (record x run).
+                for _ in range(self._n):
+                    await self._task({"prompt": "hi"})
+                return {"rows": []}
+
+        class FakeLLMObs:
+            enabled = False
+
+            @staticmethod
+            def async_experiment(*, task, runs, **kwargs):
+                return FakeExperiment(task, runs)
+
+            @staticmethod
+            def flush():
+                pass
+
+            @staticmethod
+            def annotate(**kwargs):
+                pass
+
+        monkeypatch.setattr(exp_mod, "LLMObs", FakeLLMObs)
+        monkeypatch.setattr(exp_mod.dataset_module, "dataset_for_task", lambda ds, task: None)
+
+        constructed_cwds: list[str] = []
+
+        class FakeRunner:
+            def __init__(self, cwd):
+                self.cwd = cwd
+
+            async def run(self, **kwargs):
+                return HarnessResult(
+                    answer="a",
+                    usage=UsageMetrics(input_tokens=1, output_tokens=1, total_tokens=2),
+                    tool_calls=[],
+                    harness="s1",
+                )
+
+        def fake_create_runner(model, *, scenario, gateway, cwd):
+            constructed_cwds.append(cwd)
+            return FakeRunner(cwd)
+
+        monkeypatch.setattr(exp_mod, "create_runner", fake_create_runner)
+
+        model = ModelSpec.parse("anthropic/claude-3-haiku-20240307")
+        scenario = ScenarioConfig(name="s1")  # workdir=None -> empty temp dirs
+        task = TaskConfig(id="t1", prompt="Q", criteria=("c",))
+        config = ExperimentConfig(
+            project="p", models=("anthropic/claude-3-haiku-20240307",), scenarios=(scenario,), tasks=(task,)
+        )
+
+        workspace_entries = 0
+
+        async def run():
+            nonlocal workspace_entries
+            async with WorkspaceManager(config_dir=tmp_path) as wm:
+                original = wm.workspace
+
+                def counting_workspace(workdir):
+                    nonlocal workspace_entries
+                    workspace_entries += 1
+                    return original(workdir)
+
+                wm.workspace = counting_workspace
+                await exp_mod._run_cell(
+                    (model, scenario, task),
+                    config=config,
+                    gateway=None,
+                    dataset=None,
+                    judge_model="anthropic/claude-3-haiku-20240307",
+                    runs=runs,
+                    fail_fast=False,
+                    progress=ProgressReporter(enabled=False),
+                    workspace_manager=wm,
+                )
+
+        asyncio.run(run())
+
+        assert workspace_entries == runs
+        assert len(constructed_cwds) == runs
+        # Each run gets a distinct, fresh workspace.
+        assert len(set(constructed_cwds)) == runs
