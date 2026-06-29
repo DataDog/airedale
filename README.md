@@ -37,12 +37,11 @@ Given two TOML files the harness:
 
 ### Distributed tracing for complete token accounting
 
-Before each run, `LLMObs.inject_distributed_headers()` is called and the
-resulting headers are merged into the HTTP headers sent to every MCP server. When
-the MCP server is LLMObs-instrumented, its spans link to the experiment span, so
-the experiment's `token_count` reflects the full cost of the run — including
-tokens consumed by sub-agents inside the MCP server. This only applies to HTTP
-transport; stdio servers cannot receive per-request trace headers.
+Trace-context headers are injected into every HTTP MCP request, so an
+LLMObs-instrumented server's spans link back to the experiment and the tokens it
+consumes — including those used by sub-agents inside the server — are rolled into
+the experiment's `token_count`. See
+[How distributed tracing works](#how-distributed-tracing-works) for details.
 
 ---
 
@@ -176,16 +175,21 @@ See [`AGENTS.md §2.1`](./AGENTS.md) for the full contract.
 
 #### MCP server fields (`[scenarios.<name>.mcp_servers.<name>]`)
 
-The field model mirrors the common `.mcp.json` shape: `type`/`command`/`args`/
-`env`/`url`/`headers`. `type` is optional and inferred when omitted:
+Server blocks use the same field model as a standard `.mcp.json` file. Two
+transports are supported:
 
-- **stdio** — set `command` (+ optional `args`/`env`); `url` must not be set.
-  The agent SDK launches the process and speaks MCP over stdio.
-- **http** — set `url` (+ optional `headers`). Trace headers are injected on this
-  transport. Optionally also set `command` (+ `args`/`env`) to name a command
-  that auto-starts the server when it is unreachable; in that case `url` MUST
-  point at localhost (any loopback host, IPv4 or IPv6). Reachability is probed
-  via the MCP protocol itself (a `tools/list` call).
+- **stdio** — the agent SDK launches a local process and speaks MCP over its
+  standard streams.
+- **http** — the agent connects to an MCP endpoint over HTTP. This is the only
+  transport that participates in distributed tracing: when the server is
+  LLMObs-instrumented, the trace headers injected into its requests let its
+  agent and sub-agent spans link back to the experiment (see
+  [How distributed tracing works](#how-distributed-tracing-works)).
+
+An http server may additionally carry `command`/`args`/`env`, which the harness
+uses to auto-start the server when it is unreachable; `url` must then resolve to
+localhost. Reachability is probed through the MCP protocol itself with a
+`tools/list` call.
 
 | Key | Type | Description |
 |-----|------|-------------|
