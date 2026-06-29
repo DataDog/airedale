@@ -176,19 +176,26 @@ See [`AGENTS.md §2.1`](./AGENTS.md) for the full contract.
 
 #### MCP server fields (`[scenarios.<name>.mcp_servers.<name>]`)
 
-Exactly one of `url` or `command` must be set.
+The field model mirrors the common `.mcp.json` shape: `type`/`command`/`args`/
+`env`/`url`/`headers`. `type` is optional and inferred when omitted:
+
+- **stdio** — set `command` (+ optional `args`/`env`); `url` must not be set.
+  The agent SDK launches the process and speaks MCP over stdio.
+- **http** — set `url` (+ optional `headers`). Trace headers are injected on this
+  transport. Optionally also set `command` (+ `args`/`env`) to name a command
+  that auto-starts the server when it is unreachable; in that case `url` MUST
+  point at localhost (any loopback host, IPv4 or IPv6). Reachability is probed
+  via the MCP protocol itself (a `tools/list` call).
 
 | Key | Type | Description |
 |-----|------|-------------|
+| `type` | string | `"stdio"` or `"http"`; inferred from `url`/`command` when omitted |
+| `command` | string | Stdio executable, or (http) command to auto-start the server |
+| `args` | list of strings | Arguments for `command` |
+| `env` | table | Extra environment variables for `command` |
 | `url` | string | HTTP(S) MCP endpoint (enables trace-header injection) |
-| `command` | string | Stdio executable (launched by the agent SDK) |
-| `args` | list of strings | Arguments for stdio command |
-| `env` | table | Extra environment variables for stdio command |
-| `headers` | table | Static HTTP headers (HTTP transport only) |
-| `bearer_token_env_var` | string | Env var holding a bearer token (HTTP only) |
+| `headers` | table | Static HTTP headers (http transport only) |
 | `tool_names` | list of strings | Allow-list of MCP tools; empty = all tools |
-| `start_command` | string | Shell command to auto-start the server if unreachable (reachability is probed via an MCP `tools/list` call) |
-| `start_env` | table | Extra env vars for `start_command` |
 
 #### Task fields (`[[tasks]]`)
 

@@ -123,9 +123,7 @@ class TestLoadExperimentValid:
         [scenarios.s1.mcp_servers.apm]
         url = "http://localhost:8000/mcp"
         headers = { source = "evals" }
-        bearer_token_env_var = "APM_TOKEN"
         tool_names = ["search_apm"]
-        start_command = "python -m server"
 
         [[tasks]]
         id = "t1"
@@ -135,11 +133,11 @@ class TestLoadExperimentValid:
         config = load_experiment(write_toml(tmp_path, toml))
         server = config.scenarios[0].mcp_servers[0]
         assert server.name == "apm"
+        assert server.type == "http"
         assert server.url == "http://localhost:8000/mcp"
         assert server.headers == {"source": "evals"}
-        assert server.bearer_token_env_var == "APM_TOKEN"
         assert server.tool_names == ("search_apm",)
-        assert server.start_command == "python -m server"
+        assert not server.is_managed
 
     def test_mcp_stdio_server_parsed(self, tmp_path):
         toml = """
@@ -159,10 +157,12 @@ class TestLoadExperimentValid:
         """
         config = load_experiment(write_toml(tmp_path, toml))
         server = config.scenarios[0].mcp_servers[0]
+        assert server.type == "stdio"
         assert server.command == "python"
         assert server.args == ("-m", "my_server")
         assert server.env == {"FOO": "bar"}
         assert server.tool_names == ("do_thing",)
+        assert not server.is_managed
 
     def test_multiple_models(self, tmp_path):
         toml = """
@@ -316,20 +316,70 @@ class TestLoadExperimentErrors:
         with pytest.raises(ConfigError, match="Invalid model"):
             load_experiment(write_toml(tmp_path, toml))
 
-    def test_mcp_server_both_url_and_command(self, tmp_path):
+    def test_mcp_server_managed_localhost_url_valid(self, tmp_path):
         toml = """
         project = "p"
         models = ["anthropic/claude-3-haiku-20240307"]
-        [scenarios.s1.mcp_servers.bad]
+        [scenarios.s1.mcp_servers.managed]
         url = "http://localhost:8000/mcp"
-        command = "python"
+        command = "my-server"
+        args = ["--port", "8000"]
         [[tasks]]
         id = "t1"
         prompt = "p"
         criteria = ["c"]
         """
-        with pytest.raises(ConfigError, match="exactly one of"):
+        config = load_experiment(write_toml(tmp_path, toml))
+        server = config.scenarios[0].mcp_servers[0]
+        assert server.type == "http"
+        assert server.is_managed
+        assert server.command == "my-server"
+        assert server.args == ("--port", "8000")
+
+    def test_mcp_server_managed_non_localhost_url_rejected(self, tmp_path):
+        toml = """
+        project = "p"
+        models = ["anthropic/claude-3-haiku-20240307"]
+        [scenarios.s1.mcp_servers.bad]
+        url = "http://example.com:8000/mcp"
+        command = "my-server"
+        [[tasks]]
+        id = "t1"
+        prompt = "p"
+        criteria = ["c"]
+        """
+        with pytest.raises(ConfigError, match="not localhost"):
             load_experiment(write_toml(tmp_path, toml))
+
+    def test_mcp_server_managed_loopback_ipv4_valid(self, tmp_path):
+        toml = """
+        project = "p"
+        models = ["anthropic/claude-3-haiku-20240307"]
+        [scenarios.s1.mcp_servers.managed]
+        url = "http://127.0.0.5:8000/mcp"
+        command = "my-server"
+        [[tasks]]
+        id = "t1"
+        prompt = "p"
+        criteria = ["c"]
+        """
+        config = load_experiment(write_toml(tmp_path, toml))
+        assert config.scenarios[0].mcp_servers[0].is_managed
+
+    def test_mcp_server_managed_loopback_ipv6_valid(self, tmp_path):
+        toml = """
+        project = "p"
+        models = ["anthropic/claude-3-haiku-20240307"]
+        [scenarios.s1.mcp_servers.managed]
+        url = "http://[::1]:8000/mcp"
+        command = "my-server"
+        [[tasks]]
+        id = "t1"
+        prompt = "p"
+        criteria = ["c"]
+        """
+        config = load_experiment(write_toml(tmp_path, toml))
+        assert config.scenarios[0].mcp_servers[0].is_managed
 
     def test_mcp_server_neither_url_nor_command(self, tmp_path):
         toml = """
@@ -342,7 +392,22 @@ class TestLoadExperimentErrors:
         prompt = "p"
         criteria = ["c"]
         """
-        with pytest.raises(ConfigError, match="exactly one of"):
+        with pytest.raises(ConfigError, match="must define 'url'"):
+            load_experiment(write_toml(tmp_path, toml))
+
+    def test_mcp_server_unsupported_type_rejected(self, tmp_path):
+        toml = """
+        project = "p"
+        models = ["anthropic/claude-3-haiku-20240307"]
+        [scenarios.s1.mcp_servers.bad]
+        type = "sse"
+        url = "http://localhost:8000/mcp"
+        [[tasks]]
+        id = "t1"
+        prompt = "p"
+        criteria = ["c"]
+        """
+        with pytest.raises(ConfigError, match="unsupported type"):
             load_experiment(write_toml(tmp_path, toml))
 
     def test_task_empty_criteria(self, tmp_path):

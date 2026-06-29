@@ -261,7 +261,7 @@ def _managed_server_specs(scenarios: list[ScenarioConfig]) -> list[McpServerSpec
     seen: set[tuple[str, str | None, str | None]] = set()
     for scenario in scenarios:
         for server in scenario.mcp_servers:
-            if not server.start_command:
+            if not server.is_managed:
                 continue
             spec = McpServerSpec.from_config(server)
             key = (spec.name, spec.url, spec.command)

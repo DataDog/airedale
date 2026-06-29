@@ -25,18 +25,31 @@ class TestFromConfig:
             name="apm",
             url="http://localhost:8000/mcp",
             headers={"source": "evals"},
-            bearer_token_env_var="APM_TOKEN",
             tool_names=("search_apm",),
-            start_command="python -m server",
         )
         spec = McpServerSpec.from_config(cfg)
         assert spec.name == "apm"
+        assert spec.type == "http"
         assert spec.url == "http://localhost:8000/mcp"
         assert spec.command is None
         assert dict(spec.headers) == {"source": "evals"}
-        assert spec.bearer_token_env_var == "APM_TOKEN"
         assert spec.tool_names == ("search_apm",)
-        assert spec.start_command == "python -m server"
+        assert not spec.is_managed
+
+    def test_managed_http_server(self):
+        cfg = McpServerConfig(
+            name="apm",
+            url="http://localhost:8000/mcp",
+            command="my-server",
+            args=("--port", "8000"),
+            env={"MODE": "both"},
+        )
+        spec = McpServerSpec.from_config(cfg)
+        assert spec.type == "http"
+        assert spec.is_managed
+        assert spec.command == "my-server"
+        assert spec.args == ("--port", "8000")
+        assert dict(spec.env) == {"MODE": "both"}
 
     def test_stdio_server(self):
         cfg = McpServerConfig(
@@ -47,10 +60,12 @@ class TestFromConfig:
         )
         spec = McpServerSpec.from_config(cfg)
         assert spec.name == "tools"
+        assert spec.type == "stdio"
         assert spec.url is None
         assert spec.command == "python"
         assert spec.args == ("-m", "my_server")
         assert dict(spec.env) == {"FOO": "bar"}
+        assert not spec.is_managed
 
 
 # ---------------------------------------------------------------------------
@@ -64,35 +79,11 @@ class TestMergedHeaders:
         result = spec.merged_headers({})
         assert result == {"source": "evals"}
 
-    def test_bearer_from_env(self, monkeypatch):
-        monkeypatch.setenv("MY_TOKEN", "secret-token")
-        spec = McpServerSpec(
-            name="s",
-            url="http://localhost/mcp",
-            headers={"source": "evals"},
-            bearer_token_env_var="MY_TOKEN",
-        )
-        result = spec.merged_headers({})
-        assert result["Authorization"] == "Bearer secret-token"
-        assert result["source"] == "evals"
-
-    def test_bearer_env_unset_skipped(self, monkeypatch):
-        monkeypatch.delenv("MISSING_TOKEN", raising=False)
-        spec = McpServerSpec(name="s", url="http://localhost/mcp", bearer_token_env_var="MISSING_TOKEN")
-        result = spec.merged_headers({})
-        assert "Authorization" not in result
-
     def test_trace_headers_override_static(self):
         spec = McpServerSpec(name="s", url="http://localhost/mcp", headers={"x-foo": "static"})
         result = spec.merged_headers({"x-foo": "from-trace", "x-dd-trace-id": "123"})
         assert result["x-foo"] == "from-trace"
         assert result["x-dd-trace-id"] == "123"
-
-    def test_include_bearer_false_skips_auth(self, monkeypatch):
-        monkeypatch.setenv("MY_TOKEN", "secret")
-        spec = McpServerSpec(name="s", url="http://localhost/mcp", bearer_token_env_var="MY_TOKEN")
-        result = spec.merged_headers({}, include_bearer=False)
-        assert "Authorization" not in result
 
 
 # ---------------------------------------------------------------------------
@@ -101,20 +92,24 @@ class TestMergedHeaders:
 
 
 class TestToClaudeConfig:
-    def test_http_config_type_and_fields(self, monkeypatch):
-        monkeypatch.setenv("APM_TOKEN", "mytoken")
+    def test_http_config_type_and_fields(self):
         spec = McpServerSpec(
             name="apm",
             url="http://localhost:8000/mcp",
             headers={"source": "evals"},
-            bearer_token_env_var="APM_TOKEN",
         )
         result = spec.to_claude_config({})
         # McpHttpServerConfig returns a dict
         assert result["type"] == "http"
         assert result["url"] == "http://localhost:8000/mcp"
         assert result["headers"]["source"] == "evals"
-        assert result["headers"]["Authorization"] == "Bearer mytoken"
+
+    def test_managed_http_renders_as_http(self):
+        spec = McpServerSpec(name="apm", url="http://localhost:8000/mcp", command="my-server", args=("--port", "8000"))
+        result = spec.to_claude_config({})
+        # The launch command is internal; Claude only sees the http transport.
+        assert result["type"] == "http"
+        assert result["url"] == "http://localhost:8000/mcp"
 
     def test_stdio_config_type_and_fields(self):
         spec = McpServerSpec(
@@ -129,20 +124,11 @@ class TestToClaudeConfig:
         assert result["args"] == ["-m", "my_server"]
         assert result["env"] == {"FOO": "bar"}
 
-    def test_no_url_no_command_raises(self):
-        # Directly construct a spec in an invalid state to test the guard
-        spec = McpServerSpec.__new__(McpServerSpec)
-        object.__setattr__(spec, "name", "bad")
-        object.__setattr__(spec, "url", None)
-        object.__setattr__(spec, "command", None)
-        object.__setattr__(spec, "args", ())
-        object.__setattr__(spec, "env", {})
-        object.__setattr__(spec, "headers", {})
-        object.__setattr__(spec, "tool_names", ())
-        object.__setattr__(spec, "bearer_token_env_var", None)
-        object.__setattr__(spec, "start_command", None)
-        object.__setattr__(spec, "start_env", {})
-        with pytest.raises(ValueError, match="url or command"):
+    def test_unsupported_type_raises(self):
+        # Force an unsupported transport type to exercise the guard.
+        spec = McpServerSpec(name="bad", url="http://localhost/mcp")
+        object.__setattr__(spec, "type", "sse")
+        with pytest.raises(ValueError, match="unsupported type"):
             spec.to_claude_config({})
 
 
@@ -164,12 +150,6 @@ class TestToCodexConfigOverrides:
         headers_override = next(o for o in overrides if "http_headers" in o)
         assert "source" in headers_override
         assert "x-dd-trace-id" in headers_override
-
-    def test_http_bearer_env_var_override(self):
-        spec = McpServerSpec(name="apm", url="http://localhost/mcp", bearer_token_env_var="MY_TOKEN")
-        overrides = spec.to_codex_config_overrides({})
-        bearer_override = next(o for o in overrides if "bearer_token_env_var" in o)
-        assert "MY_TOKEN" in bearer_override
 
     def test_stdio_command_override(self):
         spec = McpServerSpec(name="tools", command="python", args=("-m", "server"), env={"FOO": "bar"})
@@ -205,16 +185,12 @@ class TestToSafeDict:
         # Keys are still present, just values replaced
         assert set(safe["headers"].keys()) == {"Authorization", "source"}
 
-    def test_url_and_name_preserved(self):
+    def test_url_name_and_type_preserved(self):
         spec = McpServerSpec(name="apm", url="http://localhost/mcp")
         safe = spec.to_safe_dict()
         assert safe["name"] == "apm"
         assert safe["url"] == "http://localhost/mcp"
-
-    def test_bearer_token_env_var_preserved(self):
-        spec = McpServerSpec(name="apm", url="http://localhost/mcp", bearer_token_env_var="TOKEN_ENV")
-        safe = spec.to_safe_dict()
-        assert safe["bearer_token_env_var"] == "TOKEN_ENV"
+        assert safe["type"] == "http"
 
 
 # ---------------------------------------------------------------------------

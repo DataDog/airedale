@@ -38,89 +38,88 @@ class McpServerSpec:
     """MCP server configuration passed through to provider agent SDKs."""
 
     name: str
+    type: str | None = None
     url: str | None = None
     command: str | None = None
     args: tuple[str, ...] = ()
     env: Mapping[str, str] = field(default_factory=dict)
     headers: Mapping[str, str] = field(default_factory=dict)
     tool_names: tuple[str, ...] = ()
-    bearer_token_env_var: str | None = None
-    # Managed start fields
-    start_command: str | None = None
-    start_env: Mapping[str, str] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """Infer the transport type from the fields when not given explicitly."""
+        if not self.type:
+            object.__setattr__(self, "type", "stdio" if self.command and not self.url else "http")
 
     @classmethod
     def from_config(cls, config: McpServerConfigExperiment) -> McpServerSpec:
         """Build a server spec from an experiment config."""
         return cls(
             name=config.name,
+            type=config.type,
             url=config.url,
             command=config.command,
             args=config.args,
             env=config.env or {},
             headers=config.headers or {},
             tool_names=config.tool_names,
-            bearer_token_env_var=config.bearer_token_env_var,
-            start_command=config.start_command,
-            start_env=config.start_env or {},
         )
 
-    def merged_headers(self, trace_headers: Mapping[str, str], *, include_bearer: bool = True) -> dict[str, str]:
+    @property
+    def is_managed(self) -> bool:
+        """True for http servers that carry a command used to auto-start them."""
+        return self.type == "http" and self.command is not None
+
+    def merged_headers(self, trace_headers: Mapping[str, str]) -> dict[str, str]:
         """Merge static MCP headers with per-run distributed-tracing headers."""
         headers = dict(self.headers)
-        if include_bearer and self.bearer_token_env_var and (token := os.environ.get(self.bearer_token_env_var)):
-            headers.setdefault("Authorization", f"Bearer {token}")
         headers.update(trace_headers)
         return headers
 
     def to_claude_config(self, trace_headers: Mapping[str, str]) -> McpServerConfig:
         """Render this spec as a Claude Agent SDK MCP server config."""
-        if self.url:
+        if self.type == "http":
             from claude_agent_sdk.types import McpHttpServerConfig
 
             return McpHttpServerConfig(type="http", url=self.url, headers=self.merged_headers(trace_headers))
-        if self.command:
+        if self.type == "stdio":
             from claude_agent_sdk.types import McpStdioServerConfig
 
             return McpStdioServerConfig(
                 type="stdio", command=self.command, args=list[str](self.args), env=dict[str, str](self.env)
             )
-        raise ValueError(f"MCP server {self.name!r} must define either url or command")
+        raise ValueError(f"MCP server {self.name!r} has unsupported type {self.type!r}")
 
     def to_codex_config_overrides(self, trace_headers: Mapping[str, str]) -> list[str]:
         """Render this spec as Codex CLI config override strings."""
         key_prefix = _toml_key_path("mcp_servers", self.name)
         overrides: list[str] = []
-        if self.url:
+        if self.type == "http":
             overrides.append(f"{key_prefix}.url={_toml_value(self.url)}")
-            headers = self.merged_headers(trace_headers, include_bearer=False)
+            headers = self.merged_headers(trace_headers)
             if headers:
                 overrides.append(f"{key_prefix}.http_headers={_toml_value(headers)}")
-            if self.bearer_token_env_var:
-                overrides.append(f"{key_prefix}.bearer_token_env_var={_toml_value(self.bearer_token_env_var)}")
             return overrides
-        if self.command:
+        if self.type == "stdio":
             overrides.append(f"{key_prefix}.command={_toml_value(self.command)}")
             if self.args:
                 overrides.append(f"{key_prefix}.args={_toml_value(list(self.args))}")
             if self.env:
                 overrides.append(f"{key_prefix}.env={_toml_value(dict(self.env))}")
             return overrides
-        raise ValueError(f"MCP server {self.name!r} must define either url or command")
+        raise ValueError(f"MCP server {self.name!r} has unsupported type {self.type!r}")
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serializable representation for runtime config."""
         return {
             "name": self.name,
+            "type": self.type,
             "url": self.url,
             "command": self.command,
             "args": list(self.args),
             "env": dict(self.env),
             "headers": dict(self.headers),
             "tool_names": list(self.tool_names),
-            "bearer_token_env_var": self.bearer_token_env_var,
-            "start_command": self.start_command,
-            "start_env": dict(self.start_env),
         }
 
     def to_safe_dict(self) -> dict[str, Any]:
@@ -199,7 +198,7 @@ async def _mcp_server_tool_metadata(
 
 async def _list_mcp_tools(server: McpServerSpec, trace_headers: Mapping[str, str]) -> list[Any]:
     """List tools from an MCP server using the standard protocol."""
-    if server.url:
+    if server.type == "http":
         async with (
             streamablehttp_client(server.url, headers=server.merged_headers(trace_headers)) as (
                 read_stream,
@@ -210,7 +209,7 @@ async def _list_mcp_tools(server: McpServerSpec, trace_headers: Mapping[str, str
         ):
             await session.initialize()
             return list((await session.list_tools()).tools)
-    if server.command:
+    if server.type == "stdio":
         stdio_server = StdioServerParameters(
             command=server.command, args=list(server.args), env=dict(server.env) or None
         )
@@ -220,7 +219,7 @@ async def _list_mcp_tools(server: McpServerSpec, trace_headers: Mapping[str, str
         ):
             await session.initialize()
             return list((await session.list_tools()).tools)
-    raise ValueError(f"MCP server {server.name!r} must define either url or command")
+    raise ValueError(f"MCP server {server.name!r} has unsupported type {server.type!r}")
 
 
 def _mcp_tool_metadata(tool: Any) -> McpToolMetadata:
@@ -244,7 +243,7 @@ def _mcp_tool_field(tool: Any, *field_names: str) -> Any:
 class ManagedMcpServer:
     """Async context manager that starts/stops an HTTP MCP server if needed.
 
-    For HTTP servers with start_command configured:
+    For http servers that carry a launch ``command`` (``spec.is_managed``):
     - Probes health via the MCP protocol itself (a tools/list call)
     - If unreachable, starts the subprocess and polls until reachable
     - On exit, terminates the subprocess gracefully then forcefully
@@ -257,8 +256,8 @@ class ManagedMcpServer:
         self.owns_process = False
 
     async def __aenter__(self) -> ManagedMcpServer:
-        if not self.spec.url or not self.spec.start_command:
-            # Not an HTTP server or no auto-start configured
+        if not self.spec.is_managed:
+            # Not an http server, or no auto-start command configured
             return self
 
         # Check if already reachable via the MCP protocol
@@ -267,14 +266,14 @@ class ManagedMcpServer:
             return self
 
         # Start the server
-        logger.info("Starting MCP server %s with command: %s", self.spec.name, self.spec.start_command)
+        argv = [self.spec.command, *self.spec.args]
+        logger.info("Starting MCP server %s with command: %s", self.spec.name, argv)
         env = os.environ.copy()
-        if self.spec.start_env:
-            env.update({str(k): str(v) for k, v in self.spec.start_env.items()})
+        if self.spec.env:
+            env.update({str(k): str(v) for k, v in self.spec.env.items()})
 
         self.process = subprocess.Popen(
-            self.spec.start_command,
-            shell=True,
+            argv,
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

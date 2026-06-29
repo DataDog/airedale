@@ -97,16 +97,21 @@ max_turns = 64                        # optional per-scenario override
 effort = "medium"                     # optional per-scenario override
 
 # MCP servers visible in this scenario. Table key = server name.
+# Fields mirror the .mcp.json model: type/command/args/env/url/headers.
+# `type` is optional and inferred ("http" when `url` is set, "stdio" when only
+# `command` is set).
 [scenarios.fat-mcp.mcp_servers.apm]
 # HTTP transport (supports distributed-trace header injection):
 url = "http://localhost:8000/mcp"
 headers = { source = "evals" }        # optional static headers
-bearer_token_env_var = "APM_TOKEN"    # optional; Authorization: Bearer <env value>
 tool_names = ["search_apm_libraries"] # tools allow-listed for this scenario
-# Optional managed auto-start (started only if the server is unreachable;
-# reachability is probed via the MCP protocol itself, a tools/list call):
-start_command = "python -m my_mcp_server"
-start_env = { MCP_MODE = "both" }
+# Optional managed auto-start: on an http server, `command` (+ args/env) is the
+# command used to launch the server if it is unreachable. Reachability is probed
+# via the MCP protocol itself (a tools/list call). `url` MUST then be localhost
+# (any loopback host, IPv4 or IPv6).
+command = "python"
+args = ["-m", "my_mcp_server"]
+env = { MCP_MODE = "both" }
 
 # stdio transport (alternative to url; launched directly by the agent SDK):
 [scenarios.local.mcp_servers.tools]
@@ -131,7 +136,12 @@ latency_threshold_ms = 30000                 # optional, reported only
 Notes:
 - A scenario MUST define at least one MCP server is NOT required — scenarios with
   no MCP servers are valid (model answers from skills/builtins only).
-- Each MCP server MUST define either `url` or `command` (never both).
+- `type` is optional; when omitted it is inferred ("http" if `url` is set,
+  "stdio" if only `command` is set). Only `stdio` and `http` are supported.
+- A `stdio` server defines `command` (+ optional `args`/`env`) and MUST NOT set
+  `url`. An `http` server defines `url` (+ optional `headers`); it MAY also set
+  `command` (+ `args`/`env`) as a managed auto-start command, in which case `url`
+  MUST be localhost (any loopback host, IPv4 or IPv6).
 - `tool_names` is the allow-list of MCP tools exposed; empty/omitted means "all
   tools the server advertises".
 
@@ -188,7 +198,7 @@ src/dd_ai_devx_evals/
   observability.py       enable_llmobs(project, *, agentless, integrations_enabled)
 
   mcp.py                 McpServerSpec (from McpServerConfig); HTTP/stdio rendering for both SDKs;
-                         merged_headers (static + bearer + trace); managed-server start/health;
+                         merged_headers (static + trace); managed-server start/health;
                          tools/list metadata catalog
   skills.py              cross-provider skill staging (Claude + Codex)
 

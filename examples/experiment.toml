@@ -35,15 +35,17 @@ max_turns = 64
 effort = "medium"
 
 # HTTP-transport MCP server with optional auto-start.
+# `type` is optional; it is inferred as "http" because `url` is set.
 [scenarios.fat-mcp.mcp_servers.apm]
 url = "http://localhost:8000/mcp"
 headers = { source = "evals" }
-bearer_token_env_var = "APM_MCP_TOKEN"
 tool_names = ["search_apm_libraries", "get_apm_docs"]
-# Optional managed auto-start (started only when the server is unreachable).
-# Reachability is probed via the MCP protocol itself (a tools/list call).
-start_command = "python -m my_mcp_server"
-start_env = { MCP_MODE = "both" }
+# Optional managed auto-start: when `command` is set on an http server it is the
+# command used to launch the server if it is unreachable. Reachability is probed
+# via the MCP protocol itself (a tools/list call). `url` MUST then be localhost.
+command = "python"
+args = ["-m", "my_mcp_server"]
+env = { MCP_MODE = "both" }
 
 # Scenario B: minimal scenario using only built-in tools (no MCP).
 [scenarios.builtin-only]
@@ -53,6 +55,8 @@ max_turns = 32
 effort = "low"
 
 # Scenario C: stdio-transport MCP server launched directly by the agent SDK.
+# `type` is optional; it is inferred as "stdio" because `command` is set and
+# there is no `url`.
 [scenarios.local-tools]
 description = "Stdio MCP server for local tool access."
 

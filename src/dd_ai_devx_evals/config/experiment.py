@@ -12,27 +12,89 @@ from dd_ai_devx_evals.config import ConfigError, read_toml_file
 from dd_ai_devx_evals.types import ModelSpec
 
 
+def _is_localhost_url(url: str) -> bool:
+    """Return True if the URL's host is localhost or any loopback IP (v4/v6)."""
+    import ipaddress
+    from urllib.parse import urlparse
+
+    host = (urlparse(url).hostname or "").lower()
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 @dataclass(frozen=True)
 class McpServerConfig:
-    """Configuration for an MCP server in a scenario."""
+    """Configuration for an MCP server in a scenario.
+
+    Mirrors the ``.mcp.json`` field model: ``type``/``command``/``args``/``env``/
+    ``url``/``headers``. ``type`` is optional and inferred when omitted.
+
+    - ``stdio`` transport: ``command`` (+ optional ``args``/``env``), launched
+      directly by the agent SDK. ``url`` must not be set.
+    - ``http`` transport: ``url`` (+ optional ``headers``). ``command``
+      (+ optional ``args``/``env``) may additionally name a command used to
+      auto-start the server when it is unreachable; in that case ``url`` MUST
+      point at localhost.
+    """
 
     name: str
-    url: str | None = None
+    type: str | None = None
     command: str | None = None
     args: tuple[str, ...] = ()
     env: dict[str, str] | None = None
+    url: str | None = None
     headers: dict[str, str] | None = None
-    bearer_token_env_var: str | None = None
     tool_names: tuple[str, ...] = ()
-    start_command: str | None = None
-    start_env: dict[str, str] | None = None
 
     def __post_init__(self) -> None:
-        """Validate that exactly one of url or command is set."""
+        """Resolve and validate the transport type from the provided fields."""
+        object.__setattr__(self, "type", self._resolve_type())
+
+    def _resolve_type(self) -> str:
         has_url = self.url is not None
         has_command = self.command is not None
-        if has_url == has_command:  # Both set or both unset
-            raise ConfigError(f"MCP server '{self.name}' must have exactly one of 'url' or 'command' set")
+
+        if self.type is not None and self.type not in ("stdio", "http"):
+            raise ConfigError(
+                f"MCP server '{self.name}' has unsupported type '{self.type}' (expected 'stdio' or 'http')"
+            )
+
+        if self.type is not None:
+            resolved = self.type
+        elif has_url:
+            resolved = "http"
+        elif has_command:
+            resolved = "stdio"
+        else:
+            raise ConfigError(f"MCP server '{self.name}' must define 'url' (http) or 'command' (stdio)")
+
+        if resolved == "stdio":
+            if not has_command:
+                raise ConfigError(f"MCP server '{self.name}' of type 'stdio' must define 'command'")
+            if has_url:
+                raise ConfigError(f"MCP server '{self.name}' of type 'stdio' must not define 'url'")
+        else:  # http
+            if not has_url:
+                raise ConfigError(f"MCP server '{self.name}' of type 'http' must define 'url'")
+            if has_command and not _is_localhost_url(self.url):
+                raise ConfigError(
+                    f"MCP server '{self.name}' defines a managed start 'command' but 'url' "
+                    f"'{self.url}' is not localhost"
+                )
+
+        if (self.args or self.env) and not has_command:
+            raise ConfigError(f"MCP server '{self.name}' sets 'args'/'env' without a 'command'")
+
+        return resolved
+
+    @property
+    def is_managed(self) -> bool:
+        """True for http servers that carry a command used to auto-start them."""
+        return self.type == "http" and self.command is not None
 
 
 @dataclass(frozen=True)
@@ -107,15 +169,13 @@ def _parse_mcp_server(name: str, config: dict[str, Any]) -> McpServerConfig:
     """Parse MCP server config from TOML data."""
     return McpServerConfig(
         name=name,
-        url=config.get("url"),
+        type=config.get("type"),
         command=config.get("command"),
         args=tuple(config.get("args", [])),
         env=config.get("env") or {},
+        url=config.get("url"),
         headers=config.get("headers") or {},
-        bearer_token_env_var=config.get("bearer_token_env_var"),
         tool_names=tuple(config.get("tool_names", [])),
-        start_command=config.get("start_command"),
-        start_env=config.get("start_env") or {},
     )
 
 

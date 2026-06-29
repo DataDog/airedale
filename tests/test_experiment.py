@@ -77,14 +77,14 @@ class TestExperimentName:
 
 class TestManagedServerSpecs:
     def _make_server(
-        self, name: str, *, url: str = "http://localhost/mcp", start_command: str | None = None
+        self, name: str, *, url: str = "http://localhost/mcp", command: str | None = None
     ) -> McpServerConfig:
-        return McpServerConfig(name=name, url=url, start_command=start_command)
+        return McpServerConfig(name=name, url=url, command=command)
 
     def test_empty_scenarios_returns_empty(self):
         assert _managed_server_specs([]) == []
 
-    def test_servers_without_start_command_excluded(self):
+    def test_servers_without_command_excluded(self):
         scenario = ScenarioConfig(
             name="s1",
             mcp_servers=(self._make_server("s1", url="http://localhost:8000/mcp"),),
@@ -92,32 +92,32 @@ class TestManagedServerSpecs:
         specs = _managed_server_specs([scenario])
         assert specs == []
 
-    def test_server_with_start_command_included(self):
+    def test_server_with_command_included(self):
         scenario = ScenarioConfig(
             name="s1",
-            mcp_servers=(self._make_server("managed", start_command="python -m server"),),
+            mcp_servers=(self._make_server("managed", command="my-server"),),
         )
         specs = _managed_server_specs([scenario])
         assert len(specs) == 1
         assert specs[0].name == "managed"
 
     def test_deduplication_by_name_and_url(self):
-        server = self._make_server("managed", url="http://localhost:8000/mcp", start_command="python -m server")
+        server = self._make_server("managed", url="http://localhost:8000/mcp", command="my-server")
         s1 = ScenarioConfig(name="s1", mcp_servers=(server,))
         s2 = ScenarioConfig(name="s2", mcp_servers=(server,))
         specs = _managed_server_specs([s1, s2])
         assert len(specs) == 1
 
     def test_different_servers_not_deduped(self):
-        s1_server = self._make_server("s1-srv", url="http://localhost:8001/mcp", start_command="start-s1")
-        s2_server = self._make_server("s2-srv", url="http://localhost:8002/mcp", start_command="start-s2")
+        s1_server = self._make_server("s1-srv", url="http://localhost:8001/mcp", command="start-s1")
+        s2_server = self._make_server("s2-srv", url="http://localhost:8002/mcp", command="start-s2")
         sc1 = ScenarioConfig(name="sc1", mcp_servers=(s1_server,))
         sc2 = ScenarioConfig(name="sc2", mcp_servers=(s2_server,))
         specs = _managed_server_specs([sc1, sc2])
         assert len(specs) == 2
 
     def test_mix_of_managed_and_unmanaged(self):
-        managed = self._make_server("mgd", start_command="start")
+        managed = self._make_server("mgd", command="start")
         unmanaged = self._make_server("nope")
         scenario = ScenarioConfig(name="s", mcp_servers=(managed, unmanaged))
         specs = _managed_server_specs([scenario])
