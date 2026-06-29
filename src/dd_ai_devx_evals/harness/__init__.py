@@ -44,13 +44,13 @@ def create_runner(
     *,
     scenario: ScenarioConfig,
     gateway: GatewayConfig | None,
-    cwd: str | None = None,
+    cwd: str,
 ) -> AgentRunner:
     """Build the provider-appropriate :class:`AgentRunner` for one cell.
 
     MCP server specs are derived from ``scenario.mcp_servers``; gateway config is
-    resolved per provider. When ``cwd`` is ``None`` the runner creates (and later
-    cleans up) a temporary working directory.
+    resolved per provider. ``cwd`` is the per-run working directory, owned by the
+    caller (the ``WorkspaceManager``).
     """
     mcp_servers = [McpServerSpec.from_config(server) for server in scenario.mcp_servers]
     skills = list(scenario.skills)

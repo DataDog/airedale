@@ -51,6 +51,7 @@ from dd_ai_devx_evals.types import HarnessResult, ModelSpec, UsageMetrics, coerc
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -96,12 +97,12 @@ class ClaudeRunner(AgentRunner):
     def __init__(
         self,
         *,
+        cwd: str | Path,
         mcp_servers: list[McpServerSpec] | None = None,
         allowed_builtin_tools: Iterable[str] | None = None,
         skills: Iterable[str] = (),
         max_turns: int | None = None,
         effort: str | None = None,
-        cwd: str | None = None,
         gateway_base_url: str | None = None,
         gateway_headers: Mapping[str, str] | None = None,
         gateway_credentials_helper: str | None = None,
@@ -110,12 +111,12 @@ class ClaudeRunner(AgentRunner):
         claude_client_factory: Callable[[ClaudeAgentOptions], Any] | None = None,
     ) -> None:
         super().__init__(
+            cwd=cwd,
             mcp_servers=mcp_servers,
             allowed_builtin_tools=allowed_builtin_tools,
             skills=skills,
             max_turns=max_turns,
             effort=effort,
-            cwd=cwd,
         )
         self.gateway_base_url = gateway_base_url
         self.gateway_headers = dict(gateway_headers or {})

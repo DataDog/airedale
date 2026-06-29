@@ -20,7 +20,6 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
-import tempfile
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
@@ -288,8 +287,9 @@ class AgentRunner(ABC):
     Subclasses wire the provider SDK (MCP servers, skills, gateway auth) and
     decide how LLMObs spans are produced. Shared run state (MCP specs, allowed
     builtin tools, staged skills, turn budget, reasoning effort, working
-    directory) is stored here; a temporary ``cwd`` is created and cleaned up
-    automatically when none is supplied.
+    directory) is stored here. ``cwd`` is required and owned by the caller (the
+    ``WorkspaceManager`` in production, a ``tmp_path`` in tests); the runner
+    never creates or cleans up working directories itself.
     """
 
     #: Name reported on spans/metadata; overridden per provider runner.
@@ -298,12 +298,12 @@ class AgentRunner(ABC):
     def __init__(
         self,
         *,
+        cwd: str | Path,
         mcp_servers: list[McpServerSpec] | None = None,
         allowed_builtin_tools: Iterable[str] | None = None,
         skills: Iterable[str] = (),
         max_turns: int | None = None,
         effort: str | None = None,
-        cwd: str | Path | None = None,
     ) -> None:
         self.mcp_servers = list(mcp_servers or [])
         # ``None`` is the "all built-in tools allowed" sentinel; preserve it.
@@ -311,17 +311,7 @@ class AgentRunner(ABC):
         self.skills = list(skills)
         self.max_turns = max_turns
         self.effort = effort
-        self._temp_cwd: tempfile.TemporaryDirectory[str] | None = None
-        if cwd is None:
-            self._temp_cwd = tempfile.TemporaryDirectory(prefix="dd-ai-devx-eval-")
-            self.cwd = self._temp_cwd.name
-        else:
-            self.cwd = str(cwd)
-
-    def __del__(self) -> None:
-        if self._temp_cwd is not None:
-            with contextlib.suppress(Exception):
-                self._temp_cwd.cleanup()
+        self.cwd = str(cwd)
 
     @abstractmethod
     async def run(
