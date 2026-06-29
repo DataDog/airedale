@@ -89,6 +89,31 @@ description = "Stdio MCP server only; built-in tools disabled."
 allowed_builtin_tools = []
 mcp_servers = ["tools"]
 
+# Scenario D: run inside a git worktree of a repository. Without a `workdir`
+# block the agent runs in a fresh empty temp dir (hermetic sandbox). With one,
+# each run/repetition gets a fresh `git worktree` of a cached clone, and the
+# repo's own project config (.claude/.codex/AGENTS.md/.mcp.json) is honored.
+[scenarios.repo-workspace]
+description = "Run against a checkout of this repository at a fixed ref."
+allowed_builtin_tools = ["Read", "Grep", "Glob"]
+# `workdir` is also defaultable via [defaults.workdir]; a scenario that sets it
+# replaces the default entirely (no merge).
+[scenarios.repo-workspace.workdir]
+repo = "self"          # "self" (repo containing this file) | a git URL | a local path
+ref  = "main"          # optional; default = source repo's current HEAD
+# Ordered setup steps applied inside each fresh worktree (all optional):
+[[scenarios.repo-workspace.workdir.steps]]
+op    = "restore"      # git restore --source=<from> -- <paths...> (requires a repo)
+from  = "v1.0.0"
+paths = ["src/**"]
+[[scenarios.repo-workspace.workdir.steps]]
+op    = "remove"       # filesystem-delete matching globs from the worktree
+paths = ["secrets/**"]
+[[scenarios.repo-workspace.workdir.steps]]
+op      = "write"      # create/overwrite a file; exactly one of content/source
+path    = "NOTES.md"
+content = "Evaluate the change described in the task.\n"
+
 # ---------------------------------------------------------------------------
 # Tasks: prompts + evaluation criteria. Table key = task id (unique by
 # construction, since TOML forbids duplicate keys).

@@ -119,6 +119,10 @@ effort = "medium"       # reasoning effort hint passed to the SDKs
 # skills = ["apm"]
 # allowed_builtin_tools = ["Read", "Grep", "Glob"]
 # mcp_servers = ["apm"]
+# A default workdir is also allowed; a scenario setting its own [scenarios.X.workdir]
+# replaces it entirely (no merge).
+# [defaults.workdir]
+# repo = "self"
 
 # --- Scenarios: named runtime configurations -----------------------------
 # Table key = scenario name (used in experiment names / tags). Scenarios
@@ -132,6 +136,26 @@ skills = ["apm"]                      # optional; names from the [skills] regist
 mcp_servers = ["apm"]                 # names from the [mcp_servers.<name>] registry
 max_turns = 64                        # optional per-scenario override
 effort = "medium"                     # optional per-scenario override
+
+# --- Working directory: where the agent runs (optional) ------------------
+# Without a `workdir` the cell runs in a fresh empty temp dir (hermetic
+# sandbox). With one, each run/repetition gets a fresh git worktree of a
+# cached clone (or an empty dir when `repo` is omitted), with ordered setup
+# steps applied.
+[scenarios.regression.workdir]
+repo = "self"          # "self" (repo containing experiment.toml) | git URL | local path
+ref  = "v2.3.0"        # optional; default = source repo's current HEAD
+[[scenarios.regression.workdir.steps]]
+op    = "restore"      # git restore --source=<from> -- <paths...> (needs a repo)
+from  = "v2.2.0"
+paths = ["src/api/**", "README.md"]
+[[scenarios.regression.workdir.steps]]
+op    = "remove"       # filesystem-delete matching globs from the worktree
+paths = ["secrets/**"]
+[[scenarios.regression.workdir.steps]]
+op      = "write"      # create/overwrite a file (exactly one of content/source)
+path    = "NOTES.md"
+content = "Evaluate the migration."
 
 # --- Tasks: prompts + evaluation criteria --------------------------------
 # Table key = task id (unique by construction; TOML forbids duplicate keys).
@@ -178,6 +202,33 @@ Notes:
   MUST be localhost (any loopback host, IPv4 or IPv6).
 - `tool_names` is the allow-list of MCP tools exposed; empty/omitted means "all
   tools the server advertises".
+- `workdir` is a defaultable scenario block (override-entirely, like `skills`):
+  - `repo`: `"self"` (the git toplevel containing `experiment.toml`, resolved &
+    validated eagerly at load), a git URL, or a local path (resolved relative to
+    the config dir). Omitted ⇒ start from an **empty** directory.
+  - `ref`: branch/tag/commit checked out as the workspace base; default = the
+    source repo's current HEAD.
+  - `steps`: ordered ops, each discriminated by `op`:
+    - `restore` — `from` (ref) + `paths` (non-empty pathspecs); requires a `repo`.
+    - `remove` — `paths` (non-empty globs); filesystem-deletes from the worktree.
+    - `write` — `path` (workspace-relative, no `..`/absolute) + exactly one of
+      `content` (inline) or `source` (file copied in, resolved against the config
+      dir).
+  - Each run/repetition gets a **fresh** workspace: a repo source is cloned once
+    (lazily, `--no-hardlinks` for local sources so `repo="self"` never touches
+    your checkout) into a cache, and every workspace is a `git worktree` of it.
+  - **Project files are always honored.** A cloned repo's own `.claude/`,
+    `.codex/`, `AGENTS.md`/`CLAUDE.md`, project subagents/skills, and `.mcp.json`
+    are discovered automatically; a bare temp dir has none, so it stays hermetic.
+  - **MCP discovery is harness-specific.** Claude: `strict_mcp_config` stays
+    `True` and we parse `<cwd>/.mcp.json` ourselves into specs (repo HTTP servers
+    thus also get distributed-trace headers); Codex does **not** read `.mcp.json`
+    (its servers come from `$CODEX_HOME/config.toml`). Scenario-configured servers
+    **win** on a name collision; discovered servers are not auto-started.
+  - Filesystem paths in the config (`[skills]` entries, workdir local `repo`
+    paths, `write.source`) resolve relative to `experiment.toml`'s directory.
+    Command-style values (MCP `command`/`args`, gateway `credentials_helper`) are
+    left untouched.
 
 ### 2.2 `gateway.toml` (optional, separate file)
 
@@ -224,7 +275,8 @@ src/dd_ai_devx_evals/
   types.py               ModelSpec, UsageMetrics, HarnessResult, slugify
   config/
     __init__.py          ConfigError; shared TOML helpers
-    experiment.py        ExperimentConfig, ScenarioConfig, McpServerConfig, TaskConfig (+ load_experiment)
+    experiment.py        ExperimentConfig, ScenarioConfig, McpServerConfig, TaskConfig,
+                         WorkdirConfig + RestoreStep/RemoveStep/WriteStep (+ load_experiment)
     gateway.py           GatewayConfig, ProviderGatewayConfig (+ load_gateway)
 
   gateway.py             credential-helper exec + per-provider header/base-url/key resolution (runtime)
@@ -233,11 +285,15 @@ src/dd_ai_devx_evals/
 
   mcp.py                 McpServerSpec (from McpServerConfig); HTTP/stdio rendering for both SDKs;
                          merged_headers (static + trace); managed-server start/health;
-                         tools/list metadata catalog
-  skills.py              cross-provider skill staging (Claude + Codex)
+                         tools/list metadata catalog; discover_claude_project_mcp_servers (.mcp.json)
+  skills.py              cross-provider skill staging (Claude + Codex) + collision guard;
+                         discover_claude_skill_names (project skills allow-list)
+  workdir.py             WorkspaceManager: clone-cache + git-worktree per-run workspaces;
+                         restore/remove/write step application; cache-confined teardown
 
   harness/
-    __init__.py          create_runner(model, *, scenario, gateway) -> AgentRunner
+    __init__.py          create_runner(model, *, scenario, gateway, cwd) -> AgentRunner;
+                         merges scenario + project-discovered MCP servers (scenario wins)
     base.py              AgentRunner protocol; AgentRunResult; AgentToolCall
     claude.py            claude-agent-sdk runner (native LLMObs; skills; MCP; gateway)
     codex.py             openai-codex runner (decorator spans; skills; MCP; gateway)

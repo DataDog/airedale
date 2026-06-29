@@ -198,6 +198,7 @@ list).
 | `max_turns` | int | Per-scenario override for `defaults.max_turns` |
 | `effort` | string | Per-scenario override for `defaults.effort` |
 | `mcp_servers` | list of strings | MCP server names referencing the `mcp_servers` registry |
+| `workdir` | table | Optional working-directory config (see [Working directories](#working-directories)) |
 
 #### MCP server fields (`[mcp_servers.<name>]`)
 
@@ -240,6 +241,64 @@ forbids duplicate keys, so a repeated id is a parse error.
 | `description` | string | no | Human-readable task description |
 | `context` | string | no | Extra context appended to the prompt |
 | `latency_threshold_ms` | int | no | Latency threshold (reported in metadata only) |
+
+---
+
+### Working directories
+
+By default every `(model, scenario, task)` repetition runs in a **fresh empty
+temporary directory** — a hermetic sandbox. A scenario can instead configure a
+`workdir` so the agent runs inside a checkout of a git repository (optionally at
+a ref), with files staged in. Each run/repetition gets its **own fresh
+workspace**, so file mutations never leak between repetitions.
+
+```toml
+[scenarios.regression.workdir]
+repo = "self"          # "self" (repo containing experiment.toml) | a git URL | a local path
+ref  = "v2.3.0"        # optional; default = the source repo's current HEAD
+
+# Ordered setup steps applied inside each fresh worktree (all optional):
+[[scenarios.regression.workdir.steps]]
+op    = "restore"      # git restore --source=<from> -- <paths...> (requires a repo)
+from  = "v2.2.0"
+paths = ["src/api/**", "README.md"]
+
+[[scenarios.regression.workdir.steps]]
+op    = "remove"       # delete matching globs from the worktree
+paths = ["secrets/**"]
+
+[[scenarios.regression.workdir.steps]]
+op      = "write"      # create/overwrite a file; exactly one of content/source
+path    = "NOTES.md"
+content = "Evaluate the migration."
+
+[[scenarios.regression.workdir.steps]]
+op     = "write"
+path   = "fixtures/input.json"
+source = "./fixtures/input.json"   # resolved relative to experiment.toml's dir
+```
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `repo` | string | `"self"`, a git URL, or a local path. Omitted = start from an empty directory |
+| `ref` | string | Branch/tag/commit to check out; default = source repo's current HEAD |
+| `steps` | array of tables | Ordered setup steps, each discriminated by `op` (`restore` / `remove` / `write`) |
+
+Notes:
+
+- **`repo = "self"`** refers to the git repository that contains
+  `experiment.toml` (validated at load — an error if the config is not inside a
+  git repo). It is cloned (`--no-hardlinks`) into an isolated cache, so the eval
+  **never mutates your real checkout**.
+- A repo source is **cloned once**, lazily; each workspace is a `git worktree` of
+  that clone. The whole cache is deleted at the end of the run.
+- `restore` requires a `repo`; `remove`/`write` work with or without one. A
+  `write` `path` must stay inside the workspace (no `..`/absolute paths).
+- **The repo's own project config is honored.** If a cloned repo ships
+  `.claude/`, `.codex/`, `AGENTS.md`/`CLAUDE.md`, project subagents/skills, or a
+  `.mcp.json`, those are discovered automatically. Claude's `.mcp.json` servers
+  are merged in (and get distributed-trace headers); a scenario-configured MCP
+  server **wins** on a name collision. Codex does not read `.mcp.json`.
 
 ---
 
