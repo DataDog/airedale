@@ -92,17 +92,21 @@ runs = 1
 max_turns = 64
 effort    = "medium"
 
-[scenarios.fat-mcp]
-description = "Full MCP orchestrator"
-skills      = ["./skills/apm"]
+# Shared skills and MCP servers are defined once and referenced by name.
+[skills]
+apm = "./skills/apm"
 
-[scenarios.fat-mcp.mcp_servers.apm]
+[mcp_servers.apm]
 url          = "http://localhost:8000/mcp"
 headers      = { source = "evals" }
 tool_names   = ["search_apm_libraries"]
 
-[[tasks]]
-id       = "ssi_overview"
+[scenarios.fat-mcp]
+description = "Full MCP orchestrator"
+skills      = ["apm"]   # reference by name
+mcp_servers = ["apm"]   # reference by name
+
+[tasks.ssi_overview]
 prompt   = "What is Single Step Instrumentation?"
 criteria = [
   "Correctly defines SSI",
@@ -127,15 +131,14 @@ credentials_helper = "mytool auth token --datacenter us1"
 ### 3. Run
 
 ```bash
-dd-ai-devx-evals \
-  --config experiment.toml \
+dd-ai-devx-evals experiment.toml \
   --gateway-config gateway.toml
 ```
 
 Preview the matrix without running:
 
 ```bash
-dd-ai-devx-evals --config experiment.toml --dry-run
+dd-ai-devx-evals experiment.toml --dry-run
 ```
 
 See `examples/` for fully-worked configs and a sample skill directory.
@@ -145,8 +148,6 @@ See `examples/` for fully-worked configs and a sample skill directory.
 ## Configuration reference
 
 ### `experiment.toml`
-
-See [`AGENTS.md §2.1`](./AGENTS.md) for the full contract.
 
 | Key | Type | Required | Description |
 |-----|------|----------|-------------|
@@ -158,22 +159,47 @@ See [`AGENTS.md §2.1`](./AGENTS.md) for the full contract.
 | `judge_model` | string | no | Model for rubric scoring (default `anthropic/claude-sonnet-4-6`) |
 | `runs` | int | no | Runs per cell (default `1`) |
 | `dataset_name` | string | no | Stable LLMObs dataset name (default: `project`) |
-| `defaults.max_turns` | int | no | Default outer agent loop cap (default `64`) |
-| `defaults.effort` | string | no | Reasoning effort hint: `"low"` / `"medium"` / `"high"` (default `"medium"`) |
+| `skills` | table | no | Skill registry: each `<name>` maps to an Agent Skill directory path (referenced by name from scenarios) |
+| `mcp_servers` | table | no | MCP server registry: each `<name>` maps to a server block (referenced by name from scenarios; see below) |
+| `defaults` | table | no | Defaults applied to every scenario (see below) |
+
+#### Shared registries (`skills` / `mcp_servers`)
+
+Skills and MCP servers are defined **once** at the top level and referenced
+**by name** from scenarios (and from `[defaults]`), so they can be reused across
+scenarios without copy-paste. Scenarios reference registry entries by name only:
+they cannot define an MCP server inline or give a raw skill path, and naming an
+entry absent from the registry is a configuration error.
+
+#### Defaults (`[defaults]`)
+
+Defaults are applied to every scenario that does not set the same field. When a
+scenario sets a field it overrides the default **entirely** — values are never
+merged (e.g. a scenario `skills` list replaces, rather than extends, the default
+list).
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `max_turns` | int | Default outer agent loop cap (default `64`) |
+| `effort` | string | Reasoning effort hint: `"low"` / `"medium"` / `"high"` (default `"medium"`) |
+| `system_prompt` | string | Default appended system prompt |
+| `skills` | list of strings | Default skill names (from the `skills` registry) |
+| `allowed_builtin_tools` | list of strings | Default built-in tool allow-list |
+| `mcp_servers` | list of strings | Default MCP server names (from the `mcp_servers` registry) |
 
 #### Scenario fields (`[scenarios.<name>]`)
 
 | Key | Type | Description |
 |-----|------|-------------|
 | `description` | string | Human description |
-| `system_prompt` | string | Appended to the base system prompt |
-| `skills` | list of strings | Paths to Agent Skill directories |
-| `allowed_builtin_tools` | list of strings | Built-in tools to allow (e.g. `"Read"`, `"Grep"`) |
+| `system_prompt` | string | Optional; appended to the base system prompt |
+| `skills` | list of strings | Skill names referencing the `skills` registry |
+| `allowed_builtin_tools` | list of strings | Built-in tool allow-list. **Omitted = all built-in tools allowed**; an explicit empty list `[]` = no built-in tools; a list = exactly those (e.g. `["Read", "Grep"]`) |
 | `max_turns` | int | Per-scenario override for `defaults.max_turns` |
 | `effort` | string | Per-scenario override for `defaults.effort` |
-| `mcp_servers.<name>` | table | MCP server config (see below) |
+| `mcp_servers` | list of strings | MCP server names referencing the `mcp_servers` registry |
 
-#### MCP server fields (`[scenarios.<name>.mcp_servers.<name>]`)
+#### MCP server fields (`[mcp_servers.<name>]`)
 
 Server blocks use the same field model as a standard `.mcp.json` file. Two
 transports are supported:
@@ -201,11 +227,14 @@ localhost. Reachability is probed through the MCP protocol itself with a
 | `headers` | table | Static HTTP headers (http transport only) |
 | `tool_names` | list of strings | Allow-list of MCP tools; empty = all tools |
 
-#### Task fields (`[[tasks]]`)
+#### Task fields (`[tasks.<id>]`)
+
+Each task is its own table keyed by a stable task **id** (`[tasks.ssi_overview]`).
+The id is used in experiment names and datasets, and must be unique — TOML
+forbids duplicate keys, so a repeated id is a parse error.
 
 | Key | Type | Required | Description |
 |-----|------|----------|-------------|
-| `id` | string | yes | Stable task identifier (used in experiment names and datasets) |
 | `prompt` | string | yes | User prompt sent to the model |
 | `criteria` | list of strings | yes | Rubric criteria (one judge call each; must be non-empty) |
 | `description` | string | no | Human-readable task description |
@@ -216,8 +245,8 @@ localhost. Reachability is probed through the MCP protocol itself with a
 
 ### `gateway.toml`
 
-See [`AGENTS.md §2.2`](./AGENTS.md) for the full contract.
-Pass via `--gateway-config PATH`; omit or use `--no-gateway` for direct provider APIs.
+Pass via `--gateway-config PATH`; omit it to use the standard provider APIs and
+env-var keys (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`).
 
 | Key | Type | Description |
 |-----|------|-------------|
@@ -237,9 +266,10 @@ Credential resolution priority (per provider):
 ## Skills
 
 Scenarios can expose **Agent Skills** (SKILL.md packages) to both execution
-engines. List skill directories under `scenario.skills` — the harness stages
-each one into the engine's discoverable location within the per-run temporary
-working directory before the agent starts.
+engines. Define each skill directory once in the top-level `skills` registry
+(`<name> = "<path>"`) and reference it by name from `scenario.skills` — the
+harness stages each referenced skill into the engine's discoverable location
+within the per-run temporary working directory before the agent starts.
 
 For **Claude** (`claude-agent-sdk`), skills are copied to
 `<cwd>/.claude/skills/<name>` and allow-listed in `ClaudeAgentOptions`.
@@ -268,23 +298,24 @@ provider SDK are counted.
 ## CLI reference
 
 ```
-dd-ai-devx-evals --config experiment.toml [options]
+dd-ai-devx-evals CONFIG [options]
 
-  --config PATH              experiment TOML file (required)
-  --gateway-config PATH      gateway TOML file (optional)
-  --no-gateway               ignore gateway config; use provider default APIs
+  CONFIG                     experiment TOML file (required positional argument)
+  --gateway-config PATH      gateway TOML file; omit to use provider default APIs
   --model M                  run only these models (repeatable / comma-separated)
   --scenario S               run only these scenarios (repeatable / comma-separated)
   --task T                   run only these task ids (repeatable / comma-separated)
   --runs N                   override runs per cell
   --judge-model M            override judge model
-  --jobs N                   concurrent tasks within one experiment (default 1)
-  --parallel-experiments N   concurrent experiments (default 1 = sequential)
+  --jobs N                   total cells run concurrently across the matrix (default 1 = sequential)
   --dry-run                  print the matrix and exit without running
   --no-progress              disable the live progress display
-  --agentless / --no-agentless  LLMObs submission mode (default: agentless)
-  --raise-errors             stop on the first task/evaluator error
+  --[no-]agentless           LLMObs submission mode (default: agentless)
+  --fail-fast                stop on the first task/evaluator error
 ```
+
+Each cell runs its `runs` repetitions sequentially, so `--jobs` is the total
+number of in-flight agent runs at any time.
 
 Exit codes: `0` success, `1` runtime error, `2` configuration error.
 
@@ -306,9 +337,6 @@ uv run ruff format .
 
 This project uses **[jj (Jujutsu)](https://github.com/jj-vcs/jj)** for version
 control. Never run vanilla `git` mutating commands.
-
-For the full architectural contract, module responsibilities, and invariants,
-read [`AGENTS.md`](./AGENTS.md).
 
 ---
 

@@ -16,27 +16,22 @@ dataset_name = "my-evals"
 # Optional: how many times to run each (model, scenario, task) cell.
 runs = 1
 
-# Optional: defaults applied to every scenario unless overridden per-scenario.
-[defaults]
-max_turns = 64
-effort = "medium"
-
 # ---------------------------------------------------------------------------
-# Scenarios: named runtime environments for the model.
+# Shared registries.
 # ---------------------------------------------------------------------------
+# Skills and MCP servers are defined ONCE here and referenced by name from
+# scenarios (and from [defaults]). This avoids copy-paste when the same skill or
+# server is reused across scenarios.
 
-# Scenario A: full MCP orchestrator with an HTTP MCP server.
-[scenarios.fat-mcp]
-description = "Full MCP orchestrator tool"
-system_prompt = "Prefer MCP tools over internal knowledge."
-skills = ["./skills/apm"]
-allowed_builtin_tools = ["Read", "Grep", "Glob"]
-max_turns = 64
-effort = "medium"
+# Skill registry: name -> Agent Skill directory.
+[skills]
+apm = "./skills/apm"
+
+# MCP server registry. Each block uses the same field model as a `.mcp.json`
+# entry; `type` is inferred from `url` (http) or `command` (stdio).
 
 # HTTP-transport MCP server with optional auto-start.
-# `type` is optional; it is inferred as "http" because `url` is set.
-[scenarios.fat-mcp.mcp_servers.apm]
+[mcp_servers.apm]
 url = "http://localhost:8000/mcp"
 headers = { source = "evals" }
 tool_names = ["search_apm_libraries", "get_apm_docs"]
@@ -47,31 +42,59 @@ command = "python"
 args = ["-m", "my_mcp_server"]
 env = { MCP_MODE = "both" }
 
-# Scenario B: minimal scenario using only built-in tools (no MCP).
-[scenarios.builtin-only]
-description = "Model answers with built-in tools only; no MCP servers."
-allowed_builtin_tools = ["Read", "Grep"]
-max_turns = 32
-effort = "low"
-
-# Scenario C: stdio-transport MCP server launched directly by the agent SDK.
-# `type` is optional; it is inferred as "stdio" because `command` is set and
-# there is no `url`.
-[scenarios.local-tools]
-description = "Stdio MCP server for local tool access."
-
-[scenarios.local-tools.mcp_servers.tools]
+# stdio-transport MCP server launched directly by the agent SDK. `type` is
+# inferred as "stdio" because `command` is set and there is no `url`.
+[mcp_servers.tools]
 command = "python"
 args = ["-m", "my_stdio_server"]
 env = { TOOL_MODE = "read-only" }
 tool_names = ["do_thing"]
 
 # ---------------------------------------------------------------------------
-# Tasks: prompts + evaluation criteria.
+# Defaults applied to every scenario unless the scenario sets the same field.
+# A scenario that sets a field overrides the default ENTIRELY (no merging).
+# ---------------------------------------------------------------------------
+[defaults]
+max_turns = 64
+effort = "medium"
+# Optional defaults for the list/table fields too:
+# system_prompt = "Prefer MCP tools over internal knowledge."
+# skills = ["apm"]
+# allowed_builtin_tools = ["Read", "Grep", "Glob"]
+# mcp_servers = ["apm"]
+
+# ---------------------------------------------------------------------------
+# Scenarios: named runtime environments for the model. They reference shared
+# skills / MCP servers by name.
 # ---------------------------------------------------------------------------
 
-[[tasks]]
-id = "ssi_overview"
+# Scenario A: full MCP orchestrator. `system_prompt` is optional. With
+# `allowed_builtin_tools` omitted, ALL built-in tools are allowed.
+[scenarios.fat-mcp]
+description = "Full MCP orchestrator tool"
+system_prompt = "Prefer MCP tools over internal knowledge."
+skills = ["apm"]
+mcp_servers = ["apm"]
+
+# Scenario B: lock the surface down to a specific built-in allow-list and no MCP.
+[scenarios.builtin-only]
+description = "Model answers with a restricted built-in allow-list; no MCP."
+allowed_builtin_tools = ["Read", "Grep"]
+max_turns = 32
+effort = "low"
+
+# Scenario C: stdio MCP server, no built-in tools at all (empty list).
+[scenarios.local-tools]
+description = "Stdio MCP server only; built-in tools disabled."
+allowed_builtin_tools = []
+mcp_servers = ["tools"]
+
+# ---------------------------------------------------------------------------
+# Tasks: prompts + evaluation criteria. Table key = task id (unique by
+# construction, since TOML forbids duplicate keys).
+# ---------------------------------------------------------------------------
+
+[tasks.ssi_overview]
 description = "[glossary] SSI definition"
 prompt = "What is Single Step Instrumentation (SSI)?"
 context = "Answer in the context of Datadog APM language instrumentation."
@@ -82,8 +105,7 @@ criteria = [
 ]
 latency_threshold_ms = 30000
 
-[[tasks]]
-id = "otel_vs_dd"
+[tasks.otel_vs_dd]
 description = "[comparison] OpenTelemetry vs Datadog tracing"
 prompt = "Compare OpenTelemetry and Datadog native tracing for a Python service."
 criteria = [

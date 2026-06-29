@@ -154,8 +154,15 @@ def _llm_output_message(answer: str, tool_calls: list[AgentToolCall]) -> dict[st
     return message
 
 
-def _builtin_tool_definitions(allowed_builtin_tools: Iterable[str]) -> list[dict[str, Any]]:
-    """Return name-only definitions for the provider's allow-listed builtins."""
+def _builtin_tool_definitions(allowed_builtin_tools: Iterable[str] | None) -> list[dict[str, Any]]:
+    """Return name-only definitions for the provider's allow-listed builtins.
+
+    ``None`` means "all built-in tools allowed"; since the full provider-native
+    set is not enumerated here, no explicit builtin definitions are emitted in
+    that case.
+    """
+    if allowed_builtin_tools is None:
+        return []
     return [
         {"name": name, "schema": {"type": "object", "properties": {}}} for name in dict.fromkeys(allowed_builtin_tools)
     ]
@@ -186,7 +193,7 @@ def _llmobs_tool_definitions(
     mcp_servers: list[McpServerSpec],
     *,
     sdk_name: str,
-    allowed_builtin_tools: Iterable[str] = (),
+    allowed_builtin_tools: Iterable[str] | None = None,
     mcp_tool_metadata: Mapping[tuple[str, str], McpToolMetadata] | None = None,
 ) -> list[dict[str, Any]]:
     """Return all LLMObs tool definitions (builtins + MCP) for a run."""
@@ -207,7 +214,7 @@ def _annotate_llm_span(
     usage: UsageMetrics,
     mcp_servers: list[McpServerSpec],
     tool_calls: list[AgentToolCall],
-    allowed_builtin_tools: Iterable[str] = (),
+    allowed_builtin_tools: Iterable[str] | None = None,
     mcp_tool_metadata: Mapping[tuple[str, str], McpToolMetadata] | None = None,
 ) -> None:
     """Annotate the manual ``llm`` span with I/O, usage, and tool definitions."""
@@ -292,14 +299,15 @@ class AgentRunner(ABC):
         self,
         *,
         mcp_servers: list[McpServerSpec] | None = None,
-        allowed_builtin_tools: Iterable[str] = (),
+        allowed_builtin_tools: Iterable[str] | None = None,
         skills: Iterable[str] = (),
         max_turns: int | None = None,
         effort: str | None = None,
         cwd: str | Path | None = None,
     ) -> None:
         self.mcp_servers = list(mcp_servers or [])
-        self.allowed_builtin_tools = tuple(allowed_builtin_tools)
+        # ``None`` is the "all built-in tools allowed" sentinel; preserve it.
+        self.allowed_builtin_tools = None if allowed_builtin_tools is None else tuple(allowed_builtin_tools)
         self.skills = list(skills)
         self.max_turns = max_turns
         self.effort = effort

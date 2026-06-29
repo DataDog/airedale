@@ -62,6 +62,31 @@ CLAUDE_DIAGNOSTIC_VALUE_MAX_CHARS = 1_000
 # Claude Code reads the apiKeyHelper output with this TTL (ms) before re-running.
 CLAUDE_API_KEY_HELPER_TTL_MS = "7200000"
 
+# Built-in (non-MCP) tools shipped by Claude Code. Under ``permission_mode=
+# "dontAsk"`` only tools pre-approved via ``allowed_tools`` may run, so when a
+# scenario allows "all" built-ins (``allowed_builtin_tools`` omitted) the harness
+# pre-approves this full set. ``Skill`` is intentionally excluded: it is enabled
+# through the ``skills`` option, not ``allowed_tools``.
+CLAUDE_BUILTIN_TOOLS: tuple[str, ...] = (
+    "Task",
+    "Bash",
+    "BashOutput",
+    "KillShell",
+    "Glob",
+    "Grep",
+    "Read",
+    "Edit",
+    "MultiEdit",
+    "Write",
+    "NotebookEdit",
+    "NotebookRead",
+    "WebFetch",
+    "WebSearch",
+    "TodoWrite",
+    "ExitPlanMode",
+    "SlashCommand",
+)
+
 
 class ClaudeRunner(AgentRunner):
     """Run eval prompts through ``claude-agent-sdk`` with native LLMObs spans."""
@@ -72,7 +97,7 @@ class ClaudeRunner(AgentRunner):
         self,
         *,
         mcp_servers: list[McpServerSpec] | None = None,
-        allowed_builtin_tools: Iterable[str] = (),
+        allowed_builtin_tools: Iterable[str] | None = None,
         skills: Iterable[str] = (),
         max_turns: int | None = None,
         effort: str | None = None,
@@ -223,7 +248,13 @@ class ClaudeRunner(AgentRunner):
             raise
 
     def _claude_available_tools(self) -> list[str]:
-        names: list[str] = [*self.allowed_builtin_tools]
+        # ``None`` means "all built-in tools allowed": pre-approve the full
+        # built-in set so ``dontAsk`` does not deny them. An explicit list
+        # (including an empty list) is an exact allow-list.
+        if self.allowed_builtin_tools is None:
+            names: list[str] = list(CLAUDE_BUILTIN_TOOLS)
+        else:
+            names = [*self.allowed_builtin_tools]
         for server in self.mcp_servers:
             tool_names = configured_tool_names(server)
             if tool_names:

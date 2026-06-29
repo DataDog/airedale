@@ -81,30 +81,19 @@ runs = 1
 # Optional: stable dataset name. Defaults to `project`.
 dataset_name = "my-evals"
 
-# Optional defaults applied to every scenario unless overridden.
-[defaults]
-max_turns = 64          # outer agent loop cap
-effort = "medium"       # reasoning effort hint passed to the SDKs
+# --- Shared registries: defined once, referenced by name -----------------
+# Skill registry. Table key = skill name; value = Agent-Skills SKILL.md dir.
+[skills]
+apm = "./skills/apm"
 
-# --- Scenarios: named runtime configurations -----------------------------
-# Table key = scenario name (used in experiment names / tags).
-[scenarios.fat-mcp]
-description = "Full MCP orchestrator tool"
-system_prompt = "..."                 # optional; appended to the base system prompt
-skills = ["./skills/apm"]             # optional list of skill directories
-allowed_builtin_tools = ["Read", "Grep", "Glob"]  # optional; Claude built-ins to allow
-max_turns = 64                        # optional per-scenario override
-effort = "medium"                     # optional per-scenario override
-
-# MCP servers visible in this scenario. Table key = server name.
-# Fields mirror the .mcp.json model: type/command/args/env/url/headers.
-# `type` is optional and inferred ("http" when `url` is set, "stdio" when only
-# `command` is set).
-[scenarios.fat-mcp.mcp_servers.apm]
+# MCP server registry. Table key = server name. Fields mirror the .mcp.json
+# model: type/command/args/env/url/headers. `type` is optional and inferred
+# ("http" when `url` is set, "stdio" when only `command` is set).
+[mcp_servers.apm]
 # HTTP transport (supports distributed-trace header injection):
 url = "http://localhost:8000/mcp"
 headers = { source = "evals" }        # optional static headers
-tool_names = ["search_apm_libraries"] # tools allow-listed for this scenario
+tool_names = ["search_apm_libraries"] # tools allow-listed for this server
 # Optional managed auto-start: on an http server, `command` (+ args/env) is the
 # command used to launch the server if it is unreachable. Reachability is probed
 # via the MCP protocol itself (a tools/list call). `url` MUST then be localhost
@@ -114,15 +103,39 @@ args = ["-m", "my_mcp_server"]
 env = { MCP_MODE = "both" }
 
 # stdio transport (alternative to url; launched directly by the agent SDK):
-[scenarios.local.mcp_servers.tools]
+[mcp_servers.tools]
 command = "python"
 args = ["-m", "my_stdio_server"]
 env = { FOO = "bar" }
 tool_names = ["do_thing"]
 
+# Optional defaults applied to every scenario unless the scenario sets the same
+# field. A scenario that sets a field overrides the default ENTIRELY (no merge).
+[defaults]
+max_turns = 64          # outer agent loop cap
+effort = "medium"       # reasoning effort hint passed to the SDKs
+# May also default the list/table fields, all optional:
+# system_prompt = "..."
+# skills = ["apm"]
+# allowed_builtin_tools = ["Read", "Grep", "Glob"]
+# mcp_servers = ["apm"]
+
+# --- Scenarios: named runtime configurations -----------------------------
+# Table key = scenario name (used in experiment names / tags). Scenarios
+# reference shared skills / MCP servers BY NAME (no inline definitions).
+[scenarios.fat-mcp]
+description = "Full MCP orchestrator tool"
+system_prompt = "..."                 # optional; appended to the base system prompt
+skills = ["apm"]                      # optional; names from the [skills] registry
+# allowed_builtin_tools omitted -> ALL built-in tools allowed.
+# allowed_builtin_tools = [] -> no built-in tools; = ["Read", ...] -> exactly those.
+mcp_servers = ["apm"]                 # names from the [mcp_servers.<name>] registry
+max_turns = 64                        # optional per-scenario override
+effort = "medium"                     # optional per-scenario override
+
 # --- Tasks: prompts + evaluation criteria --------------------------------
-[[tasks]]
-id = "ssi_overview"
+# Table key = task id (unique by construction; TOML forbids duplicate keys).
+[tasks.ssi_overview]
 description = "[glossary] SSI definition"   # optional
 prompt = "What is Single Step Instrumentation?"
 context = "..."                              # optional extra context appended to the prompt
@@ -134,8 +147,29 @@ latency_threshold_ms = 30000                 # optional, reported only
 ```
 
 Notes:
-- A scenario MUST define at least one MCP server is NOT required — scenarios with
-  no MCP servers are valid (model answers from skills/builtins only).
+- Skills and MCP servers are defined **once** in the top-level `skills` and
+  `mcp_servers` registries and referenced **by name** from scenarios
+  (and from `[defaults]`), so they can be reused across scenarios without
+  copy-paste. A scenario naming a skill/server absent from the registry is a
+  `ConfigError`. Inline `[scenarios.<name>.mcp_servers.<x>]` tables and raw skill
+  paths inside a scenario are rejected.
+- `[defaults]` may set `max_turns`, `effort`, `system_prompt`, `skills`,
+  `allowed_builtin_tools`, and `mcp_servers`. When a scenario sets one of these,
+  its value replaces the default **entirely** — lists/tables are never merged.
+- `system_prompt` is optional on both scenarios and `[defaults]`; when present it
+  is appended to the base system prompt.
+- Tasks are a table keyed by id (`[tasks.<id>]`), not an array of tables. The id
+  comes from the table key, so it is unique by construction (TOML rejects
+  duplicate keys); an array-of-tables `[[tasks]]` form is a `ConfigError`, and an
+  in-body `id` key is rejected as unknown.
+- `allowed_builtin_tools` semantics: **omitted ⇒ all built-in tools allowed**; an
+  explicit empty list `[]` ⇒ no built-in tools; a non-empty list ⇒ exactly those.
+  In code this is the `None`-vs-`()`-vs-tuple distinction on
+  `ScenarioConfig.allowed_builtin_tools`. For Claude (`dontAsk` permission mode)
+  the "all" case pre-approves the full `CLAUDE_BUILTIN_TOOLS` set; for Codex the
+  field is informational only (Codex does not gate built-ins on it).
+- A scenario need not reference any MCP server — scenarios with no MCP servers
+  are valid (model answers from skills/builtins only).
 - `type` is optional; when omitted it is inferred ("http" if `url` is set,
   "stdio" if only `command` is set). Only `stdio` and `http` are supported.
 - A `stdio` server defines `command` (+ optional `args`/`env`) and MUST NOT set
@@ -148,8 +182,8 @@ Notes:
 ### 2.2 `gateway.toml` (optional, separate file)
 
 Maps a provider name to gateway settings. Passed via `--gateway-config PATH`.
-When omitted (or `--no-gateway`), the standard provider APIs and env-var API keys
-are used (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`).
+When omitted, the standard provider APIs and env-var API keys are used
+(`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`).
 
 ```toml
 [providers.anthropic]
@@ -312,8 +346,10 @@ def slugify(value: str) -> str: ...
 
 ## 6. Skills staging contract (`skills.py`)
 
-`scenario.skills` is a list of skill *directories* (each an Agent-Skills SKILL.md
-package). The harness stages them into each engine's discoverable location:
+`ScenarioConfig.skills` is a list of skill *directories* (each an Agent-Skills
+SKILL.md package), already resolved from the top-level `skills` registry at
+config-load time (scenarios reference skills by name). The harness stages them
+into each engine's discoverable location:
 
 - **Claude (`claude-agent-sdk`):** make dirs discoverable in the run `cwd`
   (e.g. `<cwd>/.claude/skills/<name>`), set `setting_sources` accordingly (or use
@@ -333,24 +369,26 @@ and confined to the per-run temp `cwd`.
 ## 7. CLI contract (`cli.py`)
 
 ```
-dd-ai-devx-evals --config experiment.toml [options]
+dd-ai-devx-evals CONFIG [options]
 
-  --config PATH            experiment TOML (required)
-  --gateway-config PATH    gateway TOML (optional)
-  --no-gateway             ignore gateway config; use provider default APIs
+  CONFIG                   experiment TOML (required positional argument)
+  --gateway-config PATH    gateway TOML; omit to use provider default APIs
   --model M                run only these models (repeatable / comma-separated)
   --scenario S             run only these scenarios (repeatable / comma-separated)
   --task T                 run only these task ids (repeatable / comma-separated)
   --runs N                 override runs per cell
   --judge-model M          override judge model
-  --jobs N                 concurrent tasks within one experiment (default 1)
-  --parallel-experiments N concurrent experiments (default 1 = sequential)
+  --jobs N                 total cells run concurrently across the matrix (default 1)
   --dry-run                print the matrix and exit
   --no-progress            disable the live progress display
   --agentless / --no-agentless   LLMObs submission mode (default agentless)
+  --fail-fast              stop on the first task/evaluator error
 ```
 
-Exit non-zero on config errors or when `--raise-errors` and a cell fails.
+`--jobs` is the single concurrency knob: a global semaphore bounds how many
+cells run at once, and each cell runs its `runs` repetitions sequentially, so
+`--jobs` equals the maximum number of in-flight agent runs. Exit non-zero on
+config errors or when `--fail-fast` and a cell fails.
 
 ---
 

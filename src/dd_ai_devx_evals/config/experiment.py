@@ -99,13 +99,20 @@ class McpServerConfig:
 
 @dataclass(frozen=True)
 class ScenarioConfig:
-    """Configuration for a scenario runtime."""
+    """Configuration for a scenario runtime.
+
+    ``skills`` and ``mcp_servers`` hold values resolved from the top-level
+    ``[skills]`` / ``[mcp_servers.<name>]`` registries (scenarios reference them
+    by name). ``allowed_builtin_tools`` is ``None`` when the field is omitted,
+    which means *all* built-in tools are allowed; an explicit empty tuple means
+    no built-in tools are exposed.
+    """
 
     name: str
     description: str | None = None
     system_prompt: str | None = None
     skills: tuple[str, ...] = ()
-    allowed_builtin_tools: tuple[str, ...] = ()
+    allowed_builtin_tools: tuple[str, ...] | None = None
     max_turns: int | None = None
     effort: str | None = None
     mcp_servers: tuple[McpServerConfig, ...] = ()
@@ -165,6 +172,25 @@ class ExperimentConfig:
             raise ConfigError(f"Invalid judge model '{self.judge_model}': {e}") from e
 
 
+_SCENARIO_KEYS = {
+    "description",
+    "system_prompt",
+    "skills",
+    "allowed_builtin_tools",
+    "max_turns",
+    "effort",
+    "mcp_servers",
+}
+_DEFAULTS_KEYS = {
+    "max_turns",
+    "effort",
+    "system_prompt",
+    "skills",
+    "allowed_builtin_tools",
+    "mcp_servers",
+}
+
+
 def _parse_mcp_server(name: str, config: dict[str, Any]) -> McpServerConfig:
     """Parse MCP server config from TOML data."""
     return McpServerConfig(
@@ -179,40 +205,118 @@ def _parse_mcp_server(name: str, config: dict[str, Any]) -> McpServerConfig:
     )
 
 
-def _parse_scenario(name: str, config: dict[str, Any], defaults: dict[str, Any]) -> ScenarioConfig:
-    """Parse scenario config from TOML data, applying defaults."""
-    mcp_servers = []
-    if "mcp_servers" in config:
-        for server_name, server_config in config["mcp_servers"].items():
-            mcp_servers.append(_parse_mcp_server(server_name, server_config))
+def _resolve_skill_names(names: Any, registry: dict[str, str], *, where: str) -> tuple[str, ...]:
+    """Resolve a list of skill names against the top-level ``[skills]`` registry."""
+    if isinstance(names, dict):
+        raise ConfigError(
+            f"{where} 'skills' must be a list of names referencing the top-level [skills] table, not a table"
+        )
+    if not isinstance(names, (list, tuple)):
+        raise ConfigError(f"{where} 'skills' must be a list of skill names")
+    resolved: list[str] = []
+    for name in names:
+        if not isinstance(name, str):
+            raise ConfigError(f"{where} 'skills' entries must be skill names (strings)")
+        if name not in registry:
+            raise ConfigError(
+                f"{where} references unknown skill '{name}'; skills must be defined once under the "
+                f"top-level [skills] table and referenced by name"
+            )
+        resolved.append(registry[name])
+    return tuple(resolved)
 
-    # Apply defaults for max_turns and effort if not specified
+
+def _resolve_mcp_server_names(
+    names: Any, registry: dict[str, McpServerConfig], *, where: str
+) -> tuple[McpServerConfig, ...]:
+    """Resolve a list of server names against the top-level ``[mcp_servers]`` registry."""
+    if isinstance(names, dict):
+        raise ConfigError(
+            f"{where} 'mcp_servers' must be a list of names referencing top-level "
+            f"[mcp_servers.<name>] blocks, not an inline table"
+        )
+    if not isinstance(names, (list, tuple)):
+        raise ConfigError(f"{where} 'mcp_servers' must be a list of MCP server names")
+    resolved: list[McpServerConfig] = []
+    for name in names:
+        if not isinstance(name, str):
+            raise ConfigError(f"{where} 'mcp_servers' entries must be server names (strings)")
+        if name not in registry:
+            raise ConfigError(
+                f"{where} references unknown MCP server '{name}'; MCP servers must be defined once under "
+                f"top-level [mcp_servers.<name>] blocks and referenced by name"
+            )
+        resolved.append(registry[name])
+    return tuple(resolved)
+
+
+def _parse_scenario(
+    name: str,
+    config: dict[str, Any],
+    defaults: dict[str, Any],
+    skill_registry: dict[str, str],
+    mcp_registry: dict[str, McpServerConfig],
+) -> ScenarioConfig:
+    """Parse scenario config from TOML data, applying defaults.
+
+    A scenario that sets a list/table field (``skills``, ``allowed_builtin_tools``,
+    ``mcp_servers``, ``system_prompt``) overrides the corresponding ``[defaults]``
+    value entirely; values are never merged.
+    """
+    unknown = set(config.keys()) - _SCENARIO_KEYS
+    if unknown:
+        raise ConfigError(f"Scenario '{name}' has unknown keys: {', '.join(sorted(unknown))}")
+
+    where = f"Scenario '{name}'"
+
+    # Scenario value wins entirely when present; otherwise fall back to defaults.
+    skill_names = config["skills"] if "skills" in config else defaults.get("skills", [])
+    skills = _resolve_skill_names(skill_names, skill_registry, where=where)
+
+    server_names = config["mcp_servers"] if "mcp_servers" in config else defaults.get("mcp_servers", [])
+    mcp_servers = _resolve_mcp_server_names(server_names, mcp_registry, where=where)
+
+    system_prompt = config["system_prompt"] if "system_prompt" in config else defaults.get("system_prompt")
+
+    # ``None`` (omitted everywhere) means "all built-in tools allowed"; an explicit
+    # list (including empty) is an exact allow-list.
+    if "allowed_builtin_tools" in config:
+        allowed = tuple(config["allowed_builtin_tools"])
+    elif "allowed_builtin_tools" in defaults:
+        allowed = tuple(defaults["allowed_builtin_tools"])
+    else:
+        allowed = None
+
     max_turns = config.get("max_turns") or defaults.get("max_turns")
     effort = config.get("effort") or defaults.get("effort")
 
     return ScenarioConfig(
         name=name,
         description=config.get("description"),
-        system_prompt=config.get("system_prompt"),
-        skills=tuple(config.get("skills", [])),
-        allowed_builtin_tools=tuple(config.get("allowed_builtin_tools", [])),
+        system_prompt=system_prompt,
+        skills=skills,
+        allowed_builtin_tools=allowed,
         max_turns=max_turns,
         effort=effort,
-        mcp_servers=tuple(mcp_servers),
+        mcp_servers=mcp_servers,
     )
 
 
-def _parse_task(config: dict[str, Any]) -> TaskConfig:
-    """Parse task config from TOML data."""
-    if "id" not in config:
-        raise ConfigError("Task missing required 'id' field")
+_TASK_KEYS = {"prompt", "criteria", "description", "context", "latency_threshold_ms"}
+
+
+def _parse_task(task_id: str, config: dict[str, Any]) -> TaskConfig:
+    """Parse one ``[tasks.<id>]`` block; the table key supplies the task id."""
+    unknown = set(config.keys()) - _TASK_KEYS
+    if unknown:
+        raise ConfigError(f"Task '{task_id}' has unknown keys: {', '.join(sorted(unknown))}")
     if "prompt" not in config:
-        raise ConfigError(f"Task '{config['id']}' missing required 'prompt' field")
+        raise ConfigError(f"Task '{task_id}' missing required 'prompt' field")
     if "criteria" not in config or not config["criteria"]:
-        raise ConfigError(f"Task '{config['id']}' must have at least one criterion")
+        raise ConfigError(f"Task '{task_id}' must have at least one criterion")
 
     return TaskConfig(
-        id=config["id"],
+        id=task_id,
         description=config.get("description"),
         prompt=config["prompt"],
         context=config.get("context"),
@@ -234,6 +338,8 @@ def load_experiment(path: str | Path) -> ExperimentConfig:
         "runs",
         "dataset_name",
         "defaults",
+        "skills",
+        "mcp_servers",
         "scenarios",
         "tasks",
     }
@@ -252,18 +358,35 @@ def load_experiment(path: str | Path) -> ExperimentConfig:
         raise ConfigError("Missing required 'tasks' field")
 
     defaults = data.get("defaults", {})
+    unknown_defaults = set(defaults.keys()) - _DEFAULTS_KEYS
+    if unknown_defaults:
+        raise ConfigError(f"Unknown [defaults] keys: {', '.join(sorted(unknown_defaults))}")
     defaults.setdefault("max_turns", 64)
     defaults.setdefault("effort", "medium")
+
+    # Parse the top-level shared registries referenced by name from scenarios.
+    skill_registry: dict[str, str] = {}
+    for skill_name, skill_path in data.get("skills", {}).items():
+        if not isinstance(skill_path, str):
+            raise ConfigError(f"Skill '{skill_name}' must map to a directory path (string)")
+        skill_registry[skill_name] = skill_path
+
+    mcp_registry: dict[str, McpServerConfig] = {}
+    for server_name, server_config in data.get("mcp_servers", {}).items():
+        mcp_registry[server_name] = _parse_mcp_server(server_name, server_config)
 
     # Parse scenarios
     scenarios = []
     for scenario_name, scenario_config in data["scenarios"].items():
-        scenarios.append(_parse_scenario(scenario_name, scenario_config, defaults))
+        scenarios.append(_parse_scenario(scenario_name, scenario_config, defaults, skill_registry, mcp_registry))
 
-    # Parse tasks
+    # Parse tasks. The `tasks` table is keyed by task id ([tasks.<id>]); TOML
+    # forbids duplicate keys, so ids are unique by construction.
+    if not isinstance(data["tasks"], dict):
+        raise ConfigError("'tasks' must be a table keyed by id ([tasks.<id>]), not an array of tables")
     tasks = []
-    for task_config in data["tasks"]:
-        tasks.append(_parse_task(task_config))
+    for task_id, task_config in data["tasks"].items():
+        tasks.append(_parse_task(task_id, task_config))
 
     dataset_name = data.get("dataset_name")
     if dataset_name is None:

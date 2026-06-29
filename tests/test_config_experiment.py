@@ -31,8 +31,7 @@ models = ["anthropic/claude-3-haiku-20240307"]
 [scenarios.default]
 description = "Default scenario"
 
-[[tasks]]
-id = "task1"
+[tasks.task1]
 prompt = "What is X?"
 criteria = ["Defines X correctly"]
 """
@@ -63,8 +62,7 @@ class TestLoadExperimentValid:
 
         [scenarios.s1]
 
-        [[tasks]]
-        id = "t1"
+        [tasks.t1]
         prompt = "p"
         criteria = ["c"]
         """
@@ -83,8 +81,7 @@ class TestLoadExperimentValid:
         [scenarios.s1]
         description = "scenario"
 
-        [[tasks]]
-        id = "t1"
+        [tasks.t1]
         prompt = "p"
         criteria = ["c"]
         """
@@ -106,8 +103,7 @@ class TestLoadExperimentValid:
         max_turns = 64
         effort = "high"
 
-        [[tasks]]
-        id = "t1"
+        [tasks.t1]
         prompt = "p"
         criteria = ["c"]
         """
@@ -120,13 +116,15 @@ class TestLoadExperimentValid:
         project = "p"
         models = ["anthropic/claude-3-haiku-20240307"]
 
-        [scenarios.s1.mcp_servers.apm]
+        [mcp_servers.apm]
         url = "http://localhost:8000/mcp"
         headers = { source = "evals" }
         tool_names = ["search_apm"]
 
-        [[tasks]]
-        id = "t1"
+        [scenarios.s1]
+        mcp_servers = ["apm"]
+
+        [tasks.t1]
         prompt = "p"
         criteria = ["c"]
         """
@@ -144,14 +142,16 @@ class TestLoadExperimentValid:
         project = "p"
         models = ["openai/gpt-4o"]
 
-        [scenarios.local.mcp_servers.tools]
+        [mcp_servers.tools]
         command = "python"
         args = ["-m", "my_server"]
         env = { FOO = "bar" }
         tool_names = ["do_thing"]
 
-        [[tasks]]
-        id = "t1"
+        [scenarios.local]
+        mcp_servers = ["tools"]
+
+        [tasks.t1]
         prompt = "p"
         criteria = ["c"]
         """
@@ -172,8 +172,7 @@ class TestLoadExperimentValid:
         [scenarios.s1]
         description = "s"
 
-        [[tasks]]
-        id = "t1"
+        [tasks.t1]
         prompt = "p"
         criteria = ["c"]
         """
@@ -189,8 +188,7 @@ class TestLoadExperimentValid:
 
         [scenarios.s1]
 
-        [[tasks]]
-        id = "t1"
+        [tasks.t1]
         prompt = "What is X?"
         context = "Context goes here"
         criteria = ["c1", "c2"]
@@ -198,6 +196,7 @@ class TestLoadExperimentValid:
         """
         config = load_experiment(write_toml(tmp_path, toml))
         task = config.tasks[0]
+        assert task.id == "t1"  # id comes from the [tasks.<id>] table key
         assert task.context == "Context goes here"
         assert task.criteria == ("c1", "c2")
         assert task.latency_threshold_ms == 5000
@@ -207,12 +206,14 @@ class TestLoadExperimentValid:
         project = "p"
         models = ["anthropic/claude-3-haiku-20240307"]
 
+        [skills]
+        apm = "./skills/apm"
+
         [scenarios.s1]
-        skills = ["./skills/apm"]
+        skills = ["apm"]
         allowed_builtin_tools = ["Read", "Grep"]
 
-        [[tasks]]
-        id = "t1"
+        [tasks.t1]
         prompt = "p"
         criteria = ["c"]
         """
@@ -220,6 +221,110 @@ class TestLoadExperimentValid:
         scenario = config.scenarios[0]
         assert scenario.skills == ("./skills/apm",)
         assert scenario.allowed_builtin_tools == ("Read", "Grep")
+
+    def test_shared_registry_referenced_by_multiple_scenarios(self, tmp_path):
+        toml = """
+        project = "p"
+        models = ["anthropic/claude-3-haiku-20240307"]
+
+        [skills]
+        apm = "./skills/apm"
+
+        [mcp_servers.apm]
+        url = "http://localhost:8000/mcp"
+        tool_names = ["search_apm"]
+
+        [scenarios.a]
+        mcp_servers = ["apm"]
+        skills = ["apm"]
+
+        [scenarios.b]
+        mcp_servers = ["apm"]
+        skills = ["apm"]
+
+        [tasks.t1]
+        prompt = "p"
+        criteria = ["c"]
+        """
+        config = load_experiment(write_toml(tmp_path, toml))
+        a, b = config.scenarios
+        assert a.mcp_servers[0].name == "apm"
+        assert b.mcp_servers[0].name == "apm"
+        assert a.skills == ("./skills/apm",) == b.skills
+
+    def test_allowed_builtin_tools_unset_is_none(self, tmp_path):
+        config = load_experiment(write_toml(tmp_path, MINIMAL))
+        # Omitted -> None sentinel meaning "all built-in tools allowed".
+        assert config.scenarios[0].allowed_builtin_tools is None
+
+    def test_allowed_builtin_tools_empty_list_is_empty_tuple(self, tmp_path):
+        toml = """
+        project = "p"
+        models = ["anthropic/claude-3-haiku-20240307"]
+
+        [scenarios.s1]
+        allowed_builtin_tools = []
+
+        [tasks.t1]
+        prompt = "p"
+        criteria = ["c"]
+        """
+        config = load_experiment(write_toml(tmp_path, toml))
+        # Explicit empty list -> no built-in tools (distinct from unset).
+        assert config.scenarios[0].allowed_builtin_tools == ()
+
+    def test_defaults_apply_extended_fields(self, tmp_path):
+        toml = """
+        project = "p"
+        models = ["anthropic/claude-3-haiku-20240307"]
+
+        [skills]
+        apm = "./skills/apm"
+
+        [mcp_servers.apm]
+        url = "http://localhost:8000/mcp"
+
+        [defaults]
+        system_prompt = "base prompt"
+        skills = ["apm"]
+        allowed_builtin_tools = ["Read"]
+        mcp_servers = ["apm"]
+
+        [scenarios.inherits]
+
+        [tasks.t1]
+        prompt = "p"
+        criteria = ["c"]
+        """
+        config = load_experiment(write_toml(tmp_path, toml))
+        s = config.scenarios[0]
+        assert s.system_prompt == "base prompt"
+        assert s.skills == ("./skills/apm",)
+        assert s.allowed_builtin_tools == ("Read",)
+        assert s.mcp_servers[0].name == "apm"
+
+    def test_scenario_replaces_defaults_entirely(self, tmp_path):
+        toml = """
+        project = "p"
+        models = ["anthropic/claude-3-haiku-20240307"]
+
+        [skills]
+        apm = "./skills/apm"
+        k8s = "./skills/k8s"
+
+        [defaults]
+        skills = ["apm"]
+
+        [scenarios.override]
+        skills = ["k8s"]
+
+        [tasks.t1]
+        prompt = "p"
+        criteria = ["c"]
+        """
+        config = load_experiment(write_toml(tmp_path, toml))
+        # Scenario value wins entirely; no union with defaults.
+        assert config.scenarios[0].skills == ("./skills/k8s",)
 
 
 # ---------------------------------------------------------------------------
@@ -229,7 +334,7 @@ class TestLoadExperimentValid:
 
 class TestLoadExperimentErrors:
     def test_unknown_top_level_key(self, tmp_path):
-        # extra_key must appear BEFORE [[tasks]] to land at the top level in TOML
+        # extra_key must appear BEFORE [tasks.<id>] to land at the top level in TOML
         toml = """
         project = "p"
         models = ["anthropic/claude-3-haiku-20240307"]
@@ -237,8 +342,7 @@ class TestLoadExperimentErrors:
 
         [scenarios.s1]
 
-        [[tasks]]
-        id = "t1"
+        [tasks.t1]
         prompt = "p"
         criteria = ["c"]
         """
@@ -249,8 +353,7 @@ class TestLoadExperimentErrors:
         toml = """
         models = ["anthropic/claude-3-haiku-20240307"]
         [scenarios.s1]
-        [[tasks]]
-        id = "t1"
+        [tasks.t1]
         prompt = "p"
         criteria = ["c"]
         """
@@ -261,8 +364,7 @@ class TestLoadExperimentErrors:
         toml = """
         project = "p"
         [scenarios.s1]
-        [[tasks]]
-        id = "t1"
+        [tasks.t1]
         prompt = "p"
         criteria = ["c"]
         """
@@ -273,8 +375,7 @@ class TestLoadExperimentErrors:
         toml = """
         project = "p"
         models = ["anthropic/claude-3-haiku-20240307"]
-        [[tasks]]
-        id = "t1"
+        [tasks.t1]
         prompt = "p"
         criteria = ["c"]
         """
@@ -295,8 +396,7 @@ class TestLoadExperimentErrors:
         project = "p"
         models = ["gpt-4"]
         [scenarios.s1]
-        [[tasks]]
-        id = "t1"
+        [tasks.t1]
         prompt = "p"
         criteria = ["c"]
         """
@@ -308,8 +408,7 @@ class TestLoadExperimentErrors:
         project = "p"
         models = ["gemini/pro"]
         [scenarios.s1]
-        [[tasks]]
-        id = "t1"
+        [tasks.t1]
         prompt = "p"
         criteria = ["c"]
         """
@@ -320,12 +419,13 @@ class TestLoadExperimentErrors:
         toml = """
         project = "p"
         models = ["anthropic/claude-3-haiku-20240307"]
-        [scenarios.s1.mcp_servers.managed]
+        [mcp_servers.managed]
         url = "http://localhost:8000/mcp"
         command = "my-server"
         args = ["--port", "8000"]
-        [[tasks]]
-        id = "t1"
+        [scenarios.s1]
+        mcp_servers = ["managed"]
+        [tasks.t1]
         prompt = "p"
         criteria = ["c"]
         """
@@ -340,11 +440,11 @@ class TestLoadExperimentErrors:
         toml = """
         project = "p"
         models = ["anthropic/claude-3-haiku-20240307"]
-        [scenarios.s1.mcp_servers.bad]
+        [mcp_servers.bad]
         url = "http://example.com:8000/mcp"
         command = "my-server"
-        [[tasks]]
-        id = "t1"
+        [scenarios.s1]
+        [tasks.t1]
         prompt = "p"
         criteria = ["c"]
         """
@@ -355,11 +455,12 @@ class TestLoadExperimentErrors:
         toml = """
         project = "p"
         models = ["anthropic/claude-3-haiku-20240307"]
-        [scenarios.s1.mcp_servers.managed]
+        [mcp_servers.managed]
         url = "http://127.0.0.5:8000/mcp"
         command = "my-server"
-        [[tasks]]
-        id = "t1"
+        [scenarios.s1]
+        mcp_servers = ["managed"]
+        [tasks.t1]
         prompt = "p"
         criteria = ["c"]
         """
@@ -370,11 +471,12 @@ class TestLoadExperimentErrors:
         toml = """
         project = "p"
         models = ["anthropic/claude-3-haiku-20240307"]
-        [scenarios.s1.mcp_servers.managed]
+        [mcp_servers.managed]
         url = "http://[::1]:8000/mcp"
         command = "my-server"
-        [[tasks]]
-        id = "t1"
+        [scenarios.s1]
+        mcp_servers = ["managed"]
+        [tasks.t1]
         prompt = "p"
         criteria = ["c"]
         """
@@ -385,10 +487,10 @@ class TestLoadExperimentErrors:
         toml = """
         project = "p"
         models = ["anthropic/claude-3-haiku-20240307"]
-        [scenarios.s1.mcp_servers.bad]
+        [mcp_servers.bad]
         tool_names = ["tool"]
-        [[tasks]]
-        id = "t1"
+        [scenarios.s1]
+        [tasks.t1]
         prompt = "p"
         criteria = ["c"]
         """
@@ -399,11 +501,11 @@ class TestLoadExperimentErrors:
         toml = """
         project = "p"
         models = ["anthropic/claude-3-haiku-20240307"]
-        [scenarios.s1.mcp_servers.bad]
+        [mcp_servers.bad]
         type = "sse"
         url = "http://localhost:8000/mcp"
-        [[tasks]]
-        id = "t1"
+        [scenarios.s1]
+        [tasks.t1]
         prompt = "p"
         criteria = ["c"]
         """
@@ -415,8 +517,7 @@ class TestLoadExperimentErrors:
         project = "p"
         models = ["anthropic/claude-3-haiku-20240307"]
         [scenarios.s1]
-        [[tasks]]
-        id = "t1"
+        [tasks.t1]
         prompt = "p"
         criteria = []
         """
@@ -426,3 +527,123 @@ class TestLoadExperimentErrors:
     def test_file_not_found(self, tmp_path):
         with pytest.raises(ConfigError, match="not found"):
             load_experiment(tmp_path / "nonexistent.toml")
+
+    def test_scenario_references_unknown_mcp_server(self, tmp_path):
+        toml = """
+        project = "p"
+        models = ["anthropic/claude-3-haiku-20240307"]
+        [scenarios.s1]
+        mcp_servers = ["missing"]
+        [tasks.t1]
+        prompt = "p"
+        criteria = ["c"]
+        """
+        with pytest.raises(ConfigError, match="unknown MCP server 'missing'"):
+            load_experiment(write_toml(tmp_path, toml))
+
+    def test_scenario_references_unknown_skill(self, tmp_path):
+        toml = """
+        project = "p"
+        models = ["anthropic/claude-3-haiku-20240307"]
+        [scenarios.s1]
+        skills = ["./skills/apm"]
+        [tasks.t1]
+        prompt = "p"
+        criteria = ["c"]
+        """
+        with pytest.raises(ConfigError, match="unknown skill"):
+            load_experiment(write_toml(tmp_path, toml))
+
+    def test_inline_mcp_server_table_rejected(self, tmp_path):
+        toml = """
+        project = "p"
+        models = ["anthropic/claude-3-haiku-20240307"]
+        [scenarios.s1.mcp_servers.apm]
+        url = "http://localhost:8000/mcp"
+        [tasks.t1]
+        prompt = "p"
+        criteria = ["c"]
+        """
+        with pytest.raises(ConfigError, match="not an inline table"):
+            load_experiment(write_toml(tmp_path, toml))
+
+    def test_unknown_scenario_key_rejected(self, tmp_path):
+        toml = """
+        project = "p"
+        models = ["anthropic/claude-3-haiku-20240307"]
+        [scenarios.s1]
+        bogus = "x"
+        [tasks.t1]
+        prompt = "p"
+        criteria = ["c"]
+        """
+        with pytest.raises(ConfigError, match="unknown keys"):
+            load_experiment(write_toml(tmp_path, toml))
+
+    def test_unknown_defaults_key_rejected(self, tmp_path):
+        toml = """
+        project = "p"
+        models = ["anthropic/claude-3-haiku-20240307"]
+        [defaults]
+        bogus = "x"
+        [scenarios.s1]
+        [tasks.t1]
+        prompt = "p"
+        criteria = ["c"]
+        """
+        with pytest.raises(ConfigError, match="Unknown \\[defaults\\] keys"):
+            load_experiment(write_toml(tmp_path, toml))
+
+    def test_tasks_array_of_tables_rejected(self, tmp_path):
+        toml = """
+        project = "p"
+        models = ["anthropic/claude-3-haiku-20240307"]
+        [scenarios.s1]
+        [[tasks]]
+        id = "t1"
+        prompt = "p"
+        criteria = ["c"]
+        """
+        with pytest.raises(ConfigError, match="must be a table keyed by id"):
+            load_experiment(write_toml(tmp_path, toml))
+
+    def test_duplicate_task_id_rejected(self, tmp_path):
+        # TOML forbids duplicate keys, so a repeated [tasks.<id>] is a parse error.
+        toml = """
+        project = "p"
+        models = ["anthropic/claude-3-haiku-20240307"]
+        [scenarios.s1]
+        [tasks.dup]
+        prompt = "a"
+        criteria = ["c"]
+        [tasks.dup]
+        prompt = "b"
+        criteria = ["c"]
+        """
+        with pytest.raises(ConfigError, match="Invalid TOML"):
+            load_experiment(write_toml(tmp_path, toml))
+
+    def test_unknown_task_key_rejected(self, tmp_path):
+        # An in-body `id` is now an unknown key (the id comes from the table key).
+        toml = """
+        project = "p"
+        models = ["anthropic/claude-3-haiku-20240307"]
+        [scenarios.s1]
+        [tasks.t1]
+        id = "t1"
+        prompt = "p"
+        criteria = ["c"]
+        """
+        with pytest.raises(ConfigError, match="unknown keys"):
+            load_experiment(write_toml(tmp_path, toml))
+
+    def test_task_missing_prompt_rejected(self, tmp_path):
+        toml = """
+        project = "p"
+        models = ["anthropic/claude-3-haiku-20240307"]
+        [scenarios.s1]
+        [tasks.t1]
+        criteria = ["c"]
+        """
+        with pytest.raises(ConfigError, match="missing required 'prompt'"):
+            load_experiment(write_toml(tmp_path, toml))

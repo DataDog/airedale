@@ -77,7 +77,7 @@ class CodexRunner(AgentRunner):
         self,
         *,
         mcp_servers: list[McpServerSpec] | None = None,
-        allowed_builtin_tools: Iterable[str] = (),
+        allowed_builtin_tools: Iterable[str] | None = None,
         skills: Iterable[str] = (),
         max_turns: int | None = None,
         effort: str | None = None,

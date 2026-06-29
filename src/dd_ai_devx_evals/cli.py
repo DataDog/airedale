@@ -15,22 +15,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
-        "--config",
-        metavar="PATH",
-        required=True,
-        help="experiment TOML file (required)",
+        "config",
+        metavar="CONFIG",
+        help="experiment TOML file",
     )
     parser.add_argument(
         "--gateway-config",
         metavar="PATH",
         default=None,
-        help="gateway TOML file (optional)",
-    )
-    parser.add_argument(
-        "--no-gateway",
-        action="store_true",
-        default=False,
-        help="ignore gateway config; use provider default APIs",
+        help="gateway TOML file; when omitted, provider default APIs and env-var keys are used",
     )
 
     parser.add_argument(
@@ -73,14 +66,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         metavar="N",
         type=int,
         default=1,
-        help="concurrent tasks within one experiment (default 1)",
-    )
-    parser.add_argument(
-        "--parallel-experiments",
-        metavar="N",
-        type=int,
-        default=1,
-        help="concurrent experiments (default 1 = sequential)",
+        help="total number of cells run concurrently across the whole matrix (default 1 = sequential)",
     )
 
     parser.add_argument(
@@ -102,7 +88,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="LLMObs submission mode (default: agentless)",
     )
     parser.add_argument(
-        "--raise-errors",
+        "--fail-fast",
         action="store_true",
         default=False,
         help="stop on the first task/evaluator error",
@@ -128,9 +114,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    # Resolve gateway config.
+    # Resolve gateway config (only when a gateway file is supplied).
     gateway = None
-    if not args.no_gateway and args.gateway_config is not None:
+    if args.gateway_config is not None:
         try:
             gateway = load_gateway(args.gateway_config)
         except ConfigError as exc:
@@ -148,10 +134,9 @@ def main(argv: list[str] | None = None) -> int:
                 runs=args.runs,
                 judge_model=args.judge_model,
                 jobs=args.jobs,
-                parallel_experiments=args.parallel_experiments,
                 dry_run=args.dry_run,
                 show_progress=not args.no_progress,
-                raise_errors=args.raise_errors,
+                fail_fast=args.fail_fast,
                 agentless=args.agentless,
             )
         )

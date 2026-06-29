@@ -3,9 +3,11 @@
 Each cell becomes one :class:`LLMObs.async_experiment` over a single-record
 dataset view: a provider-native :class:`AgentRunner` answers the prompt, the
 :class:`RubricEvaluator` scores it, and the experiment span is annotated with the
-run's token usage. Cells run sequentially by default or concurrently under a
-semaphore when ``parallel_experiments > 1``; per-cell results are collected into
-:class:`ExperimentRunSummary` objects and rendered by :mod:`summary`.
+run's token usage. A single global semaphore caps how many cells run
+concurrently (``jobs``); each cell runs its ``runs`` repetitions sequentially, so
+``jobs`` is the total number of in-flight agent runs at any time. Per-cell
+results are collected into :class:`ExperimentRunSummary` objects and rendered by
+:mod:`summary`.
 """
 
 from __future__ import annotations
@@ -53,10 +55,9 @@ async def run_experiments(
     runs: int | None = None,
     judge_model: str | None = None,
     jobs: int = 1,
-    parallel_experiments: int = 1,
     dry_run: bool = False,
     show_progress: bool = True,
-    raise_errors: bool = False,
+    fail_fast: bool = False,
     agentless: bool = True,
 ) -> list[ExperimentRunSummary]:
     """Run the filtered evaluation matrix and return per-cell summaries."""
@@ -94,39 +95,24 @@ async def run_experiments(
 
     try:
         async with managed_servers(managed_specs):
-            if parallel_experiments > 1:
-                semaphore = asyncio.Semaphore(parallel_experiments)
+            # A single semaphore bounds concurrent cells across the whole matrix.
+            # ``jobs == 1`` therefore runs everything sequentially.
+            semaphore = asyncio.Semaphore(max(1, jobs))
 
-                async def _bounded(cell: tuple[ModelSpec, ScenarioConfig, TaskConfig]) -> ExperimentRunSummary:
-                    async with semaphore:
-                        return await _run_cell(
-                            cell,
-                            config=config,
-                            gateway=gateway,
-                            dataset=dataset,
-                            judge_model=effective_judge_model,
-                            runs=effective_runs,
-                            jobs=jobs,
-                            raise_errors=raise_errors,
-                            progress=progress,
-                        )
-
-                summaries = list(await asyncio.gather(*(_bounded(cell) for cell in matrix)))
-            else:
-                for cell in matrix:
-                    summaries.append(
-                        await _run_cell(
-                            cell,
-                            config=config,
-                            gateway=gateway,
-                            dataset=dataset,
-                            judge_model=effective_judge_model,
-                            runs=effective_runs,
-                            jobs=jobs,
-                            raise_errors=raise_errors,
-                            progress=progress,
-                        )
+            async def _bounded(cell: tuple[ModelSpec, ScenarioConfig, TaskConfig]) -> ExperimentRunSummary:
+                async with semaphore:
+                    return await _run_cell(
+                        cell,
+                        config=config,
+                        gateway=gateway,
+                        dataset=dataset,
+                        judge_model=effective_judge_model,
+                        runs=effective_runs,
+                        fail_fast=fail_fast,
+                        progress=progress,
                     )
+
+            summaries = list(await asyncio.gather(*(_bounded(cell) for cell in matrix)))
     finally:
         progress.stop()
 
@@ -142,11 +128,16 @@ async def _run_cell(
     dataset: Any,
     judge_model: str,
     runs: int,
-    jobs: int,
-    raise_errors: bool,
+    fail_fast: bool,
     progress: ProgressReporter,
 ) -> ExperimentRunSummary:
-    """Run one matrix cell as a single LLMObs experiment."""
+    """Run one matrix cell as a single LLMObs experiment.
+
+    The cell's ``runs`` repetitions execute sequentially (``jobs=1`` on the
+    LLMObs experiment); cross-cell concurrency is governed by the caller's global
+    semaphore so that the total number of in-flight agent runs stays within the
+    configured ``jobs``.
+    """
     model, scenario, task = cell
     experiment_name = _experiment_name(scenario, model, task)
 
@@ -198,7 +189,7 @@ async def _run_cell(
             runs=runs,
         )
         await progress.message(f"starting {experiment_name}")
-        result = await experiment.run(jobs=jobs, raise_errors=raise_errors)
+        result = await experiment.run(jobs=1, raise_errors=fail_fast)
         LLMObs.flush()
         progress.advance(f"finished {model.label} / {scenario.name} / {task.id}")
 
