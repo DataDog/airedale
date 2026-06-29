@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from dd_ai_devx_evals.config.experiment import McpServerConfig
@@ -11,6 +13,7 @@ from dd_ai_devx_evals.mcp import (
     _toml_key_path,
     _toml_string,
     _toml_value,
+    discover_claude_project_mcp_servers,
     provider_mcp_tool_name,
 )
 
@@ -191,6 +194,44 @@ class TestToSafeDict:
         assert safe["name"] == "apm"
         assert safe["url"] == "http://localhost/mcp"
         assert safe["type"] == "http"
+
+
+# ---------------------------------------------------------------------------
+# discover_claude_project_mcp_servers
+# ---------------------------------------------------------------------------
+
+
+class TestDiscoverClaudeProjectMcpServers:
+    def test_missing_file_returns_empty(self, tmp_path):
+        assert discover_claude_project_mcp_servers(tmp_path) == []
+
+    def test_empty_file_returns_empty(self, tmp_path):
+        (tmp_path / ".mcp.json").write_text("")
+        assert discover_claude_project_mcp_servers(tmp_path) == []
+
+    def test_malformed_json_returns_empty(self, tmp_path):
+        (tmp_path / ".mcp.json").write_text("{not json")
+        assert discover_claude_project_mcp_servers(tmp_path) == []
+
+    def test_parses_http_and_stdio(self, tmp_path):
+        (tmp_path / ".mcp.json").write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "repo-http": {"url": "http://localhost:9000/mcp", "headers": {"x-repo": "1"}},
+                        "repo-stdio": {"command": "python", "args": ["-m", "srv"], "env": {"A": "b"}},
+                    }
+                }
+            )
+        )
+        specs = {s.name: s for s in discover_claude_project_mcp_servers(tmp_path)}
+        assert specs["repo-http"].type == "http"
+        assert specs["repo-http"].url == "http://localhost:9000/mcp"
+        assert dict(specs["repo-http"].headers) == {"x-repo": "1"}
+        assert specs["repo-stdio"].type == "stdio"
+        assert specs["repo-stdio"].command == "python"
+        assert specs["repo-stdio"].args == ("-m", "srv")
+        assert dict(specs["repo-stdio"].env) == {"A": "b"}
 
 
 # ---------------------------------------------------------------------------

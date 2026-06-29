@@ -63,6 +63,17 @@ class TestStageSkillsForClaude:
         with pytest.raises(ValueError, match="does not exist"):
             stage_skills_for_claude([str(tmp_path / "nonexistent")], str(cwd))
 
+    def test_collision_with_repo_skill_raises(self, tmp_path):
+        # A repo ships .claude/skills/my-skill (no staged marker); a scenario
+        # skill of the same name must not silently clobber it.
+        skill = _make_skill_dir(tmp_path / "sources", "my-skill")
+        cwd = tmp_path / "cwd"
+        repo_skill = cwd / ".claude" / "skills" / "my-skill"
+        repo_skill.mkdir(parents=True)
+        (repo_skill / "SKILL.md").write_text("# repo skill\n")
+        with pytest.raises(ValueError, match="collides with an existing project skill"):
+            stage_skills_for_claude([str(skill)], str(cwd))
+
     def test_skill_name_slugified(self, tmp_path):
         skill = _make_skill_dir(tmp_path / "sources", "My Skill With Spaces")
         cwd = tmp_path / "cwd"

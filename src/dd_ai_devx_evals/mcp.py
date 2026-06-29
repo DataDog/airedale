@@ -20,6 +20,8 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamablehttp_client
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from claude_agent_sdk.types import McpServerConfig
 
     from dd_ai_devx_evals.config.experiment import McpServerConfig as McpServerConfigExperiment
@@ -127,6 +129,48 @@ class McpServerSpec:
         data = self.to_dict()
         data["headers"] = dict.fromkeys(self.headers, "<redacted>")
         return data
+
+
+def discover_claude_project_mcp_servers(cwd: str | Path) -> list[McpServerSpec]:
+    """Parse ``<cwd>/.mcp.json`` into MCP server specs (Claude project scope).
+
+    Claude's project-level MCP convention is a ``.mcp.json`` file shaped like
+    ``{"mcpServers": {<name>: {type/command/args/env/url/headers}}}``. Because we
+    keep ``strict_mcp_config=True`` (hermetic), Claude won't read it itself, so we
+    parse it and inject the servers as ordinary specs. A missing, empty, or
+    malformed file yields an empty list.
+    """
+    from pathlib import Path
+
+    path = Path(cwd) / ".mcp.json"
+    if not path.is_file():
+        return []
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        logger.warning("Ignoring unreadable project MCP config at %s", path, exc_info=True)
+        return []
+
+    servers_raw = data.get("mcpServers") if isinstance(data, Mapping) else None
+    if not isinstance(servers_raw, Mapping):
+        return []
+
+    specs: list[McpServerSpec] = []
+    for name, cfg in servers_raw.items():
+        if not isinstance(cfg, Mapping):
+            continue
+        specs.append(
+            McpServerSpec(
+                name=str(name),
+                type=cfg.get("type"),
+                url=cfg.get("url"),
+                command=cfg.get("command"),
+                args=tuple(cfg.get("args", []) or []),
+                env=dict(cfg.get("env", {}) or {}),
+                headers=dict(cfg.get("headers", {}) or {}),
+            )
+        )
+    return specs
 
 
 def configured_tool_names(spec: McpServerSpec) -> list[str]:

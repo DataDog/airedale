@@ -45,7 +45,7 @@ from dd_ai_devx_evals.harness.base import (
     json_safe,
 )
 from dd_ai_devx_evals.mcp import McpServerSpec, configured_tool_names
-from dd_ai_devx_evals.skills import stage_skills_for_claude
+from dd_ai_devx_evals.skills import discover_claude_skill_names, stage_skills_for_claude
 from dd_ai_devx_evals.tracing import current_trace_headers
 from dd_ai_devx_evals.types import HarnessResult, ModelSpec, UsageMetrics, coerce_int
 
@@ -183,32 +183,9 @@ class ClaudeRunner(AgentRunner):
         trace_headers: Mapping[str, str],
         progress: ProgressCallback | None,
     ) -> AgentRunResult:
-        skill_names = stage_skills_for_claude(self.skills, self.cwd)
         diagnostics = _ClaudeEvalDiagnostics()
-        options = ClaudeAgentOptions(
-            # Do not set ``tools`` here: Claude's CLI documents it as a filter for
-            # built-in tools, which can hide MCP tools from the active surface.
-            # MCP tools are exposed through ``mcp_servers`` and auto-approved via
-            # ``allowed_tools``.
-            system_prompt={"type": "preset", "preset": "claude_code", "append": system_prompt},
-            mcp_servers={server.name: server.to_claude_config(trace_headers) for server in self.mcp_servers},
-            strict_mcp_config=True,
-            allowed_tools=self._claude_available_tools(),
-            permission_mode="dontAsk",
-            # Skills staged under ``<cwd>/.claude/skills`` are project-scoped, so
-            # the project setting source must be enabled for discovery. With no
-            # skills the harness keeps the surface minimal (no setting sources).
-            setting_sources=["project"] if skill_names else [],
-            skills=skill_names or None,
-            settings=self._gateway_settings(),
-            env=self._gateway_env(),
-            max_turns=self.max_turns,
-            model=model.name,
-            effort=self.effort,
-            cwd=self.cwd,
-            include_partial_messages=True,
-            stderr=diagnostics.record_stderr,
-        )
+        options = self._build_options(model=model, system_prompt=system_prompt, trace_headers=trace_headers)
+        options.stderr = diagnostics.record_stderr
         try:
             if self._uses_custom_claude_query:
                 agent_stream = self._claude_query(prompt=user_prompt, options=options)
@@ -247,6 +224,49 @@ class ClaudeRunner(AgentRunner):
             else:
                 logger.exception("Claude Agent SDK eval run failed")
             raise
+
+    def _build_options(
+        self,
+        *,
+        model: ModelSpec,
+        system_prompt: str,
+        trace_headers: Mapping[str, str],
+    ) -> ClaudeAgentOptions:
+        """Build the Claude run options (project-scoped discovery always on).
+
+        Scenario skills are staged into ``<cwd>/.claude/skills`` (raising on a
+        name collision with a repo skill); the allow-list is then derived from
+        every skill present there (scenario ∪ repo). ``setting_sources`` is always
+        ``["project"]`` and ``strict_mcp_config`` stays ``True`` — repo
+        ``.mcp.json`` servers are honored by merging them into ``self.mcp_servers``
+        (see ``create_runner``), not by relaxing strict mode. In a bare temp dir
+        there are no project files, so this is a no-op.
+        """
+        stage_skills_for_claude(self.skills, self.cwd)
+        skill_names = discover_claude_skill_names(self.cwd)
+        return ClaudeAgentOptions(
+            # Do not set ``tools`` here: Claude's CLI documents it as a filter for
+            # built-in tools, which can hide MCP tools from the active surface.
+            # MCP tools are exposed through ``mcp_servers`` and auto-approved via
+            # ``allowed_tools``.
+            system_prompt={"type": "preset", "preset": "claude_code", "append": system_prompt},
+            mcp_servers={server.name: server.to_claude_config(trace_headers) for server in self.mcp_servers},
+            strict_mcp_config=True,
+            allowed_tools=self._claude_available_tools(),
+            permission_mode="dontAsk",
+            # Project-scoped only (never "user"): repo `.claude/settings.json`,
+            # project subagents, and CLAUDE.md load when present; user-global
+            # settings never leak.
+            setting_sources=["project"],
+            skills=skill_names or None,
+            settings=self._gateway_settings(),
+            env=self._gateway_env(),
+            max_turns=self.max_turns,
+            model=model.name,
+            effort=self.effort,
+            cwd=self.cwd,
+            include_partial_messages=True,
+        )
 
     def _claude_available_tools(self) -> list[str]:
         # ``None`` means "all built-in tools allowed": pre-approve the full

@@ -9,6 +9,7 @@ model to prefer the available MCP tools/skills over answering from memory.
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from dd_ai_devx_evals.gateway import resolve_provider_config
@@ -20,7 +21,9 @@ from dd_ai_devx_evals.harness.base import (
 )
 from dd_ai_devx_evals.harness.claude import ClaudeRunner
 from dd_ai_devx_evals.harness.codex import CodexRunner
-from dd_ai_devx_evals.mcp import McpServerSpec
+from dd_ai_devx_evals.mcp import McpServerSpec, discover_claude_project_mcp_servers
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from dd_ai_devx_evals.config.experiment import ScenarioConfig
@@ -48,11 +51,14 @@ def create_runner(
 ) -> AgentRunner:
     """Build the provider-appropriate :class:`AgentRunner` for one cell.
 
-    MCP server specs are derived from ``scenario.mcp_servers``; gateway config is
+    MCP server specs are derived from ``scenario.mcp_servers`` merged with any
+    project-level servers discovered in ``cwd`` (always-on, harness-specific;
+    scenario-configured servers win on name collision). Gateway config is
     resolved per provider. ``cwd`` is the per-run working directory, owned by the
     caller (the ``WorkspaceManager``).
     """
-    mcp_servers = [McpServerSpec.from_config(server) for server in scenario.mcp_servers]
+    scenario_specs = [McpServerSpec.from_config(server) for server in scenario.mcp_servers]
+    mcp_servers = _merge_project_mcp_servers(model, scenario_specs, cwd=cwd)
     skills = list(scenario.skills)
     allowed_builtin_tools = scenario.allowed_builtin_tools
 
@@ -85,6 +91,27 @@ def create_runner(
         gateway_token=resolved.bearer_token or resolved.api_key,
         gateway_headers=resolved.headers,
     )
+
+
+def _merge_project_mcp_servers(
+    model: ModelSpec, scenario_specs: list[McpServerSpec], *, cwd: str
+) -> list[McpServerSpec]:
+    """Merge scenario MCP servers with project-discovered ones (scenario wins).
+
+    Discovery is harness-specific: Claude reads ``<cwd>/.mcp.json``; Codex does
+    not use ``.mcp.json`` (its servers come from ``$CODEX_HOME/config.toml``), so
+    its discovery is empty pending verification of any repo-committed file.
+    """
+    discovered = discover_claude_project_mcp_servers(cwd) if model.provider == "anthropic" else []
+
+    scenario_names = {spec.name for spec in scenario_specs}
+    merged = list(scenario_specs)
+    for spec in discovered:
+        if spec.name in scenario_names:
+            logger.warning("Project MCP server '%s' shadowed by scenario-configured server of the same name", spec.name)
+            continue
+        merged.append(spec)
+    return merged
 
 
 def mcp_system_prompt() -> str:
