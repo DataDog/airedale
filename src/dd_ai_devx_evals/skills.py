@@ -62,6 +62,65 @@ def stage_skills_for_codex(skill_dirs: list[str], cwd: str) -> list[str]:
     return names
 
 
+def exclude_staged_skills_from_git(cwd: str, skill_names: list[str], *, subdir: str) -> None:
+    """Append staged skill paths to the worktree's git exclude file.
+
+    When the run ``cwd`` is a git worktree (e.g. a cloned repo workspace), the
+    scenario skills we stage under ``<cwd>/<subdir>/<name>`` would otherwise show
+    up as untracked changes to the agent (``git status``). See
+    :func:`exclude_paths_from_git`.
+    """
+    exclude_paths_from_git(cwd, [f"{subdir}/{name}" for name in skill_names])
+
+
+def exclude_paths_from_git(cwd: str, relative_paths: list[str]) -> None:
+    """Add ``relative_paths`` (workspace-relative dirs) to the local git excludes.
+
+    Adds anchored patterns to the repo's local exclude file
+    (``$GIT_DIR/info/exclude``, resolved via ``git rev-parse --git-path`` so it
+    works for both plain repos and worktrees), hiding harness-created artifacts
+    from the agent's untracked-changes view without touching the tracked
+    ``.gitignore``. No-op when ``cwd`` is not a git repository, git is
+    unavailable, or ``relative_paths`` is empty.
+    """
+    if not relative_paths:
+        return
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(cwd), "rev-parse", "--git-path", "info/exclude"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return
+    if result.returncode != 0:
+        return
+    raw = result.stdout.strip()
+    if not raw:
+        return
+
+    exclude_path = Path(raw)
+    if not exclude_path.is_absolute():
+        exclude_path = Path(cwd) / exclude_path
+
+    # Anchored directory patterns relative to the worktree root.
+    patterns = [f"/{path.strip('/')}/" for path in relative_paths]
+    try:
+        existing = exclude_path.read_text().splitlines() if exclude_path.exists() else []
+        new = [pattern for pattern in patterns if pattern not in existing]
+        if not new:
+            return
+        exclude_path.parent.mkdir(parents=True, exist_ok=True)
+        prefix = "" if not existing or existing[-1] == "" else "\n"
+        with exclude_path.open("a", encoding="utf-8") as handle:
+            handle.write(prefix + "\n".join(new) + "\n")
+    except OSError:
+        logger.debug("Unable to update git exclude file at %s", exclude_path, exc_info=True)
+
+
 def discover_claude_skill_names(cwd: str) -> list[str]:
     """Return all skill names discoverable under ``<cwd>/.claude/skills``.
 

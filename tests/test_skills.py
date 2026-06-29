@@ -9,7 +9,11 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
-from dd_ai_devx_evals.skills import stage_skills_for_claude, stage_skills_for_codex
+from dd_ai_devx_evals.skills import (
+    exclude_staged_skills_from_git,
+    stage_skills_for_claude,
+    stage_skills_for_codex,
+)
 
 
 def _make_skill_dir(tmp_path: Path, name: str) -> Path:
@@ -113,3 +117,39 @@ class TestStageSkillsForCodex:
         cwd.mkdir()
         with pytest.raises(ValueError, match="does not exist"):
             stage_skills_for_codex([str(tmp_path / "no-such-dir")], str(cwd))
+
+
+class TestExcludeStagedSkillsFromGit:
+    def _init_repo(self, path):
+        import os
+        import subprocess
+
+        env = {**os.environ, "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null"}
+        subprocess.run(["git", "init", "-q"], cwd=path, check=True, env=env)
+
+    def test_appends_anchored_patterns_in_git_repo(self, tmp_path):
+        self._init_repo(tmp_path)
+        exclude_staged_skills_from_git(str(tmp_path), ["apm", "k8s"], subdir=".claude/skills")
+        content = (tmp_path / ".git" / "info" / "exclude").read_text()
+        assert "/.claude/skills/apm/" in content.splitlines()
+        assert "/.claude/skills/k8s/" in content.splitlines()
+
+    def test_idempotent(self, tmp_path):
+        self._init_repo(tmp_path)
+        exclude_staged_skills_from_git(str(tmp_path), ["apm"], subdir=".claude/skills")
+        exclude_staged_skills_from_git(str(tmp_path), ["apm"], subdir=".claude/skills")
+        content = (tmp_path / ".git" / "info" / "exclude").read_text()
+        assert content.count("/.claude/skills/apm/") == 1
+
+    def test_noop_outside_git_repo(self, tmp_path):
+        # Must not raise and must not create a .git directory.
+        exclude_staged_skills_from_git(str(tmp_path), ["apm"], subdir=".claude/skills")
+        assert not (tmp_path / ".git").exists()
+
+    def test_empty_names_noop(self, tmp_path):
+        self._init_repo(tmp_path)
+        exclude_staged_skills_from_git(str(tmp_path), [], subdir=".claude/skills")
+        # No exclude content written for an empty name list.
+        exclude_file = tmp_path / ".git" / "info" / "exclude"
+        if exclude_file.exists():
+            assert "/.claude/skills/" not in exclude_file.read_text()

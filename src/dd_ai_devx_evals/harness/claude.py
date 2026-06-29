@@ -45,7 +45,11 @@ from dd_ai_devx_evals.harness.base import (
     json_safe,
 )
 from dd_ai_devx_evals.mcp import McpServerSpec, configured_tool_names
-from dd_ai_devx_evals.skills import discover_claude_skill_names, stage_skills_for_claude
+from dd_ai_devx_evals.skills import (
+    discover_claude_skill_names,
+    exclude_staged_skills_from_git,
+    stage_skills_for_claude,
+)
 from dd_ai_devx_evals.tracing import current_trace_headers
 from dd_ai_devx_evals.types import HarnessResult, ModelSpec, UsageMetrics, coerce_int
 
@@ -242,7 +246,11 @@ class ClaudeRunner(AgentRunner):
         (see ``create_runner``), not by relaxing strict mode. In a bare temp dir
         there are no project files, so this is a no-op.
         """
-        stage_skills_for_claude(self.skills, self.cwd)
+        staged_names = stage_skills_for_claude(self.skills, self.cwd)
+        # Keep our staged scenario skills out of the worktree's untracked view so
+        # the agent doesn't perceive them as repo changes (no-op in a bare temp
+        # dir, which is not a git repo).
+        exclude_staged_skills_from_git(self.cwd, staged_names, subdir=".claude/skills")
         skill_names = discover_claude_skill_names(self.cwd)
         return ClaudeAgentOptions(
             # Do not set ``tools`` here: Claude's CLI documents it as a filter for
