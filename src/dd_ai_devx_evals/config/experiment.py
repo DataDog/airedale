@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from pathlib import Path
+from typing import Any
 
 from dd_ai_devx_evals.config import ConfigError, read_toml_file
 from dd_ai_devx_evals.types import ModelSpec
@@ -148,6 +146,16 @@ class ExperimentConfig:
     runs: int = 1
     dataset_name: str | None = None
     defaults: dict[str, Any] | None = None
+    config_path: Path | None = None
+
+    @property
+    def config_dir(self) -> Path:
+        """Directory containing ``experiment.toml``; filesystem paths resolve here.
+
+        Falls back to the current working directory when the config was not
+        loaded from a file (e.g. synthesized in tests).
+        """
+        return self.config_path.parent if self.config_path is not None else Path.cwd()
 
     def __post_init__(self) -> None:
         """Validate configuration integrity."""
@@ -327,6 +335,8 @@ def _parse_task(task_id: str, config: dict[str, Any]) -> TaskConfig:
 
 def load_experiment(path: str | Path) -> ExperimentConfig:
     """Load and validate an experiment configuration from a TOML file."""
+    config_path = Path(path).resolve()
+    config_dir = config_path.parent
     data = read_toml_file(path)
 
     # Check for unknown top-level keys
@@ -365,11 +375,14 @@ def load_experiment(path: str | Path) -> ExperimentConfig:
     defaults.setdefault("effort", "medium")
 
     # Parse the top-level shared registries referenced by name from scenarios.
+    # Filesystem paths in the config (skill dirs) resolve relative to the config
+    # file's directory, never the process CWD, so a relative path like
+    # "./skills/apm" works regardless of where the tool is invoked from.
     skill_registry: dict[str, str] = {}
     for skill_name, skill_path in data.get("skills", {}).items():
         if not isinstance(skill_path, str):
             raise ConfigError(f"Skill '{skill_name}' must map to a directory path (string)")
-        skill_registry[skill_name] = skill_path
+        skill_registry[skill_name] = str((config_dir / skill_path).resolve())
 
     mcp_registry: dict[str, McpServerConfig] = {}
     for server_name, server_config in data.get("mcp_servers", {}).items():
@@ -402,4 +415,5 @@ def load_experiment(path: str | Path) -> ExperimentConfig:
         defaults=defaults,
         scenarios=tuple(scenarios),
         tasks=tuple(tasks),
+        config_path=config_path,
     )

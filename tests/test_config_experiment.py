@@ -219,7 +219,7 @@ class TestLoadExperimentValid:
         """
         config = load_experiment(write_toml(tmp_path, toml))
         scenario = config.scenarios[0]
-        assert scenario.skills == ("./skills/apm",)
+        assert scenario.skills == (str((tmp_path / "skills" / "apm").resolve()),)
         assert scenario.allowed_builtin_tools == ("Read", "Grep")
 
     def test_shared_registry_referenced_by_multiple_scenarios(self, tmp_path):
@@ -250,7 +250,8 @@ class TestLoadExperimentValid:
         a, b = config.scenarios
         assert a.mcp_servers[0].name == "apm"
         assert b.mcp_servers[0].name == "apm"
-        assert a.skills == ("./skills/apm",) == b.skills
+        apm_dir = str((tmp_path / "skills" / "apm").resolve())
+        assert a.skills == (apm_dir,) == b.skills
 
     def test_allowed_builtin_tools_unset_is_none(self, tmp_path):
         config = load_experiment(write_toml(tmp_path, MINIMAL))
@@ -299,7 +300,7 @@ class TestLoadExperimentValid:
         config = load_experiment(write_toml(tmp_path, toml))
         s = config.scenarios[0]
         assert s.system_prompt == "base prompt"
-        assert s.skills == ("./skills/apm",)
+        assert s.skills == (str((tmp_path / "skills" / "apm").resolve()),)
         assert s.allowed_builtin_tools == ("Read",)
         assert s.mcp_servers[0].name == "apm"
 
@@ -324,7 +325,32 @@ class TestLoadExperimentValid:
         """
         config = load_experiment(write_toml(tmp_path, toml))
         # Scenario value wins entirely; no union with defaults.
-        assert config.scenarios[0].skills == ("./skills/k8s",)
+        assert config.scenarios[0].skills == (str((tmp_path / "skills" / "k8s").resolve()),)
+
+    def test_skill_paths_resolved_relative_to_config_dir(self, tmp_path, monkeypatch):
+        """A relative [skills] path resolves against the config dir, not the CWD."""
+        toml = """
+        project = "p"
+        models = ["anthropic/claude-3-haiku-20240307"]
+
+        [skills]
+        apm = "./skills/apm"
+
+        [scenarios.s1]
+        skills = ["apm"]
+
+        [tasks.t1]
+        prompt = "p"
+        criteria = ["c"]
+        """
+        config_file = write_toml(tmp_path, toml)
+        # Run the loader from an unrelated CWD to prove resolution is config-relative.
+        other_cwd = tmp_path / "elsewhere"
+        other_cwd.mkdir()
+        monkeypatch.chdir(other_cwd)
+        config = load_experiment(config_file)
+        assert config.scenarios[0].skills == (str((tmp_path / "skills" / "apm").resolve()),)
+        assert config.config_dir == tmp_path.resolve()
 
 
 # ---------------------------------------------------------------------------
