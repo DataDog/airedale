@@ -26,7 +26,6 @@ class McpServerConfig:
     tool_names: tuple[str, ...] = ()
     start_command: str | None = None
     start_env: dict[str, str] | None = None
-    health_url: str | None = None
 
     def __post_init__(self) -> None:
         """Validate that exactly one of url or command is set."""
@@ -117,7 +116,6 @@ def _parse_mcp_server(name: str, config: dict[str, Any]) -> McpServerConfig:
         tool_names=tuple(config.get("tool_names", [])),
         start_command=config.get("start_command"),
         start_env=config.get("start_env") or {},
-        health_url=config.get("health_url"),
     )
 
 

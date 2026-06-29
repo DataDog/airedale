@@ -28,7 +28,6 @@ class TestFromConfig:
             bearer_token_env_var="APM_TOKEN",
             tool_names=("search_apm",),
             start_command="python -m server",
-            health_url="http://localhost:8000/health",
         )
         spec = McpServerSpec.from_config(cfg)
         assert spec.name == "apm"
@@ -38,7 +37,6 @@ class TestFromConfig:
         assert spec.bearer_token_env_var == "APM_TOKEN"
         assert spec.tool_names == ("search_apm",)
         assert spec.start_command == "python -m server"
-        assert spec.health_url == "http://localhost:8000/health"
 
     def test_stdio_server(self):
         cfg = McpServerConfig(
@@ -144,7 +142,6 @@ class TestToClaudeConfig:
         object.__setattr__(spec, "bearer_token_env_var", None)
         object.__setattr__(spec, "start_command", None)
         object.__setattr__(spec, "start_env", {})
-        object.__setattr__(spec, "health_url", None)
         with pytest.raises(ValueError, match="url or command"):
             spec.to_claude_config({})
 

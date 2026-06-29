@@ -126,7 +126,6 @@ class TestLoadExperimentValid:
         bearer_token_env_var = "APM_TOKEN"
         tool_names = ["search_apm"]
         start_command = "python -m server"
-        health_url = "http://localhost:8000/health"
 
         [[tasks]]
         id = "t1"
@@ -141,7 +140,6 @@ class TestLoadExperimentValid:
         assert server.bearer_token_env_var == "APM_TOKEN"
         assert server.tool_names == ("search_apm",)
         assert server.start_command == "python -m server"
-        assert server.health_url == "http://localhost:8000/health"
 
     def test_mcp_stdio_server_parsed(self, tmp_path):
         toml = """

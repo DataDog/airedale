@@ -103,10 +103,10 @@ url = "http://localhost:8000/mcp"
 headers = { source = "evals" }        # optional static headers
 bearer_token_env_var = "APM_TOKEN"    # optional; Authorization: Bearer <env value>
 tool_names = ["search_apm_libraries"] # tools allow-listed for this scenario
-# Optional managed auto-start (started only if health check fails):
+# Optional managed auto-start (started only if the server is unreachable;
+# reachability is probed via the MCP protocol itself, a tools/list call):
 start_command = "python -m my_mcp_server"
 start_env = { MCP_MODE = "both" }
-health_url = "http://localhost:8000/health"  # default: <scheme>://<host>/health
 
 # stdio transport (alternative to url; launched directly by the agent SDK):
 [scenarios.local.mcp_servers.tools]

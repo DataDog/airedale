@@ -40,10 +40,10 @@ url = "http://localhost:8000/mcp"
 headers = { source = "evals" }
 bearer_token_env_var = "APM_MCP_TOKEN"
 tool_names = ["search_apm_libraries", "get_apm_docs"]
-# Optional managed auto-start (started only when the health check fails).
+# Optional managed auto-start (started only when the server is unreachable).
+# Reachability is probed via the MCP protocol itself (a tools/list call).
 start_command = "python -m my_mcp_server"
 start_env = { MCP_MODE = "both" }
-health_url = "http://localhost:8000/health"
 
 # Scenario B: minimal scenario using only built-in tools (no MCP).
 [scenarios.builtin-only]

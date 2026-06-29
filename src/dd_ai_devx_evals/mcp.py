@@ -15,7 +15,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-import httpx
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamablehttp_client
@@ -30,6 +29,7 @@ logger = logging.getLogger(__name__)
 # Constants for managed MCP server start/health
 MANAGED_MCP_HEALTH_TIMEOUT_SECONDS = 30.0
 MANAGED_MCP_HEALTH_POLL_SECONDS = 0.5
+MANAGED_MCP_HEALTH_PROBE_TIMEOUT_SECONDS = 2.0
 MCP_TOOL_METADATA_TIMEOUT_SECONDS = 10.0
 
 
@@ -48,7 +48,6 @@ class McpServerSpec:
     # Managed start fields
     start_command: str | None = None
     start_env: Mapping[str, str] = field(default_factory=dict)
-    health_url: str | None = None
 
     @classmethod
     def from_config(cls, config: McpServerConfigExperiment) -> McpServerSpec:
@@ -64,7 +63,6 @@ class McpServerSpec:
             bearer_token_env_var=config.bearer_token_env_var,
             start_command=config.start_command,
             start_env=config.start_env or {},
-            health_url=config.health_url,
         )
 
     def merged_headers(self, trace_headers: Mapping[str, str], *, include_bearer: bool = True) -> dict[str, str]:
@@ -123,7 +121,6 @@ class McpServerSpec:
             "bearer_token_env_var": self.bearer_token_env_var,
             "start_command": self.start_command,
             "start_env": dict(self.start_env),
-            "health_url": self.health_url,
         }
 
     def to_safe_dict(self) -> dict[str, Any]:
@@ -248,10 +245,10 @@ class ManagedMcpServer:
     """Async context manager that starts/stops an HTTP MCP server if needed.
 
     For HTTP servers with start_command configured:
-    - Checks health_url (defaults to <scheme>://<host>/health)
-    - If unhealthy, starts the subprocess and polls until healthy
+    - Probes health via the MCP protocol itself (a tools/list call)
+    - If unreachable, starts the subprocess and polls until reachable
     - On exit, terminates the subprocess gracefully then forcefully
-    - If already healthy, reuses existing server without owning it
+    - If already reachable, reuses existing server without owning it
     """
 
     def __init__(self, spec: McpServerSpec) -> None:
@@ -264,18 +261,9 @@ class ManagedMcpServer:
             # Not an HTTP server or no auto-start configured
             return self
 
-        # Determine health URL
-        health_url = self.spec.health_url
-        if not health_url:
-            # Default to /health at the server's base URL
-            from urllib.parse import urlparse, urlunparse
-
-            parsed = urlparse(self.spec.url)
-            health_url = urlunparse((parsed.scheme, parsed.netloc, "/health", "", "", ""))
-
-        # Check if already healthy
-        if await self._is_healthy(health_url):
-            logger.debug("MCP server %s already healthy at %s", self.spec.name, health_url)
+        # Check if already reachable via the MCP protocol
+        if await self._is_healthy():
+            logger.debug("MCP server %s already reachable at %s", self.spec.name, self.spec.url)
             return self
 
         # Start the server
@@ -307,15 +295,15 @@ class ManagedMcpServer:
                     f"stdout: {stdout}\nstderr: {stderr}"
                 )
 
-            if await self._is_healthy(health_url):
-                logger.info("MCP server %s started and healthy", self.spec.name)
+            if await self._is_healthy():
+                logger.info("MCP server %s started and reachable", self.spec.name)
                 return self
 
             await asyncio.sleep(MANAGED_MCP_HEALTH_POLL_SECONDS)
 
         # Timed out
         raise RuntimeError(
-            f"MCP server {self.spec.name} failed to become healthy within {MANAGED_MCP_HEALTH_TIMEOUT_SECONDS}s"
+            f"MCP server {self.spec.name} failed to become reachable within {MANAGED_MCP_HEALTH_TIMEOUT_SECONDS}s"
         )
 
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
@@ -335,12 +323,11 @@ class ManagedMcpServer:
                     self.process.kill()
                 self.process.wait()
 
-    async def _is_healthy(self, health_url: str) -> bool:
-        """Check if the server is healthy via HTTP GET."""
+    async def _is_healthy(self) -> bool:
+        """Check if the server is reachable by issuing an MCP tools/list call."""
         try:
-            async with httpx.AsyncClient(timeout=2.0) as client:
-                response = await client.get(health_url)
-                return 200 <= response.status_code < 300
+            await asyncio.wait_for(_list_mcp_tools(self.spec, {}), timeout=MANAGED_MCP_HEALTH_PROBE_TIMEOUT_SECONDS)
+            return True
         except Exception:
             return False
 

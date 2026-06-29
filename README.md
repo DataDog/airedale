@@ -187,9 +187,8 @@ Exactly one of `url` or `command` must be set.
 | `headers` | table | Static HTTP headers (HTTP transport only) |
 | `bearer_token_env_var` | string | Env var holding a bearer token (HTTP only) |
 | `tool_names` | list of strings | Allow-list of MCP tools; empty = all tools |
-| `start_command` | string | Shell command to auto-start the server if unhealthy |
+| `start_command` | string | Shell command to auto-start the server if unreachable (reachability is probed via an MCP `tools/list` call) |
 | `start_env` | table | Extra env vars for `start_command` |
-| `health_url` | string | Health-check URL (default: `<scheme>://<host>/health`) |
 
 #### Task fields (`[[tasks]]`)
 
