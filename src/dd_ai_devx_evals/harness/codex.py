@@ -1,12 +1,22 @@
 """OpenAI Codex runner with decorator-based LLMObs instrumentation.
 
 ``openai`` models run through ``openai-codex``. Codex has **no native ddtrace
-LLMObs integration**, so this runner manufactures the spans manually: the run is
-wrapped in an outer ``@agent`` span (the agentic loop) and an inner ``@llm`` span
-(the model call). Both decorators are applied only when ``LLMObs.enabled`` so we
-never emit empty spans, and both spans are annotated with I/O, usage, and tool
-definitions. This mirrors the Claude path's span shape even though Claude's spans
-come from its native integration.
+LLMObs integration**, so this runner manufactures the spans manually and shapes
+them to match what the native ``claude_agent_sdk`` integration emits:
+
+- an outer ``@agent`` span (the agentic loop) whose input/output are role/content
+  message lists (a serialized transcript pairing ``tool_use`` and ``tool_result``
+  messages) carrying an ``agent_manifest`` under ``metadata._dd.agent_manifest``;
+- an inner ``@llm`` span (the model call) with structured ``input.messages`` /
+  ``output.messages`` (each tool call its own assistant message, then the final
+  answer) plus usage and tool definitions;
+- one ``tool`` span per tool call, emitted as a child of the agent span so the
+  trace topology mirrors the native ``agent -> llm + tool...`` tree.
+
+The decorators are applied only when ``LLMObs.enabled`` so we never emit empty
+spans. We only have aggregate Codex output (final answer + flat tool-call list),
+not per-turn granularity, so the single ``llm`` span and the tool spans are
+reconstructed from that aggregate rather than from per-model-call events.
 
 MCP servers are wired through ``CodexConfig(config_overrides=...)`` rendered by
 ``McpServerSpec.to_codex_config_overrides``; distributed-tracing headers from
@@ -52,6 +62,7 @@ from dd_ai_devx_evals.harness.base import (
     _annotate_agent_loop_span,
     _annotate_llm_span,
     _decorate_when_llmobs_enabled,
+    _emit_tool_spans,
     _notify,
     _raise_if_missing_usage,
 )
@@ -66,6 +77,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 SDK_NAME = "openai-codex"
+# Framework label surfaced in the agent-span manifest (mirrors the Claude path's
+# "Claude Agent SDK").
+CODEX_FRAMEWORK = "OpenAI Codex"
 # Custom model-provider id registered through config overrides for gateway use.
 CODEX_GATEWAY_PROVIDER_ID = "dd_ai_devx_gateway"
 # Per-run isolated CODEX_HOME directory name (staged under the run cwd).
@@ -150,9 +164,14 @@ class CodexRunner(AgentRunner):
             harness=harness,
             progress=progress,
         )
+        # Emit per-tool child spans first so they attach to this active agent
+        # span (siblings of the inner llm span), reproducing the native Claude
+        # `agent -> llm + tool...` topology.
+        _emit_tool_spans(run_result.tool_calls)
         _annotate_agent_loop_span(
             model=model,
             sdk_name=SDK_NAME,
+            framework=CODEX_FRAMEWORK,
             prompt_version=prompt_version,
             harness=harness,
             system_prompt=system_prompt,
@@ -161,6 +180,8 @@ class CodexRunner(AgentRunner):
             usage=run_result.usage,
             mcp_servers=self.mcp_servers,
             tool_calls=run_result.tool_calls,
+            allowed_builtin_tools=self.allowed_builtin_tools,
+            max_turns=self.max_turns,
         )
         if run_result.error is not None:
             raise run_result.error
@@ -350,6 +371,7 @@ def _codex_mcp_tool_call(item: Any) -> AgentToolCall:
         error=str(getattr(error, "message", error)) if error else None,
         metadata={
             "source": SDK_NAME,
+            "tool_id": getattr(item, "id", None),
             "server": server,
             "tool": tool,
             "status": _enum_value(getattr(item, "status", None)),
@@ -366,6 +388,7 @@ def _codex_collab_agent_tool_call(item: Any) -> AgentToolCall:
         error=None,
         metadata={
             "source": SDK_NAME,
+            "tool_id": getattr(item, "id", None),
             "status": _enum_value(getattr(item, "status", None)),
             "model": getattr(item, "model", None),
             "sender_thread_id": getattr(item, "sender_thread_id", None),
@@ -381,6 +404,7 @@ def _codex_dynamic_tool_call(item: Any) -> AgentToolCall:
         error=None if getattr(item, "success", None) is not False else "dynamic_tool_failed",
         metadata={
             "source": SDK_NAME,
+            "tool_id": getattr(item, "id", None),
             "namespace": getattr(item, "namespace", None),
             "status": _enum_value(getattr(item, "status", None)),
             "duration_ms": getattr(item, "duration_ms", None),
