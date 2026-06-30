@@ -9,7 +9,6 @@ import logging
 import os
 import re
 import signal
-import subprocess
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -32,7 +31,15 @@ logger = logging.getLogger(__name__)
 MANAGED_MCP_HEALTH_TIMEOUT_SECONDS = 30.0
 MANAGED_MCP_HEALTH_POLL_SECONDS = 0.5
 MANAGED_MCP_HEALTH_PROBE_TIMEOUT_SECONDS = 2.0
+# Grace period for a managed server to exit after SIGTERM before we SIGKILL it.
+MANAGED_MCP_TERMINATE_TIMEOUT_SECONDS = 3.0
 MCP_TOOL_METADATA_TIMEOUT_SECONDS = 10.0
+# How much of a managed server's stdout/stderr we retain for diagnostics. The
+# pipes are drained continuously (see ``ManagedMcpServer._drain``) so the OS
+# pipe buffer can never fill and wedge the child; we keep only a bounded tail
+# of recent output for error reporting.
+MANAGED_MCP_OUTPUT_TAIL_BYTES = 64 * 1024
+MANAGED_MCP_DRAIN_CHUNK_BYTES = 4096
 
 
 @dataclass(frozen=True)
@@ -284,6 +291,26 @@ def _mcp_tool_field(tool: Any, *field_names: str) -> Any:
     return None
 
 
+class _BoundedByteBuffer:
+    """Accumulate bytes while retaining only the most recent ``limit`` bytes.
+
+    Used to capture a managed server's stdout/stderr tail for diagnostics
+    without growing without bound over a long-lived run.
+    """
+
+    def __init__(self, limit: int) -> None:
+        self._limit = limit
+        self._data = bytearray()
+
+    def append(self, chunk: bytes) -> None:
+        self._data.extend(chunk)
+        if len(self._data) > self._limit:
+            del self._data[: len(self._data) - self._limit]
+
+    def text(self) -> str:
+        return bytes(self._data).decode(errors="replace")
+
+
 class ManagedMcpServer:
     """Async context manager that starts/stops an HTTP MCP server if needed.
 
@@ -292,12 +319,26 @@ class ManagedMcpServer:
     - If unreachable, starts the subprocess and polls until reachable
     - On exit, terminates the subprocess gracefully then forcefully
     - If already reachable, reuses existing server without owning it
+
+    The subprocess is launched and awaited through :mod:`asyncio` (never the
+    blocking :class:`subprocess.Popen` API) so teardown never blocks the event
+    loop; the stop path is additionally shielded so an in-flight cancellation
+    (Ctrl+C) still reaps the child instead of leaking it.
     """
 
     def __init__(self, spec: McpServerSpec) -> None:
         self.spec = spec
-        self.process: subprocess.Popen[str] | None = None
+        self.process: asyncio.subprocess.Process | None = None
         self.owns_process = False
+        # Background tasks that continuously drain stdout/stderr into the
+        # bounded buffers below. Draining is mandatory: an undrained PIPE fills
+        # its ~64 KB OS buffer, blocks the child on its next write, and then
+        # deadlocks ``process.wait()`` (per the asyncio subprocess docs).
+        self._drain_tasks: list[asyncio.Task[None]] = []
+        self._output: dict[str, _BoundedByteBuffer] = {
+            "stdout": _BoundedByteBuffer(MANAGED_MCP_OUTPUT_TAIL_BYTES),
+            "stderr": _BoundedByteBuffer(MANAGED_MCP_OUTPUT_TAIL_BYTES),
+        }
 
     async def __aenter__(self) -> ManagedMcpServer:
         if not self.spec.is_managed:
@@ -316,26 +357,30 @@ class ManagedMcpServer:
         if self.spec.env:
             env.update({str(k): str(v) for k, v in self.spec.env.items()})
 
-        self.process = subprocess.Popen(
-            argv,
+        self.process = await asyncio.create_subprocess_exec(
+            *argv,
             env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            # Start in new process group for clean termination
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            # Start in a new process group so we can signal the whole tree.
             preexec_fn=os.setsid if hasattr(os, "setsid") else None,
         )
         self.owns_process = True
+        # Drain the pipes for the whole lifetime of the server so its buffers
+        # never fill (which would block the child and deadlock teardown).
+        self._start_draining()
 
         # Wait for health check
         deadline = time.monotonic() + MANAGED_MCP_HEALTH_TIMEOUT_SECONDS
         while time.monotonic() < deadline:
-            if self.process.poll() is not None:
-                # Process died
-                stdout, stderr = self.process.communicate()
+            if self.process.returncode is not None:
+                # Process died during startup; the drain tasks have captured
+                # whatever it wrote before exiting.
+                await self.process.wait()
+                await self._stop_draining()
                 raise RuntimeError(
                     f"MCP server {self.spec.name} process died (exit code {self.process.returncode})\n"
-                    f"stdout: {stdout}\nstderr: {stderr}"
+                    f"stdout: {self._output['stdout'].text()}\nstderr: {self._output['stderr'].text()}"
                 )
 
             if await self._is_healthy():
@@ -350,21 +395,72 @@ class ManagedMcpServer:
         )
 
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        if self.process and self.owns_process:
-            logger.info("Stopping MCP server %s", self.spec.name)
-            # Try graceful termination first
-            self.process.terminate()
+        if not (self.process and self.owns_process):
+            return
+        logger.info("Stopping MCP server %s", self.spec.name)
+        # Shield the stop sequence so that, even when teardown runs while the
+        # surrounding task is being cancelled, the child is still reaped.
+        await asyncio.shield(self._terminate())
+
+    def _start_draining(self) -> None:
+        """Spawn background readers that empty stdout/stderr into bounded buffers."""
+        process = self.process
+        if process is None:
+            return
+        for key, stream in (("stdout", process.stdout), ("stderr", process.stderr)):
+            if stream is not None:
+                self._drain_tasks.append(asyncio.create_task(self._drain(stream, key)))
+
+    async def _drain(self, stream: asyncio.StreamReader, key: str) -> None:
+        """Continuously read ``stream`` into a bounded buffer until EOF/cancel."""
+        buffer = self._output[key]
+        with contextlib.suppress(Exception):
+            while True:
+                chunk = await stream.read(MANAGED_MCP_DRAIN_CHUNK_BYTES)
+                if not chunk:
+                    return
+                buffer.append(chunk)
+
+    async def _stop_draining(self) -> None:
+        """Cancel and reap the drain tasks (they may be blocked on a read)."""
+        tasks, self._drain_tasks = self._drain_tasks, []
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _terminate(self) -> None:
+        """Stop the owned subprocess gracefully (SIGTERM) then forcefully (SIGKILL)."""
+        process = self.process
+        if process is None:
+            return
+        try:
+            self._signal_group(signal.SIGTERM, fallback=process.terminate)
             try:
-                self.process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                # Force kill if needed
+                await asyncio.wait_for(process.wait(), timeout=MANAGED_MCP_TERMINATE_TIMEOUT_SECONDS)
+                return
+            except TimeoutError:
                 logger.warning("MCP server %s did not terminate gracefully, forcing kill", self.spec.name)
-                if hasattr(os, "killpg"):
-                    with contextlib.suppress(ProcessLookupError):
-                        os.killpg(os.getpgid(self.process.pid), signal.SIGKILL)
-                else:
-                    self.process.kill()
-                self.process.wait()
+            self._signal_group(signal.SIGKILL, fallback=process.kill)
+            with contextlib.suppress(Exception):
+                await process.wait()
+        finally:
+            # Stop reading the pipes regardless: a detached grandchild may still
+            # hold the write end, so a drain task could otherwise block forever
+            # and keep the event loop alive after every eval has finished.
+            await self._stop_draining()
+
+    def _signal_group(self, sig: int, *, fallback: Any) -> None:
+        """Signal the child's process group, falling back to the lone child."""
+        process = self.process
+        if process is None or process.returncode is not None:
+            return
+        if hasattr(os, "killpg"):
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.killpg(os.getpgid(process.pid), sig)
+                return
+        with contextlib.suppress(ProcessLookupError):
+            fallback()
 
     async def _is_healthy(self) -> bool:
         """Check if the server is reachable by issuing an MCP tools/list call."""

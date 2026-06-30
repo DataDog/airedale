@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import os
+import sys
 
 import pytest
 
+from dd_ai_devx_evals import mcp as mcp_module
 from dd_ai_devx_evals.config.experiment import McpServerConfig
 from dd_ai_devx_evals.mcp import (
+    ManagedMcpServer,
     McpServerSpec,
+    _BoundedByteBuffer,
     _toml_key,
     _toml_key_path,
     _toml_string,
@@ -321,3 +327,65 @@ class TestTomlString:
 
     def test_escapes_backslash(self):
         assert "\\\\" in _toml_string("back\\slash")
+
+
+class TestBoundedByteBuffer:
+    def test_retains_only_tail_within_limit(self):
+        buf = _BoundedByteBuffer(limit=4)
+        buf.append(b"abcdef")
+        assert buf.text() == "cdef"
+
+    def test_accumulates_under_limit(self):
+        buf = _BoundedByteBuffer(limit=10)
+        buf.append(b"ab")
+        buf.append(b"cd")
+        assert buf.text() == "abcd"
+
+
+class TestManagedMcpServerTermination:
+    """Regression tests for the teardown deadlock.
+
+    A managed server that floods its stdout pipe and ignores SIGTERM used to
+    wedge teardown: the undrained pipe buffer filled, the child blocked on its
+    next write, and ``process.wait()`` then deadlocked. Draining the pipes for
+    the server's whole lifetime is what keeps teardown from hanging.
+    """
+
+    async def test_terminate_does_not_hang_on_flooding_child(self, monkeypatch):
+        # Keep the SIGTERM grace period short so the test is fast.
+        monkeypatch.setattr(mcp_module, "MANAGED_MCP_TERMINATE_TIMEOUT_SECONDS", 0.3)
+
+        # Child: ignore SIGTERM and flood stdout far beyond the OS pipe buffer.
+        program = (
+            "import signal, sys\n"
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            "chunk = b'x' * 4096\n"
+            "while True:\n"
+            "    sys.stdout.buffer.write(chunk)\n"
+            "    sys.stdout.flush()\n"
+        )
+        srv = ManagedMcpServer(McpServerSpec(name="flooder", url="http://localhost:0/mcp"))
+        srv.process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-c",
+            program,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            # Isolate into its own process group, exactly as __aenter__ does, so
+            # _signal_group's killpg targets only this child (never the runner).
+            preexec_fn=os.setsid,
+        )
+        srv.owns_process = True
+        srv._start_draining()
+        # Let the child flood and the drain tasks empty the pipe for a moment.
+        # Without draining the pipe buffer would fill, block the child, and wedge
+        # teardown; here it proves the buffer keeps draining instead.
+        await asyncio.sleep(0.2)
+
+        # Without draining + a working SIGKILL fallback, this would hang forever.
+        await asyncio.wait_for(srv._terminate(), timeout=10.0)
+
+        assert srv.process.returncode is not None  # actually reaped
+        assert srv._drain_tasks == []  # drain tasks cancelled and cleared
+        # The drain captured (a bounded tail of) the flood for diagnostics.
+        assert srv._output["stdout"].text() != ""
