@@ -299,6 +299,14 @@ Notes:
   `.mcp.json`, those are discovered automatically. Claude's `.mcp.json` servers
   are merged in (and get distributed-trace headers); a scenario-configured MCP
   server **wins** on a name collision. Codex does not read `.mcp.json`.
+- **Codex hermeticity.** Codex reads MCP servers (and other global config) from
+  `$CODEX_HOME/config.toml` (global, default `~/.codex`). The harness **always**
+  isolates `CODEX_HOME` to a fresh per-run directory so the operator's global
+  Codex config never leaks into a run. Authentication still works: env auth (a
+  gateway token or `OPENAI_API_KEY`) is used directly, and when relying on
+  `codex login` the harness copies only `auth.json` into the isolated home — so
+  login auth keeps working without pulling in the global `config.toml`. A
+  repo-committed `.codex/config.toml` is not read by Codex for MCP servers.
 
 ---
 

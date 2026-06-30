@@ -225,6 +225,17 @@ Notes:
     thus also get distributed-trace headers); Codex does **not** read `.mcp.json`
     (its servers come from `$CODEX_HOME/config.toml`). Scenario-configured servers
     **win** on a name collision; discovered servers are not auto-started.
+  - **Codex hermeticity.** Codex reads MCP servers (and all other global config)
+    from `$CODEX_HOME/config.toml` (global, default `~/.codex`), so an operator's
+    ambient servers would leak into runs (the Codex analog of Claude's
+    `strict_mcp_config`). `CodexRunner._codex_env()` therefore **always** isolates
+    `CODEX_HOME` to a fresh, empty per-run dir under `cwd`, so no global config
+    ever loads. Auth is preserved on both paths: env auth (gateway token /
+    `OPENAI_API_KEY`) is used directly; otherwise only `auth.json` is **copied**
+    from the operator's real `CODEX_HOME` into the isolated dir, so `codex login`
+    keeps working without inheriting the global `config.toml`. A repo-scoped
+    `<cwd>/.codex/config.toml` is **not** read by Codex for MCP servers
+    (verified), so there is no Codex project MCP discovery.
   - Filesystem paths in the config (`[skills]` entries, workdir local `repo`
     paths, `write.source`) resolve relative to `experiment.toml`'s directory.
     Command-style values (MCP `command`/`args`, gateway `credentials_helper`) are

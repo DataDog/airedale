@@ -36,6 +36,8 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ddtrace.llmobs import LLMObs
@@ -54,19 +56,20 @@ from dd_ai_devx_evals.harness.base import (
     _raise_if_missing_usage,
 )
 from dd_ai_devx_evals.mcp import McpServerSpec, _mcp_tool_metadata_catalog
-from dd_ai_devx_evals.skills import stage_skills_for_codex
+from dd_ai_devx_evals.skills import exclude_paths_from_git, stage_skills_for_codex
 from dd_ai_devx_evals.tracing import current_trace_headers
 from dd_ai_devx_evals.types import HarnessResult, ModelSpec, UsageMetrics
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
-    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 SDK_NAME = "openai-codex"
 # Custom model-provider id registered through config overrides for gateway use.
 CODEX_GATEWAY_PROVIDER_ID = "dd_ai_devx_gateway"
+# Per-run isolated CODEX_HOME directory name (staged under the run cwd).
+ISOLATED_CODEX_HOME_DIRNAME = ".dd-ai-devx-codex-home"
 
 
 class CodexRunner(AgentRunner):
@@ -248,14 +251,52 @@ class CodexRunner(AgentRunner):
         tool_calls = _codex_tool_calls_from_items(getattr(result, "items", []) or [])
         return AgentRunResult(answer=answer, usage=usage, tool_calls=tool_calls)
 
-    def _codex_env(self) -> dict[str, str] | None:
-        if not self.gateway_base_url:
-            return None
+    def _codex_env(self) -> dict[str, str]:
+        """Build the Codex subprocess env (gateway wiring + CODEX_HOME isolation).
+
+        Hermeticity: Codex reads MCP servers (and all other global config) from
+        ``$CODEX_HOME/config.toml`` (default ``~/.codex``), so an operator's
+        ambient servers would leak into runs — the Codex analog of the leak
+        Claude's ``strict_mcp_config`` prevents. We therefore **always** isolate
+        ``CODEX_HOME`` to a fresh, empty per-run dir under ``cwd`` so no global
+        config ever loads.
+
+        Auth is preserved across both paths:
+
+        - **env auth** (a resolved gateway token or an ``OPENAI_API_KEY`` in the
+          environment) is carried through and used directly.
+        - otherwise we seed only ``auth.json`` into the isolated home, copied from
+          the operator's real ``CODEX_HOME``, so ``codex login`` keeps working
+          **without** inheriting the global ``config.toml``. We copy (not symlink)
+          so token-refresh writes stay in the throwaway dir and never mutate the
+          operator's auth state.
+
+        Repo-scoped ``<cwd>/.codex/config.toml`` is **not** read by Codex for MCP
+        servers (verified), so there is nothing to discover there.
+        """
         env = dict(os.environ)
-        env["OPENAI_BASE_URL"] = self.gateway_base_url
-        if self.gateway_token:
-            env["OPENAI_API_KEY"] = self.gateway_token
+        if self.gateway_base_url:
+            env["OPENAI_BASE_URL"] = self.gateway_base_url
+            if self.gateway_token:
+                env["OPENAI_API_KEY"] = self.gateway_token
+
+        has_env_auth = bool(self.gateway_token) or bool(os.environ.get("OPENAI_API_KEY"))
+        codex_home = Path(self.cwd) / ISOLATED_CODEX_HOME_DIRNAME
+        codex_home.mkdir(parents=True, exist_ok=True)
+        if not has_env_auth:
+            operator_auth = self._operator_codex_home() / "auth.json"
+            if operator_auth.is_file():
+                shutil.copyfile(operator_auth, codex_home / "auth.json")
+        env["CODEX_HOME"] = str(codex_home)
+        # Keep the throwaway home out of the agent's untracked-changes view when
+        # the workspace is a git worktree (no-op in a bare temp dir).
+        exclude_paths_from_git(self.cwd, [ISOLATED_CODEX_HOME_DIRNAME])
         return env
+
+    @staticmethod
+    def _operator_codex_home() -> Path:
+        """Resolve the operator's real CODEX_HOME (``$CODEX_HOME`` or ``~/.codex``)."""
+        return Path(os.environ.get("CODEX_HOME") or (Path.home() / ".codex"))
 
     def _gateway_config_overrides(self) -> list[str]:
         if not self.gateway_base_url:
