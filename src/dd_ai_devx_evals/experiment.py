@@ -217,6 +217,7 @@ async def _run_cell(
         description=f"{scenario.name} / {model.label} / {task.id}",
         tags={
             "scenario": scenario.name,
+            "prompt_version": scenario.name,
             "model_name": model.label,
             "task_slug": task.id,
             "judge_model": judge_model,
@@ -224,6 +225,7 @@ async def _run_cell(
         config={
             "model_name": model.label,
             "scenario": scenario.name,
+            "prompt_version": scenario.name,
             "task": task.id,
             "judge_model": judge_model,
             "mcp_servers": [server.to_safe_dict() for server in cell_mcp_servers],
@@ -252,7 +254,12 @@ def _annotate_experiment_usage(result: Any, *, scenario: str, model: str, task: 
         return
     LLMObs.annotate(
         metrics=result.usage.to_llmobs_metrics(),
-        tags={"scenario": scenario, "model_name": model, "task_slug": task},
+        tags={
+            "scenario": scenario,
+            "prompt_version": scenario,
+            "model_name": model,
+            "task_slug": task,
+        },
     )
 
 

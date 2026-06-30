@@ -154,11 +154,14 @@ class TestPerRunWorkspaces:
                     await self._task({"prompt": "hi"})
                 return {"rows": []}
 
+        captured_experiment_kwargs: dict = {}
+
         class FakeLLMObs:
             enabled = False
 
             @staticmethod
             def async_experiment(*, task, runs, **kwargs):
+                captured_experiment_kwargs.update(kwargs)
                 return FakeExperiment(task, runs)
 
             @staticmethod
@@ -225,6 +228,11 @@ class TestPerRunWorkspaces:
                 )
 
         asyncio.run(run())
+
+        # The experiment must carry prompt_version (= scenario name) so LLMObs
+        # Experiments can compare scenarios against each other.
+        assert captured_experiment_kwargs["tags"]["prompt_version"] == "s1"
+        assert captured_experiment_kwargs["config"]["prompt_version"] == "s1"
 
         assert workspace_entries == runs
         assert len(constructed_cwds) == runs
