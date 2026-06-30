@@ -140,6 +140,11 @@ def main(argv: list[str] | None = None) -> int:
                 agentless=args.agentless,
             )
         )
+    except KeyboardInterrupt:
+        # Force-quit (a second Ctrl+C) or an interrupt outside the matrix run.
+        # 130 is the conventional "terminated by SIGINT" exit status.
+        print("interrupted", file=sys.stderr)
+        return 130
     except Exception as exc:  # noqa: BLE001
         print(f"error: {exc}", file=sys.stderr)
         return 1

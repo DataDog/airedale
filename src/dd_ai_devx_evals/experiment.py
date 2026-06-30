@@ -13,6 +13,9 @@ results are collected into :class:`ExperimentRunSummary` objects and rendered by
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import signal
+import sys
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -92,6 +95,29 @@ async def run_experiments(
 
     summaries: list[ExperimentRunSummary] = []
     managed_specs = _managed_server_specs(selected_scenarios)
+    interrupted = False
+
+    loop = asyncio.get_running_loop()
+    matrix_task: asyncio.Future[list[ExperimentRunSummary]] | None = None
+
+    def _request_shutdown() -> None:
+        # First Ctrl+C: cancel the in-flight matrix so teardown can run cleanly.
+        # Restoring the default SIGINT handler makes a *second* Ctrl+C raise
+        # KeyboardInterrupt immediately, i.e. a force-quit escape hatch.
+        with contextlib.suppress(NotImplementedError, RuntimeError, ValueError):
+            loop.remove_signal_handler(signal.SIGINT)
+        print(
+            "\nInterrupt received - cancelling in-flight runs (press Ctrl+C again to force quit)...",
+            file=sys.stderr,
+            flush=True,
+        )
+        if matrix_task is not None and not matrix_task.done():
+            matrix_task.cancel()
+
+    signal_installed = False
+    with contextlib.suppress(NotImplementedError, RuntimeError):
+        loop.add_signal_handler(signal.SIGINT, _request_shutdown)
+        signal_installed = True
 
     try:
         async with WorkspaceManager(config_dir=config.config_dir) as workspace_manager, managed_servers(managed_specs):
@@ -113,9 +139,24 @@ async def run_experiments(
                         workspace_manager=workspace_manager,
                     )
 
-            summaries = list(await asyncio.gather(*(_bounded(cell) for cell in matrix)))
+            # Run the matrix as a child future we can cancel from the SIGINT
+            # handler. Cancelling the child (not this task) lets the surrounding
+            # ``async with`` teardown run uncancelled, so workspaces and managed
+            # MCP servers are still cleaned up.
+            matrix_task = asyncio.ensure_future(asyncio.gather(*(_bounded(cell) for cell in matrix)))
+            try:
+                summaries = list(await matrix_task)
+            except asyncio.CancelledError:
+                interrupted = True
     finally:
+        if signal_installed:
+            with contextlib.suppress(NotImplementedError, RuntimeError, ValueError):
+                loop.remove_signal_handler(signal.SIGINT)
         progress.stop()
+
+    if interrupted:
+        print("Evaluation interrupted; partial results discarded.", file=sys.stderr, flush=True)
+        return summaries
 
     print_summary(_to_experiment_summaries(summaries))
     return summaries
@@ -150,7 +191,7 @@ async def _run_cell(
 
     cell_mcp_servers = [McpServerSpec.from_config(server) for server in scenario.mcp_servers]
 
-    async def experiment_task(input_data: dict[str, Any], cfg: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def experiment_task(input_data: dict[str, Any], config: dict[str, Any] | None = None) -> dict[str, Any]:
         await progress.message(f"running {model.label} / {scenario.name} / {task.id}")
         async with workspace_manager.workspace(scenario.workdir) as cwd:
             runner = create_runner(model, scenario=scenario, gateway=gateway, cwd=str(cwd))
