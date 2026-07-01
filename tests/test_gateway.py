@@ -106,8 +106,45 @@ class TestResolveCredentialsHelper:
     def test_failed_helper_raises_runtime_error(self, mocker, clear_credential_cache):
         import subprocess
 
+        mocker.patch("dd_ai_devx_evals.gateway.time.sleep")
         mock_run = mocker.patch("dd_ai_devx_evals.gateway.subprocess.run")
         mock_run.side_effect = subprocess.CalledProcessError(1, "helper", stderr="auth failed")
         gw = _make_gateway("anthropic", credentials_helper="bad-helper")
         with pytest.raises(RuntimeError, match="failed"):
             resolve_provider_config("anthropic", gw)
+
+    def test_failed_helper_retries_up_to_max_attempts(self, mocker, clear_credential_cache):
+        import subprocess
+
+        from dd_ai_devx_evals.gateway import _CREDENTIALS_HELPER_MAX_ATTEMPTS
+
+        mocker.patch("dd_ai_devx_evals.gateway.time.sleep")
+        mock_run = mocker.patch("dd_ai_devx_evals.gateway.subprocess.run")
+        mock_run.side_effect = subprocess.CalledProcessError(1, "helper", stderr="auth failed")
+        with pytest.raises(RuntimeError, match="after .* attempts"):
+            _run_credentials_helper("bad-helper")
+        assert mock_run.call_count == _CREDENTIALS_HELPER_MAX_ATTEMPTS
+
+    def test_helper_recovers_after_transient_failure(self, mocker, clear_credential_cache):
+        import subprocess
+
+        mocker.patch("dd_ai_devx_evals.gateway.time.sleep")
+        mock_run = mocker.patch("dd_ai_devx_evals.gateway.subprocess.run")
+        mock_run.side_effect = [
+            subprocess.CalledProcessError(1, "helper", stderr="transient"),
+            MagicMock(stdout="good-token\n", returncode=0),
+        ]
+        token = _run_credentials_helper("flaky-helper")
+        assert token == "good-token"
+        assert mock_run.call_count == 2
+
+    def test_timeout_is_not_retried(self, mocker, clear_credential_cache):
+        import subprocess
+
+        mock_sleep = mocker.patch("dd_ai_devx_evals.gateway.time.sleep")
+        mock_run = mocker.patch("dd_ai_devx_evals.gateway.subprocess.run")
+        mock_run.side_effect = subprocess.TimeoutExpired("helper", 30)
+        with pytest.raises(RuntimeError, match="timed out"):
+            _run_credentials_helper("slow-helper")
+        assert mock_run.call_count == 1
+        mock_sleep.assert_not_called()
