@@ -24,6 +24,7 @@ import pytest
 
 import dd_ai_devx_evals.harness.base as base
 from dd_ai_devx_evals.harness.base import (
+    AgentThought,
     AgentToolCall,
     _agent_transcript_messages,
     _annotate_agent_loop_span,
@@ -112,6 +113,65 @@ def test_agent_transcript_pairs_tool_use_and_tool_result():
     ]
 
 
+def test_llm_output_interleaves_reasoning_and_tool_calls_in_order():
+    # Reasoning (and plan) segments surface as bare assistant messages, in item
+    # order relative to tool calls, mirroring Claude's ThinkingBlock handling.
+    segments = [
+        AgentThought(text="thinking about it", kind="reasoning"),
+        _tool_call(),
+        AgentThought(text="1. do the thing", kind="plan"),
+    ]
+    messages = _llm_output_messages("final", segments)
+    assert messages == [
+        {"role": "assistant", "content": "thinking about it"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"name": "mcp.apm.search", "arguments": {"query": "ssi"}, "type": "tool_use"}],
+        },
+        {"role": "assistant", "content": "1. do the thing"},
+        {"role": "assistant", "content": "final"},
+    ]
+
+
+def test_agent_transcript_interleaves_reasoning_with_tool_pairs():
+    segments = [AgentThought(text="reasoning", kind="reasoning"), _tool_call()]
+    messages = _agent_transcript_messages("final", segments)
+    assert messages == [
+        {"role": "assistant", "content": "reasoning"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"name": "mcp.apm.search", "arguments": {"query": "ssi"}, "type": "tool_use"}],
+        },
+        {
+            "role": "user",
+            "content": "",
+            "tool_results": [{"name": "mcp.apm.search", "result": '{"hits":3}', "type": "tool_result"}],
+        },
+        {"role": "assistant", "content": "final"},
+    ]
+
+
+def test_tool_call_count_metadata_ignores_thoughts(llmobs):
+    # Only tool calls count toward tool_call_count; thoughts are not tools.
+    _annotate_agent_loop_span(
+        model=MODEL,
+        sdk_name="openai-codex",
+        framework="OpenAI Codex",
+        prompt_version="s1",
+        harness="s1",
+        system_prompt="SYS",
+        user_prompt="USER",
+        answer="final",
+        usage=UsageMetrics(input_tokens=1, output_tokens=2, total_tokens=3),
+        mcp_servers=[],
+        segments=[AgentThought(text="thinking"), _tool_call(), AgentThought(text="plan", kind="plan")],
+    )
+    (call,) = llmobs.annotations
+    assert call["metadata"]["tool_call_count"] == 1
+
+
 def test_tool_result_text_passes_strings_through():
     call = AgentToolCall(name="t", arguments={}, result="plain text")
     transcript = _agent_transcript_messages("a", [call])
@@ -139,7 +199,7 @@ def test_llm_span_uses_structured_messages(llmobs):
         answer="final",
         usage=UsageMetrics(input_tokens=1, output_tokens=2, total_tokens=3),
         mcp_servers=[],
-        tool_calls=[_tool_call()],
+        segments=[_tool_call()],
     )
     (call,) = llmobs.annotations
     assert call["input_data"] == [{"role": "system", "content": "SYS"}, {"role": "user", "content": "USER"}]
@@ -159,7 +219,7 @@ def test_agent_span_emits_message_lists_and_manifest(llmobs):
         answer="final",
         usage=UsageMetrics(input_tokens=1, output_tokens=2, total_tokens=3),
         mcp_servers=[],
-        tool_calls=[_tool_call()],
+        segments=[_tool_call()],
         allowed_builtin_tools=["Read", "Grep"],
         max_turns=42,
     )
@@ -228,5 +288,5 @@ def test_span_helpers_are_noops_when_llmobs_disabled(monkeypatch):
         answer="final",
         usage=UsageMetrics(),
         mcp_servers=[],
-        tool_calls=[_tool_call()],
+        segments=[_tool_call()],
     )

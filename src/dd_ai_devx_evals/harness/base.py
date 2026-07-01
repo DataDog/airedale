@@ -106,12 +106,35 @@ class AgentToolCall:
 
 
 @dataclass
+class AgentThought:
+    """A non-tool assistant output segment (reasoning, plan, or intermediate text).
+
+    Mirrors how the native ``claude_agent_sdk`` integration surfaces a
+    ``ThinkingBlock``: as a plain assistant message interleaved in the output
+    stream (see ``parse_content_blocks``). ``kind`` is carried for reporting and
+    debugging but, like the native path, does not change the emitted message
+    shape (both reasoning and text become a bare ``assistant`` message).
+    """
+
+    text: str
+    kind: str = "reasoning"
+
+
+#: An ordered assistant output segment: either a tool invocation or a
+#: reasoning/plan/text ``AgentThought``. Providers that reconstruct spans by
+#: hand (Codex) emit these in item order so the manual transcript interleaves
+#: reasoning and tool calls the way the native Claude integration does.
+AgentOutputSegment = AgentToolCall | AgentThought
+
+
+@dataclass
 class AgentRunResult:
     """Normalized provider SDK run output plus deferred failure state."""
 
     answer: str
     usage: UsageMetrics
     tool_calls: list[AgentToolCall]
+    segments: list[AgentOutputSegment] = field(default_factory=list)
     error: RuntimeError | None = None
 
 
@@ -186,35 +209,59 @@ def _tool_result_entry(tool_call: AgentToolCall) -> dict[str, Any]:
     return entry
 
 
-def _llm_output_messages(answer: str, tool_calls: list[AgentToolCall]) -> list[dict[str, Any]]:
+def _thought_message(thought: AgentThought) -> dict[str, Any]:
+    """Render a reasoning/plan/text segment as a bare assistant message.
+
+    Matches the native integration's handling of a ``ThinkingBlock`` (and of a
+    plain ``TextBlock``): the content text becomes an ``assistant`` message. The
+    ``kind`` is intentionally not encoded in the message so the shape stays
+    identical to what Claude emits.
+    """
+    return {"role": "assistant", "content": thought.text}
+
+
+def _tool_use_message(tool_call: AgentToolCall) -> dict[str, Any]:
+    """Render one assistant ``tool_use`` message (LLMObs ``ToolCall`` shape)."""
+    return {"role": "assistant", "content": "", "tool_calls": [_tool_call_entry(tool_call)]}
+
+
+def _llm_output_messages(answer: str, segments: list[AgentOutputSegment]) -> list[dict[str, Any]]:
     """Render the llm span output as interleaved assistant messages.
 
-    Mirrors the Claude integration's ``parse_content_blocks`` output: each tool
-    invocation is its own assistant message carrying a single ``tool_calls``
-    entry, followed by a final assistant message holding the answer text. Tool
-    *results* are intentionally not emitted here — they live on the dedicated
-    tool spans and in the agent transcript, exactly as in the native path.
+    Mirrors the Claude integration's ``parse_content_blocks`` output: reasoning
+    (and plan) segments become bare assistant messages and each tool invocation
+    is its own assistant message carrying a single ``tool_calls`` entry, in the
+    original item order, followed by a final assistant message holding the answer
+    text. Tool *results* are intentionally not emitted here — they live on the
+    dedicated tool spans and in the agent transcript, exactly as in the native
+    path.
     """
-    messages: list[dict[str, Any]] = [
-        {"role": "assistant", "content": "", "tool_calls": [_tool_call_entry(tool_call)]} for tool_call in tool_calls
-    ]
+    messages: list[dict[str, Any]] = []
+    for segment in segments:
+        if isinstance(segment, AgentThought):
+            messages.append(_thought_message(segment))
+        else:
+            messages.append(_tool_use_message(segment))
     messages.append({"role": "assistant", "content": answer})
     return messages
 
 
-def _agent_transcript_messages(answer: str, tool_calls: list[AgentToolCall]) -> list[dict[str, Any]]:
+def _agent_transcript_messages(answer: str, segments: list[AgentOutputSegment]) -> list[dict[str, Any]]:
     """Render the agent span's full transcript as a role/content message list.
 
     This matches the Claude agent span's serialized output: an interleaved
-    sequence of assistant ``tool_use`` messages and ``user`` ``tool_result``
-    messages, terminated by the final assistant answer. For a non-``llm`` span
-    LLMObs serializes this list into ``output.value`` (a JSON string), just like
-    the native integration.
+    sequence of assistant reasoning messages, assistant ``tool_use`` messages and
+    ``user`` ``tool_result`` messages (in item order), terminated by the final
+    assistant answer. For a non-``llm`` span LLMObs serializes this list into
+    ``output.value`` (a JSON string), just like the native integration.
     """
     messages: list[dict[str, Any]] = []
-    for tool_call in tool_calls:
-        messages.append({"role": "assistant", "content": "", "tool_calls": [_tool_call_entry(tool_call)]})
-        messages.append({"role": "user", "content": "", "tool_results": [_tool_result_entry(tool_call)]})
+    for segment in segments:
+        if isinstance(segment, AgentThought):
+            messages.append(_thought_message(segment))
+            continue
+        messages.append(_tool_use_message(segment))
+        messages.append({"role": "user", "content": "", "tool_results": [_tool_result_entry(segment)]})
     messages.append({"role": "assistant", "content": answer})
     return messages
 
@@ -278,13 +325,14 @@ def _annotate_llm_span(
     answer: str,
     usage: UsageMetrics,
     mcp_servers: list[McpServerSpec],
-    tool_calls: list[AgentToolCall],
+    segments: list[AgentOutputSegment],
     allowed_builtin_tools: Iterable[str] | None = None,
     mcp_tool_metadata: Mapping[tuple[str, str], McpToolMetadata] | None = None,
 ) -> None:
     """Annotate the manual ``llm`` span with I/O, usage, and tool definitions."""
     if not LLMObs.enabled:
         return
+    tool_calls = [segment for segment in segments if isinstance(segment, AgentToolCall)]
     LLMObs.annotate(
         prompt={
             "id": LLMOBS_PROMPT_ID,
@@ -293,7 +341,7 @@ def _annotate_llm_span(
             "variables": {"prompt_version": prompt_version, "harness": harness, "model_name": model.label},
         },
         input_data=_input_messages(system_prompt, user_prompt),
-        output_data=_llm_output_messages(answer, tool_calls),
+        output_data=_llm_output_messages(answer, segments),
         metadata={
             "harness": harness,
             "reported_model_name": model.label,
@@ -360,7 +408,7 @@ def _annotate_agent_loop_span(
     answer: str,
     usage: UsageMetrics,
     mcp_servers: list[McpServerSpec],
-    tool_calls: list[AgentToolCall],
+    segments: list[AgentOutputSegment],
     allowed_builtin_tools: Iterable[str] | None = None,
     max_turns: int | None = None,
 ) -> None:
@@ -373,6 +421,7 @@ def _annotate_agent_loop_span(
     """
     if not LLMObs.enabled:
         return
+    tool_calls = [segment for segment in segments if isinstance(segment, AgentToolCall)]
     metadata: dict[str, Any] = {
         "harness": harness,
         "reported_model_name": model.label,
@@ -393,7 +442,7 @@ def _annotate_agent_loop_span(
     metadata["_dd"] = {"agent_manifest": manifest}
     LLMObs.annotate(
         input_data=_input_messages(system_prompt, user_prompt),
-        output_data=_agent_transcript_messages(answer, tool_calls),
+        output_data=_agent_transcript_messages(answer, segments),
         metadata=metadata,
         metrics=usage.to_llmobs_metrics(),
         tags={"harness": harness, "prompt_version": prompt_version, "model_name": model.label, "sdk": sdk_name},

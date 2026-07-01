@@ -55,8 +55,10 @@ from ddtrace.llmobs.decorators import agent, llm
 from openai_codex import ApprovalMode, AsyncCodex, CodexConfig, Sandbox
 
 from dd_ai_devx_evals.harness.base import (
+    AgentOutputSegment,
     AgentRunner,
     AgentRunResult,
+    AgentThought,
     AgentToolCall,
     ProgressCallback,
     _annotate_agent_loop_span,
@@ -82,6 +84,15 @@ SDK_NAME = "openai-codex"
 CODEX_FRAMEWORK = "OpenAI Codex"
 # Custom model-provider id registered through config overrides for gateway use.
 CODEX_GATEWAY_PROVIDER_ID = "dd_ai_devx_gateway"
+# Built-in (non-MCP) tools Codex ships and that this runner maps into tool/thought
+# reporting. Codex does not gate built-ins on ``allowed_builtin_tools`` (that field
+# is informational for Codex), so these are always available at runtime; the
+# harness therefore lists them as the "available tools" when a scenario allows all
+# built-ins (``allowed_builtin_tools`` omitted), mirroring how the Claude runner
+# lists ``CLAUDE_BUILTIN_TOOLS`` for its own all-allowed case. ``update_plan`` is
+# surfaced here for the manifest even though plan updates are reported as
+# reasoning-style ``AgentThought`` segments rather than tool spans.
+CODEX_BUILTIN_TOOLS: tuple[str, ...] = ("shell", "apply_patch", "update_plan", "web_search")
 # Per-run isolated CODEX_HOME directory name (staged under the run cwd).
 ISOLATED_CODEX_HOME_DIRNAME = ".dd-ai-devx-codex-home"
 
@@ -179,8 +190,8 @@ class CodexRunner(AgentRunner):
             answer=run_result.answer,
             usage=run_result.usage,
             mcp_servers=self.mcp_servers,
-            tool_calls=run_result.tool_calls,
-            allowed_builtin_tools=self.allowed_builtin_tools,
+            segments=run_result.segments,
+            allowed_builtin_tools=self._effective_builtin_tools(),
             max_turns=self.max_turns,
         )
         if run_result.error is not None:
@@ -229,11 +240,26 @@ class CodexRunner(AgentRunner):
             answer=run_result.answer,
             usage=run_result.usage,
             mcp_servers=self.mcp_servers,
-            tool_calls=run_result.tool_calls,
-            allowed_builtin_tools=self.allowed_builtin_tools,
+            segments=run_result.segments,
+            allowed_builtin_tools=self._effective_builtin_tools(),
             mcp_tool_metadata=mcp_tool_metadata,
         )
         return run_result, missing_usage_error
+
+    def _effective_builtin_tools(self) -> tuple[str, ...]:
+        """Return the built-in tools to report as available for this run.
+
+        Codex does **not** gate built-ins on ``allowed_builtin_tools`` (that field
+        is informational for Codex — see ``AGENTS.md``), so every Codex built-in is
+        always reachable regardless of the scenario's list. We therefore always
+        report the full ``CODEX_BUILTIN_TOOLS`` set as the available built-ins,
+        which also guarantees any observed built-in tool call (``shell`` /
+        ``apply_patch`` / ``web_search``) appears in the manifest and llm-span
+        tool definitions rather than looking like an undeclared tool in the UI.
+        Contrast the Claude runner, which *does* gate (``permission_mode`` =
+        ``dontAsk``) and so honors an explicit allow-list.
+        """
+        return CODEX_BUILTIN_TOOLS
 
     async def _run_codex(
         self,
@@ -269,8 +295,9 @@ class CodexRunner(AgentRunner):
             )
         answer = str(getattr(result, "final_response", None) or "Codex did not produce a final response.")
         usage = UsageMetrics.from_codex(getattr(result, "usage", None))
-        tool_calls = _codex_tool_calls_from_items(getattr(result, "items", []) or [])
-        return AgentRunResult(answer=answer, usage=usage, tool_calls=tool_calls)
+        segments = _codex_output_segments(getattr(result, "items", []) or [])
+        tool_calls = [segment for segment in segments if isinstance(segment, AgentToolCall)]
+        return AgentRunResult(answer=answer, usage=usage, tool_calls=tool_calls, segments=segments)
 
     def _codex_env(self) -> dict[str, str]:
         """Build the Codex subprocess env (gateway wiring + CODEX_HOME isolation).
@@ -344,20 +371,131 @@ def _codex_mcp_config_overrides(servers: Iterable[McpServerSpec], trace_headers:
 
 
 # --------------------------------------------------------------------------- #
-# Tool-call extraction
+# Output-segment extraction
 # --------------------------------------------------------------------------- #
-def _codex_tool_calls_from_items(items: Iterable[Any]) -> list[AgentToolCall]:
-    tool_calls: list[AgentToolCall] = []
+# Codex returns an ordered ``ThreadItem`` list covering every turn event: model
+# reasoning, plan updates, built-in tool activity (shell command execution, file
+# patches, web search), MCP/dynamic/collab tool calls, and the final assistant
+# message. Only a subset was captured before, so runs that used only Codex's
+# built-in tools (e.g. shelling into a checkout) reported no tool activity at
+# all. We now walk the items **in order** and normalize each recognized type
+# into either an ``AgentToolCall`` (tool spans + transcript) or an
+# ``AgentThought`` (reasoning/plan, surfaced as assistant messages the way the
+# native Claude integration surfaces ``ThinkingBlock`` content). Item types with
+# no reporting analog (user message, hook prompt, agent message, image view,
+# review-mode markers, compaction) are intentionally skipped: the final agent
+# message is already carried as the run's ``answer``.
+def _codex_output_segments(items: Iterable[Any]) -> list[AgentOutputSegment]:
+    segments: list[AgentOutputSegment] = []
     for item in items:
         root = getattr(item, "root", item)
-        item_type = _enum_value(getattr(root, "type", None))
-        if item_type == "mcpToolCall":
-            tool_calls.append(_codex_mcp_tool_call(root))
-        elif item_type == "collabAgentToolCall":
-            tool_calls.append(_codex_collab_agent_tool_call(root))
-        elif item_type == "dynamicToolCall":
-            tool_calls.append(_codex_dynamic_tool_call(root))
-    return tool_calls
+        builder = _CODEX_SEGMENT_BUILDERS.get(_enum_value(getattr(root, "type", None)))
+        if builder is None:
+            continue
+        segment = builder(root)
+        if segment is not None:
+            segments.append(segment)
+    return segments
+
+
+def _codex_command_tool_call(item: Any) -> AgentToolCall:
+    """Normalize a built-in shell (``commandExecution``) item into a tool call."""
+    exit_code = getattr(item, "exit_code", None)
+    status = _enum_value(getattr(item, "status", None))
+    if status in {"failed", "declined"}:
+        error = status
+    elif isinstance(exit_code, int) and exit_code != 0:
+        error = f"exit_code={exit_code}"
+    else:
+        error = None
+    return AgentToolCall(
+        name="shell",
+        arguments={"command": str(getattr(item, "command", "") or ""), "cwd": str(getattr(item, "cwd", "") or "")},
+        result=getattr(item, "aggregated_output", None),
+        error=error,
+        metadata={
+            "source": SDK_NAME,
+            "tool_id": getattr(item, "id", None),
+            "status": status,
+            "exit_code": exit_code,
+            "duration_ms": getattr(item, "duration_ms", None),
+            "command_source": _enum_value(getattr(item, "source", None)),
+        },
+    )
+
+
+def _codex_file_change_tool_call(item: Any) -> AgentToolCall:
+    """Normalize a built-in file-patch (``fileChange``) item into a tool call."""
+    changes = getattr(item, "changes", []) or []
+    rendered = [
+        {
+            "path": getattr(change, "path", None),
+            "kind": _codex_patch_change_kind(getattr(change, "kind", None)),
+            "diff": getattr(change, "diff", None),
+        }
+        for change in changes
+    ]
+    status = _enum_value(getattr(item, "status", None))
+    return AgentToolCall(
+        name="apply_patch",
+        arguments={"changes": [{"path": change["path"], "kind": change["kind"]} for change in rendered]},
+        result=rendered,
+        error=(status if status in {"failed", "declined"} else None),
+        metadata={
+            "source": SDK_NAME,
+            "tool_id": getattr(item, "id", None),
+            "status": status,
+            "file_count": len(rendered),
+        },
+    )
+
+
+def _codex_web_search_tool_call(item: Any) -> AgentToolCall:
+    """Normalize a built-in ``webSearch`` item into a tool call."""
+    action = getattr(item, "action", None)
+    return AgentToolCall(
+        name="web_search",
+        arguments={"query": str(getattr(item, "query", "") or "")},
+        result=action if action is not None else None,
+        error=None,
+        metadata={"source": SDK_NAME, "tool_id": getattr(item, "id", None)},
+    )
+
+
+def _codex_reasoning_thought(item: Any) -> AgentThought | None:
+    """Normalize a ``reasoning`` item into an ``AgentThought`` (or drop if empty).
+
+    Codex exposes the human-readable reasoning ``summary``; the fuller ``content``
+    is often omitted/encrypted, so we prefer ``summary`` and fall back to
+    ``content``.
+    """
+    text = _codex_join_text(getattr(item, "summary", None) or getattr(item, "content", None))
+    return AgentThought(text=text, kind="reasoning") if text else None
+
+
+def _codex_plan_thought(item: Any) -> AgentThought | None:
+    """Normalize a ``plan`` item into an ``AgentThought`` (or drop if empty)."""
+    text = str(getattr(item, "text", "") or "").strip()
+    return AgentThought(text=text, kind="plan") if text else None
+
+
+def _codex_join_text(value: Any) -> str:
+    """Join a Codex text field (``str`` or ``list[str]``) into a single string."""
+    if value is None:
+        return ""
+    parts = [value] if isinstance(value, str) else list(value)
+    return "\n\n".join(chunk for chunk in (str(part).strip() for part in parts) if chunk)
+
+
+def _codex_patch_change_kind(kind: Any) -> str:
+    """Extract the change kind (``add`` / ``delete`` / ``update``) from a ``FileUpdateChange``.
+
+    ``FileUpdateChange.kind`` is a ``PatchChangeKind`` — a pydantic ``RootModel``
+    whose ``root`` carries the discriminating ``type`` literal — not a plain enum,
+    so ``_enum_value`` alone would stringify the whole model.
+    """
+    root = getattr(kind, "root", kind)
+    return _enum_value(getattr(root, "type", root))
 
 
 def _codex_mcp_tool_call(item: Any) -> AgentToolCall:
@@ -381,11 +519,12 @@ def _codex_mcp_tool_call(item: Any) -> AgentToolCall:
 
 
 def _codex_collab_agent_tool_call(item: Any) -> AgentToolCall:
+    status = _enum_value(getattr(item, "status", None))
     return AgentToolCall(
         name=f"codex.collab_agent.{_enum_value(getattr(item, 'tool', 'unknown'))}",
         arguments={"prompt": getattr(item, "prompt", None)},
         result={"receiver_thread_ids": getattr(item, "receiver_thread_ids", [])},
-        error=None,
+        error=("collab_agent_failed" if status == "failed" else None),
         metadata={
             "source": SDK_NAME,
             "tool_id": getattr(item, "id", None),
@@ -397,11 +536,13 @@ def _codex_collab_agent_tool_call(item: Any) -> AgentToolCall:
 
 
 def _codex_dynamic_tool_call(item: Any) -> AgentToolCall:
+    status = _enum_value(getattr(item, "status", None))
+    failed = getattr(item, "success", None) is False or status == "failed"
     return AgentToolCall(
         name=f"codex.dynamic_tool.{getattr(item, 'tool', 'unknown')}",
         arguments=getattr(item, "arguments", {}) or {},
         result=getattr(item, "content_items", None),
-        error=None if getattr(item, "success", None) is not False else "dynamic_tool_failed",
+        error=("dynamic_tool_failed" if failed else None),
         metadata={
             "source": SDK_NAME,
             "tool_id": getattr(item, "id", None),
@@ -414,3 +555,17 @@ def _codex_dynamic_tool_call(item: Any) -> AgentToolCall:
 
 def _enum_value(value: Any) -> str:
     return str(getattr(value, "value", value))
+
+
+# Dispatch table mapping a ``ThreadItem`` ``type`` to its segment builder. Each
+# builder returns an ``AgentOutputSegment`` (or ``None`` to skip an empty item).
+_CODEX_SEGMENT_BUILDERS: dict[str, Callable[[Any], AgentOutputSegment | None]] = {
+    "mcpToolCall": _codex_mcp_tool_call,
+    "collabAgentToolCall": _codex_collab_agent_tool_call,
+    "dynamicToolCall": _codex_dynamic_tool_call,
+    "commandExecution": _codex_command_tool_call,
+    "fileChange": _codex_file_change_tool_call,
+    "webSearch": _codex_web_search_tool_call,
+    "reasoning": _codex_reasoning_thought,
+    "plan": _codex_plan_thought,
+}
