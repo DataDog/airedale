@@ -1,12 +1,12 @@
-"""Tests for dd_ai_devx_evals.experiment — pure helper functions."""
+"""Tests for airedale.experiment — pure helper functions."""
 
 from __future__ import annotations
 
 import asyncio
 
-from dd_ai_devx_evals.config.experiment import ExperimentConfig, McpServerConfig, ScenarioConfig, TaskConfig
-from dd_ai_devx_evals.experiment import _experiment_name, _managed_server_specs, _normalize_filter
-from dd_ai_devx_evals.types import ModelSpec
+from airedale.config.experiment import ExperimentConfig, McpServerConfig, ScenarioConfig, TaskConfig
+from airedale.experiment import _experiment_name, _managed_server_specs, _normalize_filter
+from airedale.types import ModelSpec
 
 # ---------------------------------------------------------------------------
 # _normalize_filter
@@ -134,10 +134,10 @@ class TestManagedServerSpecs:
 
 class TestPerRunWorkspaces:
     def test_fresh_workspace_and_runner_per_run(self, tmp_path, monkeypatch):
-        from dd_ai_devx_evals import experiment as exp_mod
-        from dd_ai_devx_evals.progress import ProgressReporter
-        from dd_ai_devx_evals.types import HarnessResult, UsageMetrics
-        from dd_ai_devx_evals.workdir import WorkspaceManager
+        from airedale import experiment as exp_mod
+        from airedale.progress import ProgressReporter
+        from airedale.types import HarnessResult, UsageMetrics
+        from airedale.workdir import WorkspaceManager
 
         runs = 3
 

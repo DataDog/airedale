@@ -1,4 +1,4 @@
-"""Command-line entry point for dd-ai-devx-evals."""
+"""Command-line entry point for airedale."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import sys
 def build_arg_parser() -> argparse.ArgumentParser:
     """Return the argument parser (exposed for testing)."""
     parser = argparse.ArgumentParser(
-        prog="dd-ai-devx-evals",
+        prog="airedale",
         description="Run a config-driven evaluation matrix against Datadog LLM Observability Experiments.",
     )
 
@@ -99,10 +99,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point."""
-    from dd_ai_devx_evals.config import ConfigError
-    from dd_ai_devx_evals.config.experiment import load_experiment
-    from dd_ai_devx_evals.config.gateway import load_gateway
-    from dd_ai_devx_evals.experiment import run_experiments
+    from airedale.config import ConfigError
+    from airedale.config.experiment import load_experiment
+    from airedale.config.gateway import load_gateway
+    from airedale.experiment import run_experiments
 
     parser = build_arg_parser()
     args = parser.parse_args(argv)

@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import json
 
-from dd_ai_devx_evals.config.experiment import ScenarioConfig
-from dd_ai_devx_evals.harness import create_runner
-from dd_ai_devx_evals.harness.claude import CLAUDE_BUILTIN_TOOLS, ClaudeRunner
-from dd_ai_devx_evals.mcp import McpServerSpec
-from dd_ai_devx_evals.types import ModelSpec
+from airedale.config.experiment import ScenarioConfig
+from airedale.harness import create_runner
+from airedale.harness.claude import CLAUDE_BUILTIN_TOOLS, ClaudeRunner
+from airedale.mcp import McpServerSpec
+from airedale.types import ModelSpec
 
 
 class TestClaudeAvailableTools:
@@ -85,7 +85,7 @@ class TestCreateRunnerProjectMcpMerge:
         assert "mcp__repo-http" in runner._claude_available_tools()
 
     def test_scenario_wins_on_name_collision(self, tmp_path):
-        from dd_ai_devx_evals.config.experiment import McpServerConfig
+        from airedale.config.experiment import McpServerConfig
 
         (tmp_path / ".mcp.json").write_text(json.dumps({"mcpServers": {"apm": {"url": "http://localhost:9999/repo"}}}))
         scenario_server = McpServerConfig(name="apm", url="http://localhost:8000/scenario")

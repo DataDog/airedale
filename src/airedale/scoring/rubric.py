@@ -12,11 +12,11 @@ import anthropic
 import openai
 from ddtrace.llmobs import BaseAsyncEvaluator, EvaluatorContext, EvaluatorResult
 
-from dd_ai_devx_evals.gateway import resolve_provider_config
-from dd_ai_devx_evals.types import ModelSpec
+from airedale.gateway import resolve_provider_config
+from airedale.types import ModelSpec
 
 if TYPE_CHECKING:
-    from dd_ai_devx_evals.config.gateway import GatewayConfig
+    from airedale.config.gateway import GatewayConfig
 
 DEFAULT_JUDGE_MODEL = "anthropic/claude-sonnet-4-6"
 

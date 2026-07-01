@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from dd_ai_devx_evals.config.gateway import GatewayConfig
+    from airedale.config.gateway import GatewayConfig
 
 logger = logging.getLogger(__name__)
 

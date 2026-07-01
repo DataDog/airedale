@@ -12,8 +12,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from dd_ai_devx_evals.harness.base import AgentThought, AgentToolCall
-from dd_ai_devx_evals.harness.codex import (
+from airedale.harness.base import AgentThought, AgentToolCall
+from airedale.harness.codex import (
     CODEX_BUILTIN_TOOLS,
     ISOLATED_CODEX_HOME_DIRNAME,
     CodexRunner,

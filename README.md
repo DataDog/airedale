@@ -1,11 +1,11 @@
-# dd-ai-devx-evals
+# airedale
 
 > Config-driven evaluation harness for agentic LLM runs, reporting to Datadog
 > LLM Observability Experiments.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 
-`dd-ai-devx-evals` runs an evaluation matrix of **model × scenario × task**
+`airedale` runs an evaluation matrix of **model × scenario × task**
 through provider-native agentic SDKs, exposes MCP servers and Agent Skills to
 the model, and reports every run to
 [Datadog LLM Observability Experiments](https://docs.datadoghq.com/llm_observability/).
@@ -52,7 +52,7 @@ the experiment's `token_count`. See
 uv pip install -e .
 
 # From PyPI (once published)
-# uv pip install dd-ai-devx-evals
+# uv pip install airedale
 ```
 
 ### External SDK requirements
@@ -131,14 +131,14 @@ credentials_helper = "mytool auth token --datacenter us1"
 ### 3. Run
 
 ```bash
-dd-ai-devx-evals experiment.toml \
+airedale experiment.toml \
   --gateway-config gateway.toml
 ```
 
 Preview the matrix without running:
 
 ```bash
-dd-ai-devx-evals experiment.toml --dry-run
+airedale experiment.toml --dry-run
 ```
 
 See `examples/` for fully-worked configs and a sample skill directory.
@@ -365,7 +365,7 @@ provider SDK are counted.
 ## CLI reference
 
 ```
-dd-ai-devx-evals CONFIG [options]
+airedale CONFIG [options]
 
   CONFIG                     experiment TOML file (required positional argument)
   --gateway-config PATH      gateway TOML file; omit to use provider default APIs

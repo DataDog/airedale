@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for dd-ai-devx-evals unit tests."""
+"""Shared pytest fixtures for airedale unit tests."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ def clear_credential_cache():
 
     Import is deferred so only gateway tests pay the import cost.
     """
-    from dd_ai_devx_evals.gateway import _credential_cache
+    from airedale.gateway import _credential_cache
 
     _credential_cache.clear()
     yield

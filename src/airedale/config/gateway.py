@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from pathlib import Path
 
-from dd_ai_devx_evals.config import ConfigError, read_toml_file
+from airedale.config import ConfigError, read_toml_file
 
 
 @dataclass(frozen=True)

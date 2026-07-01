@@ -1,4 +1,4 @@
-"""Tests for dd_ai_devx_evals.workdir — WorkspaceManager.
+"""Tests for airedale.workdir — WorkspaceManager.
 
 These run against a small local throwaway git repo created per test. Plain git
 is used here because the workspace manager *is* the harness's own git-based
@@ -14,8 +14,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from dd_ai_devx_evals.config.experiment import RemoveStep, RestoreStep, WorkdirConfig, WriteStep
-from dd_ai_devx_evals.workdir import WorkspaceManager
+from airedale.config.experiment import RemoveStep, RestoreStep, WorkdirConfig, WriteStep
+from airedale.workdir import WorkspaceManager
 
 if TYPE_CHECKING:
     from pathlib import Path

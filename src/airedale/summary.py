@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from dd_ai_devx_evals.types import UsageMetrics, coerce_int
+from airedale.types import UsageMetrics, coerce_int
 
 
 @dataclass

@@ -1,4 +1,4 @@
-"""Tests for dd_ai_devx_evals.gateway — credential resolution and caching."""
+"""Tests for airedale.gateway — credential resolution and caching."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from dd_ai_devx_evals.config.gateway import GatewayConfig, ProviderGatewayConfig
-from dd_ai_devx_evals.gateway import ResolvedGatewayConfig, _run_credentials_helper, resolve_provider_config
+from airedale.config.gateway import GatewayConfig, ProviderGatewayConfig
+from airedale.gateway import ResolvedGatewayConfig, _run_credentials_helper, resolve_provider_config
 
 
 def _make_gateway(provider: str, **kwargs) -> GatewayConfig:
@@ -74,7 +74,7 @@ class TestResolveApiKeyEnv:
 
 class TestResolveCredentialsHelper:
     def test_helper_output_used_as_bearer_token(self, mocker, clear_credential_cache):
-        mock_run = mocker.patch("dd_ai_devx_evals.gateway.subprocess.run")
+        mock_run = mocker.patch("airedale.gateway.subprocess.run")
         mock_run.return_value = MagicMock(stdout="raw-token-123\n", returncode=0)
         gw = _make_gateway("anthropic", base_url="https://gw.example.com", credentials_helper="my-helper get-token")
         result = resolve_provider_config("anthropic", gw)
@@ -84,19 +84,19 @@ class TestResolveCredentialsHelper:
     def test_jwt_preferred_over_plain_line(self, mocker, clear_credential_cache):
         # A JWT-shaped token has three base64url segments separated by dots.
         jwt = "aaaa.bbbb.cccc"
-        mock_run = mocker.patch("dd_ai_devx_evals.gateway.subprocess.run")
+        mock_run = mocker.patch("airedale.gateway.subprocess.run")
         mock_run.return_value = MagicMock(stdout=f"some info line\n{jwt}\nother output\n", returncode=0)
         token = _run_credentials_helper("any-command")
         assert token == jwt
 
     def test_last_line_used_when_no_jwt(self, mocker, clear_credential_cache):
-        mock_run = mocker.patch("dd_ai_devx_evals.gateway.subprocess.run")
+        mock_run = mocker.patch("airedale.gateway.subprocess.run")
         mock_run.return_value = MagicMock(stdout="line one\nthe-actual-token\n", returncode=0)
         token = _run_credentials_helper("any-command")
         assert token == "the-actual-token"
 
     def test_helper_cached_second_call_skips_subprocess(self, mocker, clear_credential_cache):
-        mock_run = mocker.patch("dd_ai_devx_evals.gateway.subprocess.run")
+        mock_run = mocker.patch("airedale.gateway.subprocess.run")
         mock_run.return_value = MagicMock(stdout="cached-token\n", returncode=0)
         gw = _make_gateway("anthropic", base_url="https://gw.example.com", credentials_helper="my-helper")
         resolve_provider_config("anthropic", gw)
@@ -106,8 +106,8 @@ class TestResolveCredentialsHelper:
     def test_failed_helper_raises_runtime_error(self, mocker, clear_credential_cache):
         import subprocess
 
-        mocker.patch("dd_ai_devx_evals.gateway.time.sleep")
-        mock_run = mocker.patch("dd_ai_devx_evals.gateway.subprocess.run")
+        mocker.patch("airedale.gateway.time.sleep")
+        mock_run = mocker.patch("airedale.gateway.subprocess.run")
         mock_run.side_effect = subprocess.CalledProcessError(1, "helper", stderr="auth failed")
         gw = _make_gateway("anthropic", credentials_helper="bad-helper")
         with pytest.raises(RuntimeError, match="failed"):
@@ -116,10 +116,10 @@ class TestResolveCredentialsHelper:
     def test_failed_helper_retries_up_to_max_attempts(self, mocker, clear_credential_cache):
         import subprocess
 
-        from dd_ai_devx_evals.gateway import _CREDENTIALS_HELPER_MAX_ATTEMPTS
+        from airedale.gateway import _CREDENTIALS_HELPER_MAX_ATTEMPTS
 
-        mocker.patch("dd_ai_devx_evals.gateway.time.sleep")
-        mock_run = mocker.patch("dd_ai_devx_evals.gateway.subprocess.run")
+        mocker.patch("airedale.gateway.time.sleep")
+        mock_run = mocker.patch("airedale.gateway.subprocess.run")
         mock_run.side_effect = subprocess.CalledProcessError(1, "helper", stderr="auth failed")
         with pytest.raises(RuntimeError, match="after .* attempts"):
             _run_credentials_helper("bad-helper")
@@ -128,8 +128,8 @@ class TestResolveCredentialsHelper:
     def test_helper_recovers_after_transient_failure(self, mocker, clear_credential_cache):
         import subprocess
 
-        mocker.patch("dd_ai_devx_evals.gateway.time.sleep")
-        mock_run = mocker.patch("dd_ai_devx_evals.gateway.subprocess.run")
+        mocker.patch("airedale.gateway.time.sleep")
+        mock_run = mocker.patch("airedale.gateway.subprocess.run")
         mock_run.side_effect = [
             subprocess.CalledProcessError(1, "helper", stderr="transient"),
             MagicMock(stdout="good-token\n", returncode=0),
@@ -141,8 +141,8 @@ class TestResolveCredentialsHelper:
     def test_timeout_is_not_retried(self, mocker, clear_credential_cache):
         import subprocess
 
-        mock_sleep = mocker.patch("dd_ai_devx_evals.gateway.time.sleep")
-        mock_run = mocker.patch("dd_ai_devx_evals.gateway.subprocess.run")
+        mock_sleep = mocker.patch("airedale.gateway.time.sleep")
+        mock_run = mocker.patch("airedale.gateway.subprocess.run")
         mock_run.side_effect = subprocess.TimeoutExpired("helper", 30)
         with pytest.raises(RuntimeError, match="timed out"):
             _run_credentials_helper("slow-helper")

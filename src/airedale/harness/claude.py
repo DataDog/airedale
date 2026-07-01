@@ -35,7 +35,7 @@ from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 from claude_agent_sdk import query as claude_query
 from ddtrace.llmobs import LLMObs
 
-from dd_ai_devx_evals.harness.base import (
+from airedale.harness.base import (
     AgentRunner,
     AgentRunResult,
     AgentToolCall,
@@ -44,14 +44,14 @@ from dd_ai_devx_evals.harness.base import (
     json_dumps_compact,
     json_safe,
 )
-from dd_ai_devx_evals.mcp import McpServerSpec, configured_tool_names
-from dd_ai_devx_evals.skills import (
+from airedale.mcp import McpServerSpec, configured_tool_names
+from airedale.skills import (
     discover_claude_skill_names,
     exclude_staged_skills_from_git,
     stage_skills_for_claude,
 )
-from dd_ai_devx_evals.tracing import current_trace_headers
-from dd_ai_devx_evals.types import HarnessResult, ModelSpec, UsageMetrics, coerce_int
+from airedale.tracing import current_trace_headers
+from airedale.types import HarnessResult, ModelSpec, UsageMetrics, coerce_int
 
 if TYPE_CHECKING:
     from collections.abc import Callable

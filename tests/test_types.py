@@ -1,4 +1,4 @@
-"""Tests for dd_ai_devx_evals.types — ModelSpec, UsageMetrics, slugify, coerce_int."""
+"""Tests for airedale.types — ModelSpec, UsageMetrics, slugify, coerce_int."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from dd_ai_devx_evals.types import (
+from airedale.types import (
     HarnessResult,
     ModelSpec,
     UsageMetrics,

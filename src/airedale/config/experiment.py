@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from dd_ai_devx_evals.config import ConfigError, read_toml_file
-from dd_ai_devx_evals.types import ModelSpec
+from airedale.config import ConfigError, read_toml_file
+from airedale.types import ModelSpec
 
 
 def _is_localhost_url(url: str) -> bool:

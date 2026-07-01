@@ -1,4 +1,4 @@
-"""Tests for dd_ai_devx_evals.mcp — McpServerSpec and rendering helpers."""
+"""Tests for airedale.mcp — McpServerSpec and rendering helpers."""
 
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ import sys
 
 import pytest
 
-from dd_ai_devx_evals import mcp as mcp_module
-from dd_ai_devx_evals.config.experiment import McpServerConfig
-from dd_ai_devx_evals.mcp import (
+from airedale import mcp as mcp_module
+from airedale.config.experiment import McpServerConfig
+from airedale.mcp import (
     ManagedMcpServer,
     McpServerSpec,
     _BoundedByteBuffer,

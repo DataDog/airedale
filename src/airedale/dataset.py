@@ -16,7 +16,7 @@ from ddtrace.llmobs import LLMObs
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from dd_ai_devx_evals.config.experiment import TaskConfig
+    from airedale.config.experiment import TaskConfig
 
 
 def task_to_record(task: TaskConfig) -> dict[str, Any]:

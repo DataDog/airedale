@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
     from claude_agent_sdk.types import McpServerConfig
 
-    from dd_ai_devx_evals.config.experiment import McpServerConfig as McpServerConfigExperiment
+    from airedale.config.experiment import McpServerConfig as McpServerConfigExperiment
 
 logger = logging.getLogger(__name__)
 

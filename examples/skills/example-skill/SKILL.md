@@ -8,7 +8,7 @@ description: >-
 # Example Skill
 
 This skill demonstrates the Agent-Skills SKILL.md format used by
-`dd-ai-devx-evals`. Place any skill directory under `scenario.skills` in your
+`airedale`. Place any skill directory under `scenario.skills` in your
 `experiment.toml` and the harness will stage it for the active engine.
 
 ## When to use this skill

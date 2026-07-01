@@ -1,4 +1,4 @@
-"""dd-ai-devx-evals: config-driven evaluation harness for agentic LLM runs.
+"""airedale: config-driven evaluation harness for agentic LLM runs.
 
 Runs an evaluation matrix of model x scenario x task through provider-native
 agentic SDKs and reports findings to Datadog LLM Observability Experiments.

@@ -12,23 +12,23 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from dd_ai_devx_evals.gateway import resolve_provider_config
-from dd_ai_devx_evals.harness.base import (
+from airedale.gateway import resolve_provider_config
+from airedale.harness.base import (
     AgentRunner,
     AgentRunResult,
     AgentToolCall,
     ProgressCallback,
 )
-from dd_ai_devx_evals.harness.claude import ClaudeRunner
-from dd_ai_devx_evals.harness.codex import CodexRunner
-from dd_ai_devx_evals.mcp import McpServerSpec, discover_claude_project_mcp_servers
+from airedale.harness.claude import ClaudeRunner
+from airedale.harness.codex import CodexRunner
+from airedale.mcp import McpServerSpec, discover_claude_project_mcp_servers
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from dd_ai_devx_evals.config.experiment import ScenarioConfig
-    from dd_ai_devx_evals.config.gateway import GatewayConfig
-    from dd_ai_devx_evals.types import ModelSpec
+    from airedale.config.experiment import ScenarioConfig
+    from airedale.config.gateway import GatewayConfig
+    from airedale.types import ModelSpec
 
 __all__ = [
     "AgentRunner",

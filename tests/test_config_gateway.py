@@ -1,4 +1,4 @@
-"""Tests for dd_ai_devx_evals.config.gateway — load_gateway parsing and validation."""
+"""Tests for airedale.config.gateway — load_gateway parsing and validation."""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
-from dd_ai_devx_evals.config import ConfigError
-from dd_ai_devx_evals.config.gateway import GatewayConfig, ProviderGatewayConfig, load_gateway
+from airedale.config import ConfigError
+from airedale.config.gateway import GatewayConfig, ProviderGatewayConfig, load_gateway
 
 
 def write_toml(tmp_path: Path, content: str) -> Path:

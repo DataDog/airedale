@@ -1,4 +1,4 @@
-"""Tests for dd_ai_devx_evals.config.experiment — load_experiment parsing and validation."""
+"""Tests for airedale.config.experiment — load_experiment parsing and validation."""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
-from dd_ai_devx_evals.config import ConfigError
-from dd_ai_devx_evals.config.experiment import load_experiment
+from airedale.config import ConfigError
+from airedale.config.experiment import load_experiment
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -473,7 +473,7 @@ class TestWorkdir:
         prompt = "p"
         criteria = ["c"]
         """
-        from dd_ai_devx_evals.config.experiment import RemoveStep, RestoreStep, WriteStep
+        from airedale.config.experiment import RemoveStep, RestoreStep, WriteStep
 
         config = load_experiment(write_toml(tmp_path, toml))
         steps = config.scenarios[0].workdir.steps

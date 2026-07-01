@@ -6,7 +6,7 @@ import logging
 import shutil
 from pathlib import Path
 
-from dd_ai_devx_evals.types import slugify
+from airedale.types import slugify
 
 logger = logging.getLogger(__name__)
 

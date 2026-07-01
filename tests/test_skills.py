@@ -1,4 +1,4 @@
-"""Tests for dd_ai_devx_evals.skills — stage_skills_for_claude/codex."""
+"""Tests for airedale.skills — stage_skills_for_claude/codex."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
-from dd_ai_devx_evals.skills import (
+from airedale.skills import (
     exclude_staged_skills_from_git,
     stage_skills_for_claude,
     stage_skills_for_codex,

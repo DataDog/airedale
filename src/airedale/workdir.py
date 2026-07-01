@@ -33,19 +33,19 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from dd_ai_devx_evals.config.experiment import (
+from airedale.config.experiment import (
     RemoveStep,
     RestoreStep,
     WriteStep,
     _git_toplevel,
     _looks_like_git_url,
 )
-from dd_ai_devx_evals.types import slugify
+from airedale.types import slugify
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from dd_ai_devx_evals.config.experiment import WorkdirConfig, WorkdirStep
+    from airedale.config.experiment import WorkdirConfig, WorkdirStep
 
 logger = logging.getLogger(__name__)
 

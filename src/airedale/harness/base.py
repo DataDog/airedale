@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any
 
 from ddtrace.llmobs import LLMObs
 
-from dd_ai_devx_evals.mcp import (
+from airedale.mcp import (
     McpServerSpec,
     McpToolMetadata,
     configured_tool_names,
@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
     from pathlib import Path
 
-    from dd_ai_devx_evals.types import HarnessResult, ModelSpec, UsageMetrics
+    from airedale.types import HarnessResult, ModelSpec, UsageMetrics
 
 logger = logging.getLogger(__name__)
 

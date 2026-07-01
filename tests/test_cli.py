@@ -1,4 +1,4 @@
-"""Tests for dd_ai_devx_evals.cli — argument parser and main entry point."""
+"""Tests for airedale.cli — argument parser and main entry point."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
-from dd_ai_devx_evals.cli import build_arg_parser, main
+from airedale.cli import build_arg_parser, main
 
 
 def write_experiment_toml(tmp_path: Path) -> Path:

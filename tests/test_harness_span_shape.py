@@ -22,8 +22,8 @@ from typing import Any
 
 import pytest
 
-import dd_ai_devx_evals.harness.base as base
-from dd_ai_devx_evals.harness.base import (
+import airedale.harness.base as base
+from airedale.harness.base import (
     AgentThought,
     AgentToolCall,
     _agent_transcript_messages,
@@ -33,7 +33,7 @@ from dd_ai_devx_evals.harness.base import (
     _input_messages,
     _llm_output_messages,
 )
-from dd_ai_devx_evals.types import ModelSpec, UsageMetrics
+from airedale.types import ModelSpec, UsageMetrics
 
 MODEL = ModelSpec.parse("openai/gpt-5.5")
 

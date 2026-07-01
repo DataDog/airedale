@@ -21,19 +21,19 @@ from typing import TYPE_CHECKING, Any
 
 from ddtrace.llmobs import LLMObs
 
-from dd_ai_devx_evals import dataset as dataset_module
-from dd_ai_devx_evals.harness import create_runner, mcp_system_prompt
-from dd_ai_devx_evals.mcp import McpServerSpec, managed_servers
-from dd_ai_devx_evals.observability import enable_llmobs
-from dd_ai_devx_evals.progress import ProgressReporter
-from dd_ai_devx_evals.scoring import RubricEvaluator
-from dd_ai_devx_evals.summary import ExperimentSummary, print_summary
-from dd_ai_devx_evals.types import ModelSpec, slugify
-from dd_ai_devx_evals.workdir import WorkspaceManager
+from airedale import dataset as dataset_module
+from airedale.harness import create_runner, mcp_system_prompt
+from airedale.mcp import McpServerSpec, managed_servers
+from airedale.observability import enable_llmobs
+from airedale.progress import ProgressReporter
+from airedale.scoring import RubricEvaluator
+from airedale.summary import ExperimentSummary, print_summary
+from airedale.types import ModelSpec, slugify
+from airedale.workdir import WorkspaceManager
 
 if TYPE_CHECKING:
-    from dd_ai_devx_evals.config.experiment import ExperimentConfig, ScenarioConfig, TaskConfig
-    from dd_ai_devx_evals.config.gateway import GatewayConfig
+    from airedale.config.experiment import ExperimentConfig, ScenarioConfig, TaskConfig
+    from airedale.config.gateway import GatewayConfig
 
 
 @dataclass

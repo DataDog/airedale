@@ -1,9 +1,9 @@
-"""Tests for dd_ai_devx_evals.dataset — task_to_record shape and helpers."""
+"""Tests for airedale.dataset — task_to_record shape and helpers."""
 
 from __future__ import annotations
 
-from dd_ai_devx_evals.config.experiment import TaskConfig
-from dd_ai_devx_evals.dataset import task_to_record
+from airedale.config.experiment import TaskConfig
+from airedale.dataset import task_to_record
 
 
 class TestTaskToRecord:

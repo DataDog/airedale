@@ -54,7 +54,7 @@ from ddtrace.llmobs import LLMObs
 from ddtrace.llmobs.decorators import agent, llm
 from openai_codex import ApprovalMode, AsyncCodex, CodexConfig, Sandbox
 
-from dd_ai_devx_evals.harness.base import (
+from airedale.harness.base import (
     AgentOutputSegment,
     AgentRunner,
     AgentRunResult,
@@ -68,10 +68,10 @@ from dd_ai_devx_evals.harness.base import (
     _notify,
     _raise_if_missing_usage,
 )
-from dd_ai_devx_evals.mcp import McpServerSpec, _mcp_tool_metadata_catalog
-from dd_ai_devx_evals.skills import exclude_paths_from_git, stage_skills_for_codex
-from dd_ai_devx_evals.tracing import current_trace_headers
-from dd_ai_devx_evals.types import HarnessResult, ModelSpec, UsageMetrics
+from airedale.mcp import McpServerSpec, _mcp_tool_metadata_catalog
+from airedale.skills import exclude_paths_from_git, stage_skills_for_codex
+from airedale.tracing import current_trace_headers
+from airedale.types import HarnessResult, ModelSpec, UsageMetrics
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
@@ -349,7 +349,7 @@ class CodexRunner(AgentRunner):
     def _gateway_config_overrides(self) -> list[str]:
         if not self.gateway_base_url:
             return []
-        from dd_ai_devx_evals.mcp import _toml_key_path, _toml_value
+        from airedale.mcp import _toml_key_path, _toml_value
 
         prefix = _toml_key_path("model_providers", CODEX_GATEWAY_PROVIDER_ID)
         overrides = [

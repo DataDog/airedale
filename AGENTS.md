@@ -1,4 +1,4 @@
-# AGENTS.md — dd-ai-devx-evals
+# AGENTS.md — airedale
 
 Context for AI agents and human contributors working on this codebase. Read this
 fully before making changes. It is both a contributor guide and the architectural
@@ -8,7 +8,7 @@ contract that every module must honor.
 
 ## 1. What this project is
 
-`dd-ai-devx-evals` is a **config-driven evaluation harness** for agentic LLM runs.
+`airedale` is a **config-driven evaluation harness** for agentic LLM runs.
 Given two TOML files it runs an evaluation matrix and reports every cell to
 **Datadog LLM Observability Experiments**.
 
@@ -278,9 +278,9 @@ Resolution rules (`gateway.py`):
 ## 3. Module layout & responsibilities
 
 ```
-src/dd_ai_devx_evals/
+src/airedale/
   __init__.py            __version__
-  __main__.py            python -m dd_ai_devx_evals -> cli.main
+  __main__.py            python -m airedale -> cli.main
   cli.py                 argparse CLI; parses flags, loads config, runs matrix
 
   types.py               ModelSpec, UsageMetrics, HarnessResult, slugify
@@ -436,7 +436,7 @@ and confined to the per-run temp `cwd`.
 ## 7. CLI contract (`cli.py`)
 
 ```
-dd-ai-devx-evals CONFIG [options]
+airedale CONFIG [options]
 
   CONFIG                   experiment TOML (required positional argument)
   --gateway-config PATH    gateway TOML; omit to use provider default APIs

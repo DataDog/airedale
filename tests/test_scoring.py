@@ -1,4 +1,4 @@
-"""Tests for dd_ai_devx_evals.scoring.rubric — RubricEvaluator and helpers."""
+"""Tests for airedale.scoring.rubric — RubricEvaluator and helpers."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from ddtrace.llmobs import EvaluatorContext
 
-from dd_ai_devx_evals.scoring.rubric import (
+from airedale.scoring.rubric import (
     RubricEvaluator,
     _extract_answer,
     _extract_criteria,
