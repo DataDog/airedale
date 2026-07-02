@@ -469,6 +469,17 @@ config errors or when `--fail-fast` and a cell fails.
   Codex overrides), `ModelSpec`/`UsageMetrics`, judge JSON parsing, skill staging.
 - **Type hints:** everywhere; `from __future__ import annotations` at the top of
   every module. Prefer dataclasses for value objects.
+- **License headers:** every source file must begin with the Datadog license
+  header, verified by `scripts/check_license_headers.py` (run in CI). This covers
+  `*.py` under `src/`, `tests/`, `examples/`, and `*.yml`/`*.yaml` repo-wide.
+  When creating a new file of one of those types, start it with the header block
+  (after an optional `#!` shebang / encoding line) using a `#`-comment prefix:
+  ```
+  # Unless explicitly stated otherwise all files in this repository are licensed under the Apache-2.0 License.
+  #
+  # This product includes software developed at Datadog (https://www.datadoghq.com/) Copyright <year> Datadog, Inc.
+  ```
+  `<year>` is the 4-digit year the file was introduced.
 - **Secrets:** never commit tokens; never log bearer tokens; redact headers in
   LLMObs metadata.
 

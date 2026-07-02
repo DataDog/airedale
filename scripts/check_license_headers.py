@@ -2,10 +2,11 @@
 #
 # This product includes software developed at Datadog (https://www.datadoghq.com/) Copyright 2026 Datadog, Inc.
 
-"""Verify that every Python source file carries the Datadog license header.
+"""Verify that every source file carries the Datadog license header.
 
-Scans ``src/``, ``tests/`` and ``examples/`` for ``*.py`` files and checks that
-each one begins (after an optional ``#!`` shebang) with the required header
+Scans ``src/``, ``tests/`` and ``examples/`` for ``*.py`` files, plus ``*.yml`` /
+``*.yaml`` files across the repository (e.g. ``.github/workflows``), and checks
+that each one begins (after an optional ``#!`` shebang) with the required header
 block::
 
     # Unless explicitly stated otherwise all files in this repository are licensed under the Apache-2.0 License.
@@ -23,7 +24,12 @@ import re
 import sys
 from pathlib import Path
 
-SCAN_DIRS = ("src", "tests", "examples")
+# Directories scanned for Python sources.
+PYTHON_SCAN_DIRS = ("src", "tests", "examples")
+
+# YAML files use the same ``#``-comment header; they are scanned repo-wide, minus
+# these directories.
+YAML_EXCLUDE_DIRS = {".git", ".jj", ".venv", "venv", "__pycache__", ".pytest_cache", ".ruff_cache"}
 
 LINE1 = "# Unless explicitly stated otherwise all files in this repository are licensed under the Apache-2.0 License."
 LINE2 = "#"
@@ -57,21 +63,34 @@ def has_valid_header(path: Path) -> bool:
 def main() -> int:
     repo_root = Path(__file__).resolve().parent.parent
     offenders: list[Path] = []
+    seen: set[Path] = set()
 
-    for scan_dir in SCAN_DIRS:
+    def check(path: Path) -> None:
+        if path in seen:
+            return
+        seen.add(path)
+        if not has_valid_header(path):
+            offenders.append(path.relative_to(repo_root))
+
+    for scan_dir in PYTHON_SCAN_DIRS:
         base = repo_root / scan_dir
         if not base.is_dir():
             continue
         for path in sorted(base.rglob("*.py")):
-            if not has_valid_header(path):
-                offenders.append(path.relative_to(repo_root))
+            check(path)
+
+    for pattern in ("*.yml", "*.yaml"):
+        for path in sorted(repo_root.rglob(pattern)):
+            if YAML_EXCLUDE_DIRS.intersection(path.relative_to(repo_root).parts):
+                continue
+            check(path)
 
     if offenders:
         print("Missing or malformed license header in the following files:", file=sys.stderr)
         for path in offenders:
             print(f"  {path}", file=sys.stderr)
         print(
-            "\nEach Python source file must begin with:\n\n"
+            "\nEach source file must begin with:\n\n"
             f"{LINE1}\n{LINE2}\n"
             "# This product includes software developed at Datadog "
             "(https://www.datadoghq.com/) Copyright <year> Datadog, Inc.",
@@ -79,7 +98,7 @@ def main() -> int:
         )
         return 1
 
-    print("All Python source files carry a valid license header.")
+    print("All source files carry a valid license header.")
     return 0
 
 
