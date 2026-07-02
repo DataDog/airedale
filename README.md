@@ -388,33 +388,12 @@ Exit codes: `0` success, `1` runtime error, `2` configuration error.
 
 ---
 
-## Development
-
-```bash
-# Install dependencies (including dev extras)
-uv sync
-
-# Run tests (fully offline — no network, no real provider calls)
-uv run pytest
-
-# Lint and format
-uv run ruff check . --fix
-uv run ruff format .
-```
-
-This project uses **[jj (Jujutsu)](https://github.com/jj-vcs/jj)** for version
-control. Never run vanilla `git` mutating commands.
-
----
-
 ## Contributing
 
-Pull requests welcome. Please:
-
-- Keep all tests fully offline (mock SDK clients and LLMObs).
-- Follow the conventional-commit subject format (`feat(scope):`, `fix:`,
-  `test:`, `docs:`, `chore:`).
-- Run `uv run ruff check . --fix && uv run ruff format .` before submitting.
+Contributions are welcome. See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for the
+development environment, dependency policy, testing requirements, coding style,
+and pull-request conventions, and [`AGENTS.md`](./AGENTS.md) for the
+architectural contract.
 
 ---
 
