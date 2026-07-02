@@ -20,7 +20,7 @@ name: LICENSE-3rdparty
 #   - The closure includes venv-baseline packages (e.g. pip) and resolves
 #     UNPINNED dependency versions, so the CSV can drift when a transitive
 #     dependency publishes a new release. Regenerate with the command printed
-#     on failure and run this on Python 3.12 to match how the file was created.
+#     on failure and run this on Python 3.14 to match how the file was created.
 
 on:
   push:
@@ -43,12 +43,12 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
-          python-version: "3.12"
+          python-version: "3.14"
 
       - name: Install dd-license-attribution
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "dd-license-attribution @ git+https://github.com/DataDog/dd-license-attribution.git@v0.5.0"
+          python -m pip install "dd-license-attribution@git+https://github.com/DataDog/dd-license-attribution.git@3dc43233d9752e0be4f1cdcf92f4b0bc5cc638ac"
 
       - name: Generate and verify LICENSE-3rdparty.csv
         env:
@@ -58,35 +58,51 @@ jobs:
           PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name || '' }}
         run: |
           set -euo pipefail
-          REPO_URL="https://github.com/DataDog/airedale"
-          FLAGS="--no-github-sbom-strategy --no-scancode-strategy --no-npm-strategy --no-gopkg-strategy"
+          REPO_ID="DataDog/airedale"
+          REPO_URL="https://github.com/${REPO_ID}"
+          FLAGS="--no-github-sbom-strategy --no-gopkg-strategy --no-npm-strategy"
 
           if [ "${EVENT_NAME}" = "pull_request" ]; then
             # dd-license-attribution clones the canonical repo's default branch, not
             # the PR branch, so mirror the canonical URL to the PR head repo/branch.
             # Build the JSON with a real encoder so odd (but valid) branch names
             # can't break or inject structure into the file.
-            python3 - "${REPO_URL}" "${PR_HEAD_REPO}" "${HEAD_REF}" > mirrors.json <<'PY'
+            python3 - "${REPO_URL}" "${PR_HEAD_REPO}" "${HEAD_REF}" "${GITHUB_TOKEN}" > mirrors.json <<'PY'
           import json, sys
-          repo_url, head_repo, head_ref = sys.argv[1], sys.argv[2], sys.argv[3]
+          repo_url, head_repo, head_ref = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
           json.dump(
               [{
                   "original_url": repo_url,
-                  "mirror_url": f"https://github.com/{head_repo}",
+                  "mirror_url": f"https://git:{token}@github.com/{head_repo}",
                   "ref_mapping": {"branch:main": f"branch:{head_ref}"},
               }],
               sys.stdout,
           )
           PY
             echo "Scanning PR branch ${HEAD_REF} from ${PR_HEAD_REPO}"
-            dd-license-attribution generate-sbom ${FLAGS} --use-mirrors=mirrors.json "${REPO_URL}" > ddla-output.csv
           else
-            dd-license-attribution generate-sbom ${FLAGS} "${REPO_URL}" > ddla-output.csv
+            python3 - "${REPO_URL}" "${REPO_ID}" "${GITHUB_TOKEN}" > mirrors.json <<'PY'
+          import json, sys
+          repo_url, repo_id, token = sys.argv[1], sys.argv[2], sys.argv[3]
+          json.dump(
+              [{
+                  "original_url": repo_url,
+                  "mirror_url": f"https://git:{token}@github.com/{repo_id}",
+                  "ref_mapping": {"branch:main": f"branch:main"},
+              }],
+              sys.stdout,
+          )
+          PY
           fi
+
+          # Make sure this is cleaned up even if the script fails.
+          trap 'rm -f mirrors.json' EXIT
+
+          dd-license-attribution generate-sbom ${FLAGS} --use-mirrors=mirrors.json "${REPO_URL}" > ddla-output.csv
 
           if ! cmp -s LICENSE-3rdparty.csv ddla-output.csv; then
             echo "::error::LICENSE-3rdparty.csv is out of date."
-            echo "Regenerate it (on Python 3.12) with:"
+            echo "Regenerate it (on Python 3.14) with:"
             echo "  dd-license-attribution generate-sbom ${FLAGS} ${REPO_URL} > LICENSE-3rdparty.csv"
             echo "----- diff (committed <=> generated) -----"
             diff -u LICENSE-3rdparty.csv ddla-output.csv || true
