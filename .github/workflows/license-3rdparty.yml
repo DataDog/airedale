@@ -1,0 +1,99 @@
+name: LICENSE-3rdparty
+
+# Verifies that the committed LICENSE-3rdparty.csv matches what
+# dd-license-attribution produces for the current dependency closure.
+#
+# Notes on the generation strategy:
+#   - The GitHub-SBOM strategy is disabled: it depends on GitHub's dependency
+#     graph, which is only available for the pushed repository and cannot be
+#     reproduced locally when regenerating the file. Dependency discovery is
+#     instead driven by the PyPI strategy, which installs the project into a
+#     throwaway virtualenv and reads back the resolved closure. airedale is a
+#     pure-Python project, so this is complete.
+#   - ScanCode / npm / GoPkg strategies are disabled: airedale has no vendored
+#     sources, JS, or Go modules, and skipping them keeps the run fast and
+#     deterministic (and avoids needing Node/Go toolchains).
+#   - The closure includes venv-baseline packages (e.g. pip) and resolves
+#     UNPINNED dependency versions, so the CSV can drift when a transitive
+#     dependency publishes a new release. Regenerate with the command printed
+#     on failure and run this on Python 3.12 to match how the file was created.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify LICENSE-3rdparty.csv
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Install dd-license-attribution
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "dd-license-attribution @ git+https://github.com/DataDog/dd-license-attribution.git@v0.5.0"
+
+      - name: Generate and verify LICENSE-3rdparty.csv
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref || '' }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name || '' }}
+        run: |
+          set -euo pipefail
+          REPO_URL="https://github.com/DataDog/airedale"
+          FLAGS="--no-github-sbom-strategy --no-scancode-strategy --no-npm-strategy --no-gopkg-strategy"
+
+          if [ "${EVENT_NAME}" = "pull_request" ]; then
+            # dd-license-attribution clones the canonical repo's default branch, not
+            # the PR branch, so mirror the canonical URL to the PR head repo/branch.
+            # Build the JSON with a real encoder so odd (but valid) branch names
+            # can't break or inject structure into the file.
+            python3 - "${REPO_URL}" "${PR_HEAD_REPO}" "${HEAD_REF}" > mirrors.json <<'PY'
+          import json, sys
+          repo_url, head_repo, head_ref = sys.argv[1], sys.argv[2], sys.argv[3]
+          json.dump(
+              [{
+                  "original_url": repo_url,
+                  "mirror_url": f"https://github.com/{head_repo}",
+                  "ref_mapping": {"branch:main": f"branch:{head_ref}"},
+              }],
+              sys.stdout,
+          )
+          PY
+            echo "Scanning PR branch ${HEAD_REF} from ${PR_HEAD_REPO}"
+            dd-license-attribution generate-sbom ${FLAGS} --use-mirrors=mirrors.json "${REPO_URL}" > ddla-output.csv
+          else
+            dd-license-attribution generate-sbom ${FLAGS} "${REPO_URL}" > ddla-output.csv
+          fi
+
+          if ! cmp -s LICENSE-3rdparty.csv ddla-output.csv; then
+            echo "::error::LICENSE-3rdparty.csv is out of date."
+            echo "Regenerate it (on Python 3.12) with:"
+            echo "  dd-license-attribution generate-sbom ${FLAGS} ${REPO_URL} > LICENSE-3rdparty.csv"
+            echo "----- diff (committed <=> generated) -----"
+            diff -u LICENSE-3rdparty.csv ddla-output.csv || true
+            exit 1
+          fi
+          echo "LICENSE-3rdparty.csv is up to date."
+
+      - name: Upload generated CSV on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ddla-output
+          path: ddla-output.csv
+          if-no-files-found: ignore
