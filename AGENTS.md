@@ -461,6 +461,21 @@ config errors or when `--fail-fast` and a cell fails.
 
 ## 8. Development workflow
 
+See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for contribution details not repeated
+here, including:
+
+- the contribution process (open an issue before new features/behavior changes);
+- **dependency management** (minimal-dependencies policy; `==`-pinning non-dev
+  dependencies unless a commented exception applies);
+- licensing of code copied from other repositories (origin-specific files with
+  the source's header, `Apache-2.0`-compatible licenses only);
+- PR conventions — conventional-commit PR titles, the why/what PR body, and
+  issue-linking footers (`Fixes:`, `Depends-On:`);
+- the CI jobs and how to run the same checks locally;
+- regenerating [`LICENSE-3rdparty.csv`](./LICENSE-3rdparty.csv) when the
+  dependency closure drifts;
+- getting a PR reviewed.
+
 - **Python:** ≥ 3.11, < 3.14. Use `uv` for envs (`uv sync`, `uv run ...`).
 - **Lint/format:** `uv run ruff check .` and `uv run ruff format .` (line length 120).
 - **Tests:** `uv run pytest`. Unit tests MUST run fully offline — no network, no

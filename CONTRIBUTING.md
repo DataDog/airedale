@@ -53,6 +53,34 @@ The two provider execution engines (`claude-agent-sdk`, `openai-codex`) are
 declared as dependencies, but may need to be installed explicitly on some
 platforms — see the [README](./README.md#external-sdk-requirements).
 
+## Dependency management
+
+`airedale` deliberately takes **minimal dependencies**. Every dependency is a
+long-term maintenance and security liability, so a new one should only be
+introduced when it either:
+
+- **meaningfully reduces the maintenance burden** of the project (i.e. it
+  replaces a non-trivial amount of code we would otherwise have to write, test,
+  and maintain ourselves), or
+- is **essential** — there is no reasonable way to deliver the functionality
+  without it.
+
+When in doubt, prefer the standard library or a small amount of in-repo code
+over a new dependency.
+
+Non-dev dependencies (the `[project].dependencies` list in
+[`pyproject.toml`](./pyproject.toml)) MUST be pinned with an exact `==` version
+so the dependency closure — and [`LICENSE-3rdparty.csv`](./LICENSE-3rdparty.csv)
+— stays reproducible. If a dependency needs a more open range (`>=`, `<`, etc.),
+add an inline comment explaining **why**. For example:
+
+```toml
+"openai-codex-cli-bin>=0.137.0a4", # 0.136.0 is missing a manylinux wheel
+```
+
+Dev dependencies (the `[dependency-groups].dev` list) are not subject to the
+`==` pinning rule.
+
 ## Pull requests
 
 `airedale` uses the [conventional commits][conventional-commits] specification
