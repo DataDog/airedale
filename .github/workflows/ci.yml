@@ -1,6 +1,6 @@
 # Unless explicitly stated otherwise all files in this repository are licensed under the Apache-2.0 License.
 #
-# This product includes software developed at Datadog (https://www.datadoghq.com/) Copyright 2026 Datadog, Inc.
+# This product includes software developed at Datadog (https://www.datadoghq.com/) Copyright 2026-present Datadog, Inc.
 
 name: CI
 
@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   checks:
-    name: checks (headers, format, lint)
+    name: checks (format, lint)
     runs-on: ubuntu-latest
     steps:
       - name: Check out the repository
@@ -33,9 +33,6 @@ jobs:
 
       - name: Install dependencies
         run: uv sync
-
-      - name: Verify license headers
-        run: uv run python scripts/check_license_headers.py
 
       - name: Check formatting
         run: uv run ruff format --check .

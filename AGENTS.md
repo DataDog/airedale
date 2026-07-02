@@ -484,17 +484,22 @@ here, including:
   Codex overrides), `ModelSpec`/`UsageMetrics`, judge JSON parsing, skill staging.
 - **Type hints:** everywhere; `from __future__ import annotations` at the top of
   every module. Prefer dataclasses for value objects.
-- **License headers:** every source file must begin with the Datadog license
-  header, verified by `scripts/check_license_headers.py` (run in CI). This covers
-  `*.py` under `src/`, `tests/`, `examples/`, and `*.yml`/`*.yaml` repo-wide.
-  When creating a new file of one of those types, start it with the header block
-  (after an optional `#!` shebang / encoding line) using a `#`-comment prefix:
+- **License headers:** every source file should begin with the Apache-2.0
+  license line, and — when the author/submitter is a Datadog employee — the
+  Datadog copyright line as well. When creating such a new file (`*.py`,
+  `*.yml`/`*.yaml`, etc.), start it with the header block (after an optional
+  `#!` shebang / encoding line) using a `#`-comment prefix:
   ```
   # Unless explicitly stated otherwise all files in this repository are licensed under the Apache-2.0 License.
   #
-  # This product includes software developed at Datadog (https://www.datadoghq.com/) Copyright <year> Datadog, Inc.
+  # This product includes software developed at Datadog (https://www.datadoghq.com/) Copyright <year>-present Datadog, Inc.
   ```
-  `<year>` is the 4-digit year the file was introduced.
+  `<year>` is the 4-digit year the file was introduced. Files created or heavily
+  modified by third-party (non-Datadog) authors need not carry the Datadog
+  copyright line — the Apache-2.0 license line alone is sufficient. Files copied
+  from another project (under an `Apache-2.0`-compatible license) must **retain**
+  their original copyright/license header and a reference to their source, and
+  must not have the Datadog copyright line prepended.
 - **Secrets:** never commit tokens; never log bearer tokens; redact headers in
   LLMObs metadata.
 

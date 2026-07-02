@@ -16,25 +16,27 @@ PR to this repository, you are making the contribution under the terms of the
 [`Apache-2.0` license](./LICENSE), and you affirm that you are authorized to do
 so.
 
-Every source file must begin with the Datadog license header (after an optional
-`#!` shebang or PEP 263 encoding line). This covers `*.py` files under `src/`,
-`tests/`, and `examples/`, as well as `*.yml`/`*.yaml` files repo-wide (e.g. the
-GitHub Actions workflows):
+Every source file should begin with the Apache-2.0 license line:
 
-```python
+```
 # Unless explicitly stated otherwise all files in this repository are licensed under the Apache-2.0 License.
-#
-# This product includes software developed at Datadog (https://www.datadoghq.com/) Copyright 2026 Datadog, Inc.
 ```
 
-The `<year>` may be any 4-digit year; files introduced in different years keep
-their original year. The [`scripts/check_license_headers.py`](./scripts/check_license_headers.py)
-check (run in CI) verifies this.
+Files authored or heavily modified by a Datadog employee should additionally
+carry the Datadog copyright line:
+
+```
+# This product includes software developed at Datadog (https://www.datadoghq.com/) Copyright <year>-present Datadog, Inc.
+```
+
+where `<year>` is the 4-digit year the file was introduced. Files created or
+heavily modified by third-party (non-Datadog) authors need not include the
+Datadog copyright line.
 
 Code copied from another repository should live in separate files containing only
-code from that same origin, and must carry the original repository's licensing
-header below Datadog's header. Such code must be governed by a license compatible
-with [`Apache-2.0`](./LICENSE).
+code from that same origin, and must **retain** the original repository's
+copyright/license header and a reference to its source. Such code must be
+governed by a license compatible with [`Apache-2.0`](./LICENSE).
 
 ## Development environment
 
@@ -128,8 +130,7 @@ failing checks will not be reviewed as a priority.
 
 The [CI workflow](./.github/workflows/ci.yml) runs two jobs:
 
-1. **checks (headers, format, lint):**
-   - `uv run python scripts/check_license_headers.py` — license-header check.
+1. **checks (format, lint):**
    - `uv run ruff format --check .` — formatting.
    - `uv run ruff check --no-fix .` — lint.
 2. **test (py3.11 – py3.14):** `uv run pytest` on every supported Python version.
@@ -159,9 +160,6 @@ uv run ruff check . --fix
 # Reproduce CI exactly (no autofix)
 uv run ruff format --check .
 uv run ruff check --no-fix .
-
-# License headers
-uv run python scripts/check_license_headers.py
 
 # Tests
 uv run pytest
