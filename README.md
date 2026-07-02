@@ -35,12 +35,8 @@ Given two TOML files the harness:
 | `anthropic` | `claude-agent-sdk`          | Native integration (ddtrace owns spans) |
 | `openai`    | `openai-codex`              | Decorator spans (`@agent` / `@llm`) |
 
-### Distributed tracing for complete token accounting
-
-Trace-context headers are injected into every HTTP MCP request, so an
-LLMObs-instrumented server's spans link back to the experiment and the tokens it
-consumes — including those used by sub-agents inside the server — are rolled into
-the experiment's `token_count`. See
+When an MCP server is itself LLMObs-instrumented, its spans link back to the
+experiment so the tokens it consumes are rolled into the experiment's total. See
 [How distributed tracing works](#how-distributed-tracing-works) for details.
 
 ---
@@ -55,25 +51,18 @@ uv pip install -e .
 # uv pip install airedale
 ```
 
-### External SDK requirements
+The provider execution engines (`claude-agent-sdk`, `openai-codex`) are regular
+dependencies and are installed automatically.
 
-The provider execution engines are not bundled as transitive dependencies on all
-platforms. Install them explicitly:
-
-```bash
-uv pip install "claude-agent-sdk==0.2.82"   # Anthropic / Claude Code
-uv pip install "openai-codex>=0.1.0b2"       # OpenAI Codex
-```
-
-### Required environment variables
+### Environment variables
 
 | Variable        | Purpose                                        | Required when          |
 |-----------------|------------------------------------------------|------------------------|
-| `DD_API_KEY`    | Datadog API key for LLMObs                     | Always                 |
-| `DD_APP_KEY`    | Datadog App key for LLMObs                     | Always                 |
-| `DD_SITE`       | Datadog site (e.g. `datadoghq.com`)            | Always                 |
-| `ANTHROPIC_API_KEY` | Anthropic API key                          | Without a gateway      |
-| `OPENAI_API_KEY`    | OpenAI API key                             | Without a gateway      |
+| `DD_API_KEY`    | Datadog API key for LLMObs                      | Always                 |
+| `DD_APP_KEY`    | Datadog App key (datasets & experiments API)   | Always                 |
+| `DD_SITE`       | Datadog site (default `datadoghq.com`)          | Only for a non-default site |
+| `ANTHROPIC_API_KEY` | Anthropic API key                          | Anthropic models, without a gateway |
+| `OPENAI_API_KEY`    | OpenAI API key                             | OpenAI models, without a gateway    |
 
 ---
 
@@ -154,7 +143,7 @@ See `examples/` for fully-worked configs and a sample skill directory.
 | `project` | string | yes | LLMObs `ml_app` / project name |
 | `models` | list of strings | yes | Provider-qualified models (`"<provider>/<model>"`) |
 | `scenarios` | table | yes | Named scenario blocks (see below) |
-| `tasks` | array of tables | yes | Prompt + criteria definitions (see below) |
+| `tasks` | table | yes | Prompt + criteria definitions, keyed by task id (see below) |
 | `description` | string | no | Human description applied to the dataset |
 | `judge_model` | string | no | Model for rubric scoring (default `anthropic/claude-sonnet-4-6`) |
 | `runs` | int | no | Runs per cell (default `1`) |
