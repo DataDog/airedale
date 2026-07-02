@@ -1,3 +1,7 @@
+# Unless explicitly stated otherwise all files in this repository are licensed under the Apache-2.0 License.
+#
+# This product includes software developed at Datadog (https://www.datadoghq.com/) Copyright 2026 Datadog, Inc.
+
 """Run the ``model × scenario × task`` evaluation matrix through LLMObs.
 
 Each cell becomes one :class:`LLMObs.async_experiment` over a single-record

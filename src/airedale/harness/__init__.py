@@ -1,3 +1,7 @@
+# Unless explicitly stated otherwise all files in this repository are licensed under the Apache-2.0 License.
+#
+# This product includes software developed at Datadog (https://www.datadoghq.com/) Copyright 2026 Datadog, Inc.
+
 """Harness layer: provider-native agent SDK runners.
 
 ``create_runner`` selects the engine from the model provider (Claude Agent SDK

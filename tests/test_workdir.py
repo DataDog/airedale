@@ -1,3 +1,7 @@
+# Unless explicitly stated otherwise all files in this repository are licensed under the Apache-2.0 License.
+#
+# This product includes software developed at Datadog (https://www.datadoghq.com/) Copyright 2026 Datadog, Inc.
+
 """Tests for airedale.workdir — WorkspaceManager.
 
 These run against a small local throwaway git repo created per test. Plain git

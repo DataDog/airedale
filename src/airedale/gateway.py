@@ -1,3 +1,7 @@
+# Unless explicitly stated otherwise all files in this repository are licensed under the Apache-2.0 License.
+#
+# This product includes software developed at Datadog (https://www.datadoghq.com/) Copyright 2026 Datadog, Inc.
+
 """Runtime gateway credential resolution and provider configuration."""
 
 from __future__ import annotations
@@ -46,7 +50,9 @@ def _run_credentials_helper(command: str) -> str:
     last_error: subprocess.CalledProcessError | None = None
     for attempt in range(1, _CREDENTIALS_HELPER_MAX_ATTEMPTS + 1):
         try:
-            logger.debug(f"Running credentials helper (attempt {attempt}/{_CREDENTIALS_HELPER_MAX_ATTEMPTS}): {command}")
+            logger.debug(
+                f"Running credentials helper (attempt {attempt}/{_CREDENTIALS_HELPER_MAX_ATTEMPTS}): {command}"
+            )
             result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=30, check=True)
             output = result.stdout.strip()
 
