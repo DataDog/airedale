@@ -3,7 +3,7 @@ name = "airedale"
 version = "0.1.0"
 description = "Config-driven evaluation harness for agentic LLM runs, reporting to Datadog LLM Observability Experiments"
 readme = "README.md"
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.11,<3.15"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Datadog, Inc." }]
 keywords = ["llm", "evals", "datadog", "llmobs", "mcp", "agents", "observability"]
@@ -14,6 +14,8 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Software Development :: Testing",
 ]
 dependencies = [
