@@ -62,6 +62,11 @@ jobs:
           REPO_URL="https://github.com/${REPO_ID}"
           FLAGS="--no-github-sbom-strategy --no-gopkg-strategy --no-npm-strategy"
 
+          if [ -f ".ddla-overrides" ]; then
+            echo "Using overrides in .ddla-overrides"
+            FLAGS="${FLAGS} --override-spec=.ddla-overrides"
+          fi
+
           if [ "${EVENT_NAME}" = "pull_request" ]; then
             # dd-license-attribution clones the canonical repo's default branch, not
             # the PR branch, so mirror the canonical URL to the PR head repo/branch.

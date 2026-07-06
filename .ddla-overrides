@@ -1,0 +1,188 @@
+[
+  {
+    "override_type": "replace",
+    "target": {
+      "origin": "https://github.com/python/typing_extensions"
+    },
+    "replacement": {
+      "name": "typing_extensions",
+      "origin": "https://github.com/python/typing_extensions",
+      "version": "2.14.0",
+      "license": [
+        "PSF-2.0"
+      ],
+      "copyright": [
+        "Corporation for National Research Initiatives",
+        "Python Software Foundation",
+        "Stichting Mathematisch Centrum Amsterdam, The Netherlands"
+      ]
+    }
+  },
+  {
+    "override_type": "replace",
+    "target": {
+      "origin": "https://github.com/executablebooks/markdown-it-py"
+    },
+    "replacement": {
+      "name": "markdown-it-py",
+      "origin": "https://github.com/executablebooks/markdown-it-py",
+      "version": "3.0.0",
+      "license": [
+        "MIT"
+      ],
+      "copyright": [
+        "ExecutableBookProject"
+      ]
+    }
+  },
+  {
+    "override_type": "replace",
+    "target": {
+      "origin": "https://github.com/pyca/cryptography/"
+    },
+    "replacement": {
+      "name": "cryptography",
+      "origin": "https://github.com/pyca/cryptography",
+      "license": [
+        "Apache-2.0 OR BSD-3-Clause"
+      ],
+      "copyright": [
+        "The cryptography developers <cryptography-dev@python.org>"
+      ]
+    }
+  },
+
+  {
+    "override_type": "replace",
+    "target": {
+      "component": "jiter"
+    },
+    "replacement": {
+      "name": "jiter",
+      "origin": "https://github.com/pydantic/jiter",
+      "license": [
+        "MIT"
+      ],
+      "copyright": [
+        "Samuel Colvin"
+      ]
+    }
+  },
+  {
+    "override_type": "replace",
+    "target": {
+      "component": "bytecode"
+    },
+    "replacement": {
+      "name": "bytecode",
+      "origin": "https://github.com/MatthieuDartiailh/bytecode",
+      "license": ["MIT"],
+      "copyright": ["MatthieuDartiailh", "Contributors to the bytecode project"]
+    }
+  },
+  {
+    "override_type": "replace",
+    "target": {
+      "component": "distro"
+    },
+    "replacement": {
+      "name": "distro",
+      "origin": "https://github.com/python-distro/distro",
+      "license": ["Apache-2.0"],
+      "copyright": ["Nir Cohen"]
+    }
+  },
+  {
+    "override_type": "replace",
+    "target": {
+      "component": "ddtrace"
+    },
+    "replacement": {
+      "name": "ddtrace",
+      "origin": "https://github.com/DataDog/dd-trace-py",
+      "license": ["BSD-3-Clause"],
+      "copyright": ["Datadog, Inc."]
+    }
+  },
+  {
+    "override_type": "replace",
+    "target": {
+      "component": "envier"
+    },
+    "replacement": {
+      "name": "envier",
+      "origin": "https://github.com/DataDog/envier",
+      "license": ["MIT"],
+      "copyright": ["Datadog, Inc."]
+    }
+  },
+  {
+    "override_type": "replace",
+    "target": {
+      "component": "pytest",
+      "origin": "pytest"
+    },
+    "replacement": {
+      "name": "pytest",
+      "origin": "https://github.com/pytest-dev/pytest",
+      "license": [
+        "MIT"
+      ],
+      "copyright": [
+        "Holger Krekel"
+      ]
+    }
+  },
+  {
+    "override_type": "replace",
+    "target": {
+      "component": "pytest-asyncio",
+      "origin": "pytest-asyncio"
+    },
+    "replacement": {
+      "name": "pytest-asyncio",
+      "origin": "https://github.com/pytest-dev/pytest-asyncio",
+      "license": [
+        "Apache-2.0"
+      ],
+      "copyright": [
+        "Tin Tvrtkovi\u0107",
+        "Michael Seifert"
+      ]
+    }
+  },
+  {
+    "override_type": "replace",
+    "target": {
+      "component": "pytest-mock",
+      "origin": "pytest-mock"
+    },
+    "replacement": {
+      "name": "pytest-mock",
+      "origin": "https://github.com/pytest-dev/pytest-mock",
+      "license": [
+        "MIT"
+      ],
+      "copyright": [
+        "Bruno Oliveira"
+      ]
+    }
+  },
+  {
+    "override_type": "replace",
+    "target": {
+      "component": "ruff",
+      "origin": "ruff"
+    },
+    "replacement": {
+      "name": "ruff",
+      "origin": "https://github.com/astral-sh/ruff",
+      "license": [
+        "MIT"
+      ],
+      "copyright": [
+        "Astral Software Inc."
+      ]
+    }
+  }
+]
