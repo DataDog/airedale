@@ -1,0 +1,33 @@
+# Unless explicitly stated otherwise all files in this repository are licensed under the Apache-2.0 License.
+#
+# This product includes software developed at Datadog (https://www.datadoghq.com/) Copyright 2026-present Datadog, Inc.
+
+version: 2
+
+updates:
+  # Python dependencies (pyproject.toml + uv.lock).
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    groups:
+      python-dev:
+        dependency-type: "development"
+      python-prod:
+        dependency-type: "production"
+
+  # GitHub Actions used by workflows under .github/workflows.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
