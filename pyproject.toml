@@ -1,6 +1,6 @@
 [project]
 name = "airedale"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Config-driven evaluation harness for agentic LLM runs, reporting to Datadog LLM Observability Experiments"
 readme = "README.md"
 requires-python = ">=3.11,<3.15"
@@ -48,6 +48,9 @@ Repository = "https://github.com/DataDog/airedale"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/airedale/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/airedale"]
