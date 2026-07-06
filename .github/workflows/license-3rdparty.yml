@@ -74,7 +74,7 @@ jobs:
             # can't break or inject structure into the file.
             python3 - "${REPO_URL}" "${PR_HEAD_REPO}" "${HEAD_REF}" "${GITHUB_TOKEN}" > mirrors.json <<'PY'
           import json, sys
-          repo_url, head_repo, head_ref = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+          repo_url, head_repo, head_ref, token = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
           json.dump(
               [{
                   "original_url": repo_url,
