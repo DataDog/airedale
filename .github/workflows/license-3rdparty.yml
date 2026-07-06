@@ -26,6 +26,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
 
 permissions:
   contents: read
@@ -56,6 +57,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           HEAD_REF: ${{ github.head_ref || '' }}
           PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name || '' }}
+          MERGE_GROUP_REF: ${{ github.event.merge_group.head_ref || '' }}
         run: |
           set -euo pipefail
           REPO_ID="DataDog/airedale"
@@ -86,18 +88,27 @@ jobs:
           PY
             echo "Scanning PR branch ${HEAD_REF} from ${PR_HEAD_REPO}"
           else
-            python3 - "${REPO_URL}" "${REPO_ID}" "${GITHUB_TOKEN}" > mirrors.json <<'PY'
+            # push -> scan `main`; merge_group -> scan the temporary
+            # `gh-readonly-queue/...` branch that carries the queued changes.
+            # Both branches live in the canonical repo, so mirror onto it.
+            if [ "${EVENT_NAME}" = "merge_group" ]; then
+              TARGET_BRANCH="${MERGE_GROUP_REF#refs/heads/}"
+            else
+              TARGET_BRANCH="main"
+            fi
+            python3 - "${REPO_URL}" "${REPO_ID}" "${GITHUB_TOKEN}" "${TARGET_BRANCH}" > mirrors.json <<'PY'
           import json, sys
-          repo_url, repo_id, token = sys.argv[1], sys.argv[2], sys.argv[3]
+          repo_url, repo_id, token, target = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
           json.dump(
               [{
                   "original_url": repo_url,
                   "mirror_url": f"https://git:{token}@github.com/{repo_id}",
-                  "ref_mapping": {"branch:main": f"branch:main"},
+                  "ref_mapping": {"branch:main": f"branch:{target}"},
               }],
               sys.stdout,
           )
           PY
+            echo "Scanning branch ${TARGET_BRANCH} from ${REPO_ID}"
           fi
 
           # Make sure this is cleaned up even if the script fails.
