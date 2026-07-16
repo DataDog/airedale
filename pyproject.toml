@@ -19,12 +19,12 @@ classifiers = [
     "Topic :: Software Development :: Testing",
 ]
 dependencies = [
-    "ddtrace==4.10.7",
+    "ddtrace==4.11.0",
     "anthropic==0.116.0",
-    "openai==2.44.0",
-    "claude-agent-sdk==0.2.114",
+    "openai==2.45.0",
+    "claude-agent-sdk==0.2.120",
     "openai-codex==0.1.0b3",
-    "openai-codex-cli-bin>=0.137.0a4", # 0.136.0 is missing a manylinux wheel
+    "openai-codex-cli-bin>=0.144.4", # 0.136.0 is missing a manylinux wheel
     "mcp==1.28.1",
     "httpx==0.28.1",
     "rich==15.0.0",
