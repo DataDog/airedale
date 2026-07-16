@@ -33,7 +33,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --prerelease=allow
 
       - name: Check formatting
         run: uv run ruff format --check .
@@ -62,7 +62,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --prerelease=allow
 
       - name: Run tests
         run: uv run pytest
