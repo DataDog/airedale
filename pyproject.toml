@@ -24,7 +24,6 @@ dependencies = [
     "openai==2.45.0",
     "claude-agent-sdk==0.2.120",
     "openai-codex==0.1.0b3",
-    "openai-codex-cli-bin>=0.144.4", # 0.136.0 is missing a manylinux wheel
     "mcp==1.28.1",
     "httpx==0.28.1",
     "rich==15.0.0",
