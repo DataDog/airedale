@@ -344,13 +344,16 @@ original (do NOT copy hardcoded project names / gateway URLs / credential tools)
 # types.py
 ModelProvider = Literal["anthropic", "openai"]
 
+
 @dataclass(frozen=True)
 class ModelSpec:
     provider: ModelProvider
-    name: str       # provider-native model id, e.g. "claude-sonnet-4-6"
-    label: str      # original "<provider>/<name>"
+    name: str  # provider-native model id, e.g. "claude-sonnet-4-6"
+    label: str  # original "<provider>/<name>"
+
     @classmethod
     def parse(cls, value: str) -> "ModelSpec": ...  # rejects non-provider-qualified / unknown providers
+
 
 @dataclass
 class UsageMetrics:
@@ -361,6 +364,7 @@ class UsageMetrics:
     cache_read_input_tokens: int = 0
     reasoning_output_tokens: int = 0
     estimated_cost_usd: float = 0.0
+
     def add(self, other) -> None: ...
     def to_llmobs_metrics(self) -> dict[str, int | float]: ...
     @classmethod
@@ -372,13 +376,16 @@ class UsageMetrics:
     @classmethod
     def from_codex(cls, usage): ...
 
+
 @dataclass
 class HarnessResult:
     answer: str
     usage: UsageMetrics
     tool_calls: list[dict]
-    harness: str       # scenario name
-    def to_output_data(self) -> dict: ...   # {"answer", "usage", "tool_calls", "harness"}
+    harness: str  # scenario name
+
+    def to_output_data(self) -> dict: ...  # {"answer", "usage", "tool_calls", "harness"}
+
 
 def slugify(value: str) -> str: ...
 ```

@@ -24,7 +24,7 @@ dependencies = [
     "openai==2.50.0",
     "claude-agent-sdk==0.2.128",
     "openai-codex==0.144.4",
-    "mcp==2.0.0",
+    "mcp==1.28.1",
     "httpx==0.28.1",
     "rich==15.0.0",
 ]
