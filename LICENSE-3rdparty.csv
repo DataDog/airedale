@@ -32,6 +32,7 @@
 "openai-codex","https://github.com/openai/codex","['Apache-2.0']","['OpenAI']"
 "openai-codex-cli-bin","https://github.com/openai/codex","['Apache-2.0']","['OpenAI']"
 "opentelemetry-api","https://github.com/open-telemetry/opentelemetry-python","['Apache-2.0']","['open-telemetry']"
+"packaging","https://github.com/pypa/packaging","['BSD-3-Clause OR Apache-2.0']","['pypa']"
 "pip","https://github.com/pypa/pip","['MIT']","['Andrey Petrov and contributors', 'Corporation for National Research Initiatives', 'Eric Larson', 'INADA Naoki', 'Kim Davies and contributors', 'Python Software Foundation', 'Seth Michael Larson', 'Stichting Mathematisch Centrum Amsterdam, The Netherlands', 'Taneli Hukkinen', 'The pip developers', 'The platformdirs developers', 'Thomas Kluyver', 'Tzu-ping Chung', 'Will McGugan']"
 "pycparser","https://github.com/eliben/pycparser","['BSD-3-Clause']","['Eli Bendersky']"
 "pydantic","https://github.com/pydantic/pydantic","['MIT']","['Samuel Colvin']"

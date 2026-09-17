@@ -19,12 +19,12 @@ classifiers = [
     "Topic :: Software Development :: Testing",
 ]
 dependencies = [
-    "ddtrace==4.13.1",
-    "anthropic==1.0.0",
-    "openai==3.3.1",
-    "claude-agent-sdk==0.2.144",
-    "openai-codex==0.147.0",
-    "mcp==1.29.0",
+    "ddtrace==4.14.0",
+    "anthropic==1.5.0",
+    "openai==3.13.0",
+    "claude-agent-sdk==0.2.152",
+    "openai-codex==0.154.0",
+    "mcp==1.30.0",
     "httpx==0.28.1",
     "rich==15.0.0",
 ]
