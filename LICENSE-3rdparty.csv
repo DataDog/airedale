@@ -24,7 +24,7 @@
 "idna","https://github.com/kjd/idna","['BSD-3-Clause']","['Kim Davies and contributors']"
 "jiter","https://github.com/pydantic/jiter","['MIT']","['Samuel Colvin']"
 "jsonschema","https://github.com/python-jsonschema/jsonschema","['MIT']","['Julian Berman']"
-"jsonschema-specifications","https://github.com/python-jsonschema/jsonschema-specifications","['MIT']","['Julian Berman']"
+"jsonschema-specifications","https://github.com/python-jsonschema/jsonschema-specifications","['BSD-3-Clause', 'MIT']","['JSON Schema', 'Julian Berman']"
 "markdown-it-py","https://github.com/executablebooks/markdown-it-py","['MIT']","['ExecutableBookProject']"
 "mcp","https://github.com/modelcontextprotocol/python-sdk","['MIT']","['Anthropic', 'PBC.']"
 "mdurl","https://github.com/executablebooks/mdurl","['MIT']","['Joyent, Inc. and other Node contributors', 'Taneli Hukkinen', 'Vitaly Puzrin, Alex Kocharin']"
