@@ -107,6 +107,18 @@
   {
     "override_type": "replace",
     "target": {
+      "component": "ddtrace-internal"
+    },
+    "replacement": {
+      "name": "ddtrace-internal",
+      "origin": "https://github.com/DataDog/dd-trace-py",
+      "license": ["BSD-3-Clause"],
+      "copyright": ["Datadog, Inc."]
+    }
+  },
+  {
+    "override_type": "replace",
+    "target": {
       "component": "envier"
     },
     "replacement": {
