@@ -12,6 +12,7 @@
 "click","https://github.com/pallets/click","['BSD-3-Clause']","['Pallets']"
 "cryptography","https://github.com/pyca/cryptography","['Apache-2.0 OR BSD-3-Clause']","['The cryptography developers <cryptography-dev@python.org>']"
 "ddtrace","https://github.com/DataDog/dd-trace-py","['BSD-3-Clause']","['Datadog, Inc.']"
+"ddtrace-internal","https://github.com/DataDog/dd-trace-py","['BSD-3-Clause']","['Datadog, Inc.']"
 "docstring-parser","https://github.com/rr-/docstring_parser","['MIT']","['Marcin Kurczewski']"
 "envier","https://github.com/DataDog/envier","['MIT']","['Datadog, Inc.']"
 "github.com/DataDog/airedale","https://github.com/DataDog/airedale","['Apache-2.0']","['Datadog, Inc.']"
