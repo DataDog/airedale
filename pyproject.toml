@@ -48,6 +48,11 @@ Repository = "https://github.com/DataDog/airedale"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.uv]
+# CI resolves with pre-releases allowed. Set it here too, so that a local
+# `uv lock` / `uv sync` produces the same uv.lock as CI expects.
+prerelease = "allow"
+
 [tool.hatch.version]
 path = "src/airedale/__init__.py"
 
