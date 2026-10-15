@@ -83,6 +83,47 @@ add an inline comment explaining **why**. For example:
 Dev dependencies (the `[dependency-groups].dev` list) are not subject to the
 `==` pinning rule.
 
+### Lock files
+
+The full dependency closure (direct **and** indirect dependencies, with hashes)
+is locked in [`uv.lock`](./uv.lock). Commit it with every dependency change.
+CI runs `uv sync --locked`, which fails when `uv.lock` does not match
+`pyproject.toml`.
+
+After you change a dependency in `pyproject.toml`, regenerate the lock:
+
+```bash
+uv lock
+```
+
+`uv lock` also removes indirect dependencies that are not needed anymore, and
+`uv sync` removes them from your virtualenv.
+
+`pyproject.toml` sets `[tool.uv] prerelease = "allow"`, the same as CI. Thus
+`uv lock` can select alpha, beta, or release-candidate versions of indirect
+dependencies.
+
+The `dd-license-attribution` tool that the LICENSE-3rdparty workflow uses has
+its own locked environment in [`.github/ddla/`](./.github/ddla/pyproject.toml).
+A new release of one of its dependencies thus cannot break CI without a lock
+update. After you change `.github/ddla/pyproject.toml`, regenerate its lock:
+
+```bash
+uv lock --project .github/ddla
+```
+
+Dependabot updates both lock files. Dependabot does **not** update the
+`dd-license-attribution` Git commit (`rev`) in `.github/ddla/pyproject.toml`
+(see [dependabot-core#16129](https://github.com/dependabot/dependabot-core/issues/16129)).
+Update that commit by hand.
+
+These parts are **not** locked:
+
+- The `uv` version: `astral-sh/setup-uv` installs the latest `uv` release.
+- Build dependencies (for example `hatchling`, or `setuptools` and `wheel`
+  for the Git source of `dd-license-attribution`). `uv.lock` does not record
+  them.
+
 ## Pull requests
 
 `airedale` uses the [conventional commits][conventional-commits] specification
@@ -138,13 +179,22 @@ The [CI workflow](./.github/workflows/ci.yml) runs two jobs:
 A separate [LICENSE-3rdparty workflow](./.github/workflows/license-3rdparty.yml)
 verifies that [`LICENSE-3rdparty.csv`](./LICENSE-3rdparty.csv) matches the current
 dependency closure. If a transitive dependency publishes a new release the file
-can drift; regenerate it (on **Python 3.12**, to match how it was created) with
-the command printed on failure:
+can drift; regenerate it (on **Python 3.14**, to match how it was created) with
+the command printed on failure. It uses the locked tool environment in
+`.github/ddla/`. This command scans the `main` branch of the canonical
+repository. For a pull request, CI scans the PR branch instead. If the log
+shows `LICENSE-3rdparty.csv is out of date.`, download the `ddla-output`
+artifact of the failed run, and use it as the new `LICENSE-3rdparty.csv`. If
+the scan itself failed (no such message), the artifact can be empty or
+incomplete: do not use it, and find the cause of the scan failure.
+
+You cannot install the tool on macOS arm64 (`extractcode-7z` has no wheel for
+it). Use Linux x86-64, for example `docker run --platform linux/amd64`.
 
 ```bash
-python -m pip install "dd-license-attribution @ git+https://github.com/DataDog/dd-license-attribution.git@v0.5.0"
-dd-license-attribution generate-sbom \
-  --no-github-sbom-strategy --no-scancode-strategy --no-npm-strategy --no-gopkg-strategy \
+uv run --locked --project .github/ddla dd-license-attribution generate-sbom \
+  --no-github-sbom-strategy --no-gopkg-strategy --no-npm-strategy \
+  --override-spec=.ddla-overrides \
   https://github.com/DataDog/airedale > LICENSE-3rdparty.csv
 ```
 

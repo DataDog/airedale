@@ -483,7 +483,7 @@ here, including:
   dependency closure drifts;
 - getting a PR reviewed.
 
-- **Python:** ≥ 3.11, < 3.14. Use `uv` for envs (`uv sync`, `uv run ...`).
+- **Python:** ≥ 3.11, < 3.15. Use `uv` for envs (`uv sync`, `uv run ...`).
 - **Lint/format:** `uv run ruff check .` and `uv run ruff format .` (line length 120).
 - **Tests:** `uv run pytest`. Unit tests MUST run fully offline — no network, no
   real provider/LLMObs calls. Mock SDK clients and `LLMObs`. Cover: config TOML
