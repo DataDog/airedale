@@ -1,0 +1,33 @@
+# Unless explicitly stated otherwise all files in this repository are licensed under the Apache-2.0 License.
+#
+# This product includes software developed at Datadog (https://www.datadoghq.com/) Copyright 2026-present Datadog, Inc.
+
+# Locked environment for the dd-license-attribution tool that the
+# LICENSE-3rdparty workflow uses. The uv.lock file next to this file pins the
+# full dependency closure (direct and indirect) with hashes, so a new release
+# of an indirect dependency cannot change the tool without a lock update.
+#
+# After a change to this file, regenerate the lock with:
+#   uv lock --project .github/ddla
+# `uv lock` also removes packages that are not needed anymore.
+
+[project]
+name = "airedale-ddla"
+version = "0"
+description = "Locked dd-license-attribution environment for the LICENSE-3rdparty workflow"
+requires-python = "==3.14.*"
+dependencies = [
+    "dd-license-attribution",
+    # pluggy 1.7.0 breaks plugincode.location_provider (a scancode-toolkit
+    # dependency): the import fails with "did not find any
+    # 'plugincode.location_provider' hooks". Remove this cap when a fixed
+    # plugincode or pluggy release is available.
+    "pluggy<1.7",
+]
+
+[tool.uv]
+# This is not a package: only install the dependencies.
+package = false
+
+[tool.uv.sources]
+dd-license-attribution = { git = "https://github.com/DataDog/dd-license-attribution.git", rev = "3dc43233d9752e0be4f1cdcf92f4b0bc5cc638ac" }

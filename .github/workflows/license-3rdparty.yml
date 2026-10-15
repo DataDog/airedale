@@ -21,6 +21,9 @@ name: LICENSE-3rdparty
 #     UNPINNED dependency versions, so the CSV can drift when a transitive
 #     dependency publishes a new release. Regenerate with the command printed
 #     on failure and run this on Python 3.14 to match how the file was created.
+#   - The tool itself is installed from .github/ddla/uv.lock (full closure,
+#     with hashes), so a new release of one of ITS dependencies cannot break
+#     this workflow without a reviewed lock update.
 
 on:
   push:
@@ -46,10 +49,21 @@ jobs:
         with:
           python-version: "3.14"
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+
+      # The tool and its full dependency closure are locked with hashes in
+      # .github/ddla/uv.lock. `--locked` fails if the lock does not match
+      # .github/ddla/pyproject.toml. The environment is kept outside the
+      # checkout, and the tool is called by its full path below: `python` on
+      # PATH stays the setup-python interpreter, which dd-license-attribution
+      # uses to create its own throwaway virtualenv.
       - name: Install dd-license-attribution
+        env:
+          UV_PROJECT_ENVIRONMENT: ${{ runner.temp }}/ddla-venv
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install "dd-license-attribution@git+https://github.com/DataDog/dd-license-attribution.git@3dc43233d9752e0be4f1cdcf92f4b0bc5cc638ac"
+          uv sync --locked --project .github/ddla --python "$(command -v python)"
+          echo "DDLA=${UV_PROJECT_ENVIRONMENT}/bin/dd-license-attribution" >> "${GITHUB_ENV}"
 
       - name: Generate and verify LICENSE-3rdparty.csv
         env:
@@ -114,12 +128,13 @@ jobs:
           # Make sure this is cleaned up even if the script fails.
           trap 'rm -f mirrors.json' EXIT
 
-          dd-license-attribution generate-sbom ${FLAGS} --use-mirrors=mirrors.json "${REPO_URL}" > ddla-output.csv
+          "${DDLA}" generate-sbom ${FLAGS} --use-mirrors=mirrors.json "${REPO_URL}" > ddla-output.csv
 
           if ! cmp -s LICENSE-3rdparty.csv ddla-output.csv; then
             echo "::error::LICENSE-3rdparty.csv is out of date."
-            echo "Regenerate it (on Python 3.14) with:"
-            echo "  dd-license-attribution generate-sbom ${FLAGS} ${REPO_URL} > LICENSE-3rdparty.csv"
+            echo "Regenerate it (on Python 3.14, with the tool from .github/ddla) with:"
+            echo "  uv run --locked --project .github/ddla dd-license-attribution generate-sbom ${FLAGS} ${REPO_URL} > LICENSE-3rdparty.csv"
+            echo "That command scans 'main'. For this run's scanned branch, use the 'ddla-output' artifact of this run."
             echo "----- diff (committed <=> generated) -----"
             diff -u LICENSE-3rdparty.csv ddla-output.csv || true
             exit 1

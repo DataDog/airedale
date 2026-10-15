@@ -19,6 +19,20 @@ updates:
       python-prod:
         dependency-type: "production"
 
+  # Locked environment of the dd-license-attribution tool that the
+  # LICENSE-3rdparty workflow uses (.github/ddla/pyproject.toml + uv.lock).
+  - package-ecosystem: "uv"
+    directory: "/.github/ddla"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    groups:
+      license-tool:
+        patterns:
+          - "*"
+
   # GitHub Actions used by workflows under .github/workflows.
   - package-ecosystem: "github-actions"
     directory: "/"
