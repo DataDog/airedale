@@ -417,7 +417,9 @@ class TestWorkdir:
         criteria = ["c"]
         """
         config = load_experiment(write_toml(tmp_path, toml))
-        assert config.scenarios[0].workdir.repo == "https://github.com/example/repo.git"
+        workdir = config.scenarios[0].workdir
+        assert workdir is not None
+        assert workdir.repo == "https://github.com/example/repo.git"
 
     def test_repo_local_path_resolved_against_config_dir(self, tmp_path):
         toml = """
@@ -430,7 +432,9 @@ class TestWorkdir:
         criteria = ["c"]
         """
         config = load_experiment(write_toml(tmp_path, toml))
-        assert config.scenarios[0].workdir.repo == str((tmp_path / "fixture-repo").resolve())
+        workdir = config.scenarios[0].workdir
+        assert workdir is not None
+        assert workdir.repo == str((tmp_path / "fixture-repo").resolve())
 
     def test_no_repo_starts_empty(self, tmp_path):
         toml = """
@@ -447,6 +451,7 @@ class TestWorkdir:
         """
         config = load_experiment(write_toml(tmp_path, toml))
         wd = config.scenarios[0].workdir
+        assert wd is not None
         assert wd.repo is None
         assert len(wd.steps) == 1
 
@@ -480,7 +485,9 @@ class TestWorkdir:
         from airedale.config.experiment import RemoveStep, RestoreStep, WriteStep
 
         config = load_experiment(write_toml(tmp_path, toml))
-        steps = config.scenarios[0].workdir.steps
+        workdir = config.scenarios[0].workdir
+        assert workdir is not None
+        steps = workdir.steps
         assert isinstance(steps[0], RestoreStep)
         assert steps[0].from_ref == "v2.2.0"
         assert steps[0].paths == ("src/api/**", "README.md")
@@ -508,8 +515,11 @@ class TestWorkdir:
         """
         config = load_experiment(write_toml(tmp_path, toml))
         by_name = {s.name: s for s in config.scenarios}
-        assert by_name["inherits"].workdir.repo == "https://github.com/example/base.git"
-        assert by_name["override"].workdir.repo == "https://github.com/example/other.git"
+        inherited, overridden = by_name["inherits"].workdir, by_name["override"].workdir
+        assert inherited is not None
+        assert overridden is not None
+        assert inherited.repo == "https://github.com/example/base.git"
+        assert overridden.repo == "https://github.com/example/other.git"
 
     def test_restore_without_repo_errors(self, tmp_path):
         toml = """

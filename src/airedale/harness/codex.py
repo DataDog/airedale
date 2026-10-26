@@ -80,6 +80,8 @@ from airedale.types import HarnessResult, ModelSpec, UsageMetrics
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
 
+    from openai_codex.models import JsonObject
+
 logger = logging.getLogger(__name__)
 
 SDK_NAME = "openai-codex"
@@ -278,7 +280,7 @@ class CodexRunner(AgentRunner):
         overrides = _codex_mcp_config_overrides(self.mcp_servers, trace_headers)
         overrides.extend(self._gateway_config_overrides())
         config = CodexConfig(config_overrides=tuple(overrides), cwd=self.cwd, env=self._codex_env())
-        thread_config = {"skill_approval": True} if skill_names else None
+        thread_config: JsonObject | None = {"skill_approval": True} if skill_names else None
         async with self._codex_factory(config) as codex:
             thread = await codex.thread_start(
                 approval_mode=ApprovalMode.auto_review,
