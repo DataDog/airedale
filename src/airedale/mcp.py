@@ -83,6 +83,18 @@ class McpServerSpec:
         """True for http servers that carry a command used to auto-start them."""
         return self.type == "http" and self.command is not None
 
+    def _require_url(self) -> str:
+        """Return the ``url`` of an http server, or raise when it is missing."""
+        if self.url is None:
+            raise ValueError(f"MCP server {self.name!r} of type 'http' has no 'url'")
+        return self.url
+
+    def _require_command(self) -> str:
+        """Return the ``command`` of a stdio server, or raise when it is missing."""
+        if self.command is None:
+            raise ValueError(f"MCP server {self.name!r} of type 'stdio' has no 'command'")
+        return self.command
+
     def merged_headers(self, trace_headers: Mapping[str, str]) -> dict[str, str]:
         """Merge static MCP headers with per-run distributed-tracing headers."""
         headers = dict(self.headers)
@@ -94,12 +106,12 @@ class McpServerSpec:
         if self.type == "http":
             from claude_agent_sdk.types import McpHttpServerConfig
 
-            return McpHttpServerConfig(type="http", url=self.url, headers=self.merged_headers(trace_headers))
+            return McpHttpServerConfig(type="http", url=self._require_url(), headers=self.merged_headers(trace_headers))
         if self.type == "stdio":
             from claude_agent_sdk.types import McpStdioServerConfig
 
             return McpStdioServerConfig(
-                type="stdio", command=self.command, args=list[str](self.args), env=dict[str, str](self.env)
+                type="stdio", command=self._require_command(), args=list[str](self.args), env=dict[str, str](self.env)
             )
         raise ValueError(f"MCP server {self.name!r} has unsupported type {self.type!r}")
 
@@ -255,7 +267,7 @@ async def _list_mcp_tools(server: McpServerSpec, trace_headers: Mapping[str, str
     """List tools from an MCP server using the standard protocol."""
     if server.type == "http":
         async with (
-            streamablehttp_client(server.url, headers=server.merged_headers(trace_headers)) as (
+            streamablehttp_client(server._require_url(), headers=server.merged_headers(trace_headers)) as (
                 read_stream,
                 write_stream,
                 _get_session_id,
@@ -266,7 +278,7 @@ async def _list_mcp_tools(server: McpServerSpec, trace_headers: Mapping[str, str
             return list((await session.list_tools()).tools)
     if server.type == "stdio":
         stdio_server = StdioServerParameters(
-            command=server.command, args=list(server.args), env=dict(server.env) or None
+            command=server._require_command(), args=list(server.args), env=dict(server.env) or None
         )
         async with (
             stdio_client(stdio_server) as (read_stream, write_stream),

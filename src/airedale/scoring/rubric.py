@@ -170,7 +170,6 @@ class RubricEvaluator(BaseAsyncEvaluator):
         response = await self.anthropic_client.messages.create(
             model=self.model.name,
             max_tokens=1024,
-            temperature=0,
             system=_JUDGE_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}],
         )

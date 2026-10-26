@@ -144,7 +144,7 @@ class AgentRunResult:
 
 def _decorate_when_llmobs_enabled(
     func: Callable[..., Any],
-    decorator: Callable[[Callable[..., Any]], Callable[..., Any]],
+    decorator: Callable[..., Any],
 ) -> Callable[..., Any]:
     """Apply a LLMObs decorator only when it would create a span."""
     if not LLMObs.enabled:

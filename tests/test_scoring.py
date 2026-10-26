@@ -203,6 +203,7 @@ class TestRubricEvaluatorEndToEnd:
         )
         result = await evaluator.evaluate(ctx)
         assert result.assessment == "fail"
+        assert result.reasoning is not None
         assert "No rubric criteria" in result.reasoning
 
     async def test_evaluate_with_openai_judge(self):
