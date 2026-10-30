@@ -30,19 +30,23 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from ddtrace.llmobs import LLMObs
+from ddtrace.llmobs.decorators import agent, llm
 
 from airedale.mcp import (
     McpServerSpec,
     McpToolMetadata,
+    _mcp_tool_metadata_catalog,
     configured_tool_names,
     provider_mcp_tool_name,
 )
+from airedale.tracing import current_trace_headers
+from airedale.types import HarnessResult
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
     from pathlib import Path
 
-    from airedale.types import HarnessResult, ModelSpec, UsageMetrics
+    from airedale.types import ModelSpec, UsageMetrics
 
 logger = logging.getLogger(__name__)
 
@@ -532,3 +536,156 @@ class AgentRunner(ABC):
         progress: ProgressCallback | None = None,
     ) -> HarnessResult:
         """Run one eval prompt and return the structured harness result."""
+
+
+class DecoratorSpanAgentRunner(AgentRunner):
+    """Base for runners whose engine has no native ddtrace LLMObs integration.
+
+    The subclass runs the engine in :meth:`_run_agent` and returns the
+    normalized :class:`AgentRunResult`. This base wraps the run in manual spans
+    that copy the shape of the native ``claude_agent_sdk`` integration: an outer
+    ``@agent`` span, an inner ``@llm`` span, and one ``tool`` span for each tool
+    call (children of the agent span). The decorators apply only when
+    ``LLMObs.enabled``, so no empty spans are sent.
+    """
+
+    #: Framework label written in the agent-span manifest.
+    framework: str = "agent-sdk"
+
+    @abstractmethod
+    async def _run_agent(
+        self,
+        *,
+        model: ModelSpec,
+        system_prompt: str,
+        user_prompt: str,
+        trace_headers: Mapping[str, str],
+        progress: ProgressCallback | None,
+    ) -> AgentRunResult:
+        """Run the engine once and return its normalized output.
+
+        Put a run failure that occurs after some output is available in
+        ``AgentRunResult.error``, so that the spans still show the partial
+        transcript before the error is raised.
+        """
+
+    def _effective_builtin_tools(self) -> Iterable[str] | None:
+        """Return the built-in tools to report as available for this run."""
+        return self.allowed_builtin_tools
+
+    async def run(
+        self,
+        *,
+        model: ModelSpec,
+        system_prompt: str,
+        user_prompt: str,
+        prompt_version: str,
+        harness: str,
+        progress: ProgressCallback | None = None,
+    ) -> HarnessResult:
+        await _notify(progress, f"{harness}/{model.label}: {self.sdk_name} run")
+        run_in_agent_span = _decorate_when_llmobs_enabled(
+            self._run_agent_loop_span,
+            agent(name=f"eval.{model.provider}_agent_loop", _automatic_io_annotation=False),
+        )
+        return await run_in_agent_span(
+            model=model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            prompt_version=prompt_version,
+            harness=harness,
+            progress=progress,
+        )
+
+    async def _run_agent_loop_span(
+        self,
+        *,
+        model: ModelSpec,
+        system_prompt: str,
+        user_prompt: str,
+        prompt_version: str,
+        harness: str,
+        progress: ProgressCallback | None,
+    ) -> HarnessResult:
+        run_in_llm_span = _decorate_when_llmobs_enabled(
+            self._run_llm_span,
+            llm(model_name=model.name, model_provider=model.provider, name=f"eval.{model.provider}_agent"),
+        )
+        run_result, missing_usage_error = await run_in_llm_span(
+            model=model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            prompt_version=prompt_version,
+            harness=harness,
+            progress=progress,
+        )
+        # Emit per-tool child spans first so they attach to this active agent
+        # span (siblings of the inner llm span), reproducing the native Claude
+        # `agent -> llm + tool...` topology.
+        _emit_tool_spans(run_result.tool_calls)
+        _annotate_agent_loop_span(
+            model=model,
+            sdk_name=self.sdk_name,
+            framework=self.framework,
+            prompt_version=prompt_version,
+            harness=harness,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            answer=run_result.answer,
+            usage=run_result.usage,
+            mcp_servers=self.mcp_servers,
+            segments=run_result.segments,
+            allowed_builtin_tools=self._effective_builtin_tools(),
+            max_turns=self.max_turns,
+        )
+        if run_result.error is not None:
+            raise run_result.error
+        if missing_usage_error is not None:
+            raise missing_usage_error
+        return HarnessResult(
+            answer=run_result.answer,
+            usage=run_result.usage,
+            tool_calls=[tool_call.to_record() for tool_call in run_result.tool_calls],
+            harness=harness,
+        )
+
+    async def _run_llm_span(
+        self,
+        *,
+        model: ModelSpec,
+        system_prompt: str,
+        user_prompt: str,
+        prompt_version: str,
+        harness: str,
+        progress: ProgressCallback | None,
+    ) -> tuple[AgentRunResult, RuntimeError | None]:
+        trace_headers = current_trace_headers()
+        mcp_tool_metadata = await _mcp_tool_metadata_catalog(self.mcp_servers, trace_headers) if LLMObs.enabled else {}
+        run_result = await self._run_agent(
+            model=model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            trace_headers=trace_headers,
+            progress=progress,
+        )
+        missing_usage_error: RuntimeError | None = None
+        if run_result.error is None:
+            try:
+                _raise_if_missing_usage(run_result.usage, sdk_name=self.sdk_name, model=model)
+            except RuntimeError as exc:
+                missing_usage_error = exc
+        _annotate_llm_span(
+            model=model,
+            sdk_name=self.sdk_name,
+            prompt_version=prompt_version,
+            harness=harness,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            answer=run_result.answer,
+            usage=run_result.usage,
+            mcp_servers=self.mcp_servers,
+            segments=run_result.segments,
+            allowed_builtin_tools=self._effective_builtin_tools(),
+            mcp_tool_metadata=mcp_tool_metadata,
+        )
+        return run_result, missing_usage_error

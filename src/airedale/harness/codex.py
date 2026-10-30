@@ -54,31 +54,24 @@ import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ddtrace.llmobs import LLMObs
-from ddtrace.llmobs.decorators import agent, llm
 from openai_codex import ApprovalMode, AsyncCodex, CodexConfig, Sandbox
 
 from airedale.harness.base import (
     AgentOutputSegment,
-    AgentRunner,
     AgentRunResult,
     AgentThought,
     AgentToolCall,
+    DecoratorSpanAgentRunner,
     ProgressCallback,
-    _annotate_agent_loop_span,
-    _annotate_llm_span,
-    _decorate_when_llmobs_enabled,
-    _emit_tool_spans,
     _notify,
-    _raise_if_missing_usage,
 )
-from airedale.mcp import McpServerSpec, _mcp_tool_metadata_catalog
 from airedale.skills import exclude_paths_from_git, stage_skills_for_codex
-from airedale.tracing import current_trace_headers
-from airedale.types import HarnessResult, ModelSpec, UsageMetrics
+from airedale.types import ModelSpec, UsageMetrics
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
+
+    from airedale.mcp import McpServerSpec
 
 logger = logging.getLogger(__name__)
 
@@ -101,10 +94,11 @@ CODEX_BUILTIN_TOOLS: tuple[str, ...] = ("shell", "apply_patch", "update_plan", "
 ISOLATED_CODEX_HOME_DIRNAME = ".dd-ai-devx-codex-home"
 
 
-class CodexRunner(AgentRunner):
+class CodexRunner(DecoratorSpanAgentRunner):
     """Run eval prompts through ``openai-codex`` with manual decorator spans."""
 
     sdk_name = SDK_NAME
+    framework = CODEX_FRAMEWORK
 
     def __init__(
         self,
@@ -133,123 +127,6 @@ class CodexRunner(AgentRunner):
         self.gateway_headers = dict(gateway_headers or {})
         self._codex_factory = codex_factory or AsyncCodex
 
-    async def run(
-        self,
-        *,
-        model: ModelSpec,
-        system_prompt: str,
-        user_prompt: str,
-        prompt_version: str,
-        harness: str,
-        progress: ProgressCallback | None = None,
-    ) -> HarnessResult:
-        await _notify(progress, f"{harness}/{model.label}: {SDK_NAME} run")
-        run_in_agent_span = _decorate_when_llmobs_enabled(
-            self._run_agent_loop_span,
-            agent(name=f"eval.{model.provider}_agent_loop", _automatic_io_annotation=False),
-        )
-        return await run_in_agent_span(
-            model=model,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            prompt_version=prompt_version,
-            harness=harness,
-            progress=progress,
-        )
-
-    async def _run_agent_loop_span(
-        self,
-        *,
-        model: ModelSpec,
-        system_prompt: str,
-        user_prompt: str,
-        prompt_version: str,
-        harness: str,
-        progress: ProgressCallback | None,
-    ) -> HarnessResult:
-        run_in_llm_span = _decorate_when_llmobs_enabled(
-            self._run_llm_span,
-            llm(model_name=model.name, model_provider=model.provider, name=f"eval.{model.provider}_agent"),
-        )
-        run_result, missing_usage_error = await run_in_llm_span(
-            model=model,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            prompt_version=prompt_version,
-            harness=harness,
-            progress=progress,
-        )
-        # Emit per-tool child spans first so they attach to this active agent
-        # span (siblings of the inner llm span), reproducing the native Claude
-        # `agent -> llm + tool...` topology.
-        _emit_tool_spans(run_result.tool_calls)
-        _annotate_agent_loop_span(
-            model=model,
-            sdk_name=SDK_NAME,
-            framework=CODEX_FRAMEWORK,
-            prompt_version=prompt_version,
-            harness=harness,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            answer=run_result.answer,
-            usage=run_result.usage,
-            mcp_servers=self.mcp_servers,
-            segments=run_result.segments,
-            allowed_builtin_tools=self._effective_builtin_tools(),
-            max_turns=self.max_turns,
-        )
-        if run_result.error is not None:
-            raise run_result.error
-        if missing_usage_error is not None:
-            raise missing_usage_error
-        return HarnessResult(
-            answer=run_result.answer,
-            usage=run_result.usage,
-            tool_calls=[tool_call.to_record() for tool_call in run_result.tool_calls],
-            harness=harness,
-        )
-
-    async def _run_llm_span(
-        self,
-        *,
-        model: ModelSpec,
-        system_prompt: str,
-        user_prompt: str,
-        prompt_version: str,
-        harness: str,
-        progress: ProgressCallback | None,
-    ) -> tuple[AgentRunResult, RuntimeError | None]:
-        trace_headers = current_trace_headers()
-        mcp_tool_metadata = await _mcp_tool_metadata_catalog(self.mcp_servers, trace_headers) if LLMObs.enabled else {}
-        run_result = await self._run_codex(
-            model=model,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            trace_headers=trace_headers,
-            progress=progress,
-        )
-        missing_usage_error: RuntimeError | None = None
-        if run_result.error is None:
-            try:
-                _raise_if_missing_usage(run_result.usage, sdk_name=SDK_NAME, model=model)
-            except RuntimeError as exc:
-                missing_usage_error = exc
-        _annotate_llm_span(
-            model=model,
-            sdk_name=SDK_NAME,
-            prompt_version=prompt_version,
-            harness=harness,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            answer=run_result.answer,
-            usage=run_result.usage,
-            mcp_servers=self.mcp_servers,
-            segments=run_result.segments,
-            allowed_builtin_tools=self._effective_builtin_tools(),
-            mcp_tool_metadata=mcp_tool_metadata,
-        )
-        return run_result, missing_usage_error
-
     def _effective_builtin_tools(self) -> tuple[str, ...]:
         """Return the built-in tools to report as available for this run.
 
@@ -265,7 +142,7 @@ class CodexRunner(AgentRunner):
         """
         return CODEX_BUILTIN_TOOLS
 
-    async def _run_codex(
+    async def _run_agent(
         self,
         *,
         model: ModelSpec,
