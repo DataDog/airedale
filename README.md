@@ -334,12 +334,16 @@ Notes:
   tools, add `codemode` to `allowed_builtin_tools`). Because
   pi lets a project server replace a same-named scenario server, such a name
   collision fails the run. **Trust:** with `--approve`, a cloned repo's
-  `.pi/extensions` and project packages run inside the pi process with the
-  pi process environment (as `.claude/settings.json` hooks do for Claude). Only
+  `.pi/extensions` and project packages run inside the pi process with its
+  environment (as `.claude/settings.json` hooks do for Claude). Only
   evaluate repositories you trust. The pi process does not inherit Datadog
   credentials: `DD_API_KEY`, `DD_APP_KEY`, and every other `DD_*` /
   `DATADOG_*` / `_DD_*` variable whose name contains `KEY`, `TOKEN`, `SECRET`,
-  `PASSWORD`, `AUTH`, `CREDENTIAL` or `BEARER`. So pi, its tools and stdio MCP
+  `PASSWORD`, `PASSWD`, `AUTH`, `CREDENTIAL` or `BEARER` (but not `AUTHOR`, as
+  in `DD_GIT_COMMIT_AUTHOR_NAME`), and every other `DD_*` / `DATADOG_*` /
+  `_DD_*` variable whose value has user information (a proxy URL such as
+  `DD_PROXY_HTTPS=http://user:pass@host`) or a credential query parameter
+  (`?api_key=...`). So pi, its tools and stdio MCP
   servers do not inherit them. This is not a sandbox (repo code runs as the
   same OS user). A gateway `api_key_env` credential still goes to pi (in its
   private `models.json`). **Compatibility:** a pi stdio MCP server that used

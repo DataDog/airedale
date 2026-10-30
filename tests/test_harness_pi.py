@@ -362,6 +362,8 @@ class TestRunnerConfig:
             "DATADOG_MCP_AUTHORIZATION",
             "DD_CREDENTIALS",
             "DD_MCP_BEARER",
+            "DD_AUTHORIZATION",
+            "DD_DB_PASSWD",
             "DATADOG_API_KEY",
             "DATADOG_APP_KEY",
             "_DD_API_KEY",
@@ -375,6 +377,38 @@ class TestRunnerConfig:
         assert name not in env
         assert secret not in env.values()
 
+    @pytest.mark.parametrize("name", ["DD_PROXY_HTTP", "DD_PROXY_HTTPS", "DD_TRACE_AGENT_URL", "dd_proxy_https"])
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "http://user:pass@proxy:3128",
+            "https://token@proxy.example.com",
+            "//user:pass@proxy:3128",
+            "user:pass@proxy:3128",
+            "https://agent.example/ingest?api_key=secret",
+            "https://agent.example/ingest?x=1&access_token=secret",
+        ],
+    )
+    def test_env_drops_datadog_values_with_credentials(self, tmp_path, monkeypatch, name, value):
+        monkeypatch.setenv(name, value)
+        env = PiRunner(cwd=tmp_path)._env(tmp_path / "agent")
+        assert name not in env
+
+    @pytest.mark.parametrize(
+        "value",
+        ["jane@example.com", "http://proxy.example.com:3128", "https://agent.example/ingest?author=jane&x=1", "plain"],
+    )
+    def test_env_keeps_datadog_values_without_credentials(self, tmp_path, monkeypatch, value):
+        monkeypatch.setenv("DD_SOMETHING", value)
+        env = PiRunner(cwd=tmp_path)._env(tmp_path / "agent")
+        assert env["DD_SOMETHING"] == value
+
+    def test_env_keeps_non_datadog_urls_with_user_information(self, tmp_path, monkeypatch):
+        # Only Datadog variables are in scope; other proxy settings are the operator's own.
+        monkeypatch.setenv("HTTPS_PROXY", "http://user:pass@proxy:3128")
+        env = PiRunner(cwd=tmp_path)._env(tmp_path / "agent")
+        assert env["HTTPS_PROXY"] == "http://user:pass@proxy:3128"
+
     def test_env_keeps_other_variables(self, tmp_path, monkeypatch):
         # Datadog settings that are not credentials, and provider API keys
         # (pi reads ANTHROPIC_API_KEY / OPENAI_API_KEY itself), stay.
@@ -385,6 +419,10 @@ class TestRunnerConfig:
             "ANTHROPIC_API_KEY": "anthropic-key",
             "OPENAI_API_KEY": "openai-key",
             "MY_DD_API_KEY_NOTE": "not a datadog variable",
+            "DD_GIT_COMMIT_AUTHOR_NAME": "Jane",
+            "DD_GIT_COMMIT_AUTHOR_EMAIL": "jane@example.com",
+            "DD_GIT_COMMIT_AUTHOR_DATE": "2026-01-01T00:00:00Z",
+            "DD_PROXY_HTTPS": "http://proxy.example.com:3128",
         }
         for name, value in keep.items():
             monkeypatch.setenv(name, value)
@@ -585,14 +623,16 @@ class TestSubprocess:
             DD_APP_KEY="dd-app",
             DATADOG_API_KEY="dd-api-2",
             _DD_API_KEY="dd-api-3",
+            DD_PROXY_HTTPS="http://user:dd-proxy-pass@proxy:3128",
             DD_SITE="site",
         )
         result = _run(PiRunner(cwd=tmp_path, pi_command=command))
         assert result.error is None
         seen = json.loads(record.read_text())
-        for name in ("DD_API_KEY", "DD_APP_KEY", "DATADOG_API_KEY", "_DD_API_KEY"):
+        for name in ("DD_API_KEY", "DD_APP_KEY", "DATADOG_API_KEY", "_DD_API_KEY", "DD_PROXY_HTTPS"):
             assert name not in seen["dd_env"]
         assert not {"dd-api", "dd-app", "dd-api-2", "dd-api-3"} & set(seen["dd_env"].values())
+        assert not any("dd-proxy-pass" in value for value in seen["dd_env"].values())
         assert seen["dd_env"]["DD_SITE"] == "site"
 
     def test_non_zero_exit(self, tmp_path, fake_pi):

@@ -37,7 +37,9 @@ installed pi. ``PI_*`` session variables of a parent pi process are removed.
 The pi process does not inherit the Datadog credentials of the operator
 (``DD_API_KEY``, ``DD_APP_KEY`` and every other ``DD_*`` / ``DATADOG_*`` /
 ``_DD_*`` variable whose name contains ``KEY``, ``TOKEN``, ``SECRET``,
-``PASSWORD``, ``AUTH``, ``CREDENTIAL`` or ``BEARER``, see
+``PASSWORD``, ``PASSWD``, ``AUTH``, ``CREDENTIAL`` or ``BEARER``, or whose
+value has user information (``DD_PROXY_HTTPS``) or a credential query
+parameter (``?api_key=...``), see
 :func:`_is_datadog_credential_env`). These are for the airedale process only
 (LLMObs). Without this, pi, its ``bash`` tool, stdio MCP servers and repo code
 that pi loads (``--approve``) get them in their environment. This is not a
@@ -83,6 +85,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -157,8 +160,19 @@ PI_INHERITED_ENV_TO_DROP: tuple[str, ...] = (
 #: Name prefixes of Datadog variables (``_DD_`` is used by Datadog tools for
 #: internal settings).
 DATADOG_ENV_PREFIXES: tuple[str, ...] = ("DD_", "DATADOG_", "_DD_")
-#: Name parts that identify a Datadog variable as a credential.
-DATADOG_CREDENTIAL_ENV_MARKERS: tuple[str, ...] = ("KEY", "TOKEN", "SECRET", "PASSWORD", "AUTH", "CREDENTIAL", "BEARER")
+#: Name parts that identify a Datadog variable as a credential. ``AUTH`` does
+#: not match ``AUTHOR`` (for example ``DD_GIT_COMMIT_AUTHOR_NAME``), but does
+#: match ``AUTHORIZATION``.
+DATADOG_CREDENTIAL_ENV_NAME_RE = re.compile(
+    r"KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|BEARER|AUTH(?!OR(?!IZ))", re.IGNORECASE
+)
+#: A value with user information: ``scheme://user:pass@host``, ``//user:pass@host``
+#: or ``user:pass@host`` (a proxy URL without a scheme). A Datadog variable with
+#: such a value (for example ``DD_PROXY_HTTPS``) carries a credential.
+VALUE_WITH_USERINFO_RE = re.compile(r"^(?:(?:[a-z][a-z0-9+.-]*:)?//[^/?#\s]*@|[^/?#\s@:]+:[^/?#\s@]+@)", re.IGNORECASE)
+#: A query parameter name in a URL value (``?api_key=...&x=...``).
+VALUE_QUERY_PARAM_RE = re.compile(r"[?&;]([^=&#;\s]+)=")
+
 #: Maximum size of one JSONL record on pi stdout (agent_end carries every message).
 PI_STREAM_LIMIT_BYTES = 64 * 1024 * 1024
 PI_STDERR_TAIL_BYTES = 16 * 1024
@@ -343,7 +357,7 @@ class PiRunner(DecoratorSpanAgentRunner):
         env = {
             name: value
             for name, value in os.environ.items()
-            if name not in PI_INHERITED_ENV_TO_DROP and not _is_datadog_credential_env(name)
+            if name not in PI_INHERITED_ENV_TO_DROP and not _is_datadog_credential_env(name, value)
         }
         env["PI_CODING_AGENT_DIR"] = str(agent_dir)
         env["PI_OFFLINE"] = "1"
@@ -550,16 +564,29 @@ async def _read_events(
             return
 
 
-def _is_datadog_credential_env(name: str) -> bool:
-    """Return True when ``name`` is a Datadog credential variable (``DD_API_KEY``, ``DD_APP_KEY``, ...).
+def _is_datadog_credential_env(name: str, value: str = "") -> bool:
+    """Return True when a variable is a Datadog credential (``DD_API_KEY``, ``DD_APP_KEY``, ...).
 
-    The check ignores case. Other Datadog variables (``DD_SITE``,
-    ``DD_SERVICE``, ...) are not credentials and stay.
+    A variable is a credential when its name starts with a Datadog prefix and
+    one of these is true. The check ignores case.
+
+    - The name has a credential word (see ``DATADOG_CREDENTIAL_ENV_NAME_RE``).
+    - The value has user information, for example a ``DD_PROXY_HTTPS`` proxy URL
+      with a password.
+    - The value has a query parameter with a credential word in its name, for
+      example ``?api_key=...``.
+
+    Other Datadog variables (``DD_SITE``, ``DD_SERVICE``, ...) are not
+    credentials and stay.
     """
-    upper = name.upper()
-    if not upper.startswith(DATADOG_ENV_PREFIXES):
+    if not name.upper().startswith(DATADOG_ENV_PREFIXES):
         return False
-    return any(marker in upper for marker in DATADOG_CREDENTIAL_ENV_MARKERS)
+    if DATADOG_CREDENTIAL_ENV_NAME_RE.search(name):
+        return True
+    value = value.strip()
+    if VALUE_WITH_USERINFO_RE.match(value):
+        return True
+    return any(DATADOG_CREDENTIAL_ENV_NAME_RE.search(param) for param in VALUE_QUERY_PARAM_RE.findall(value))
 
 
 def _default_pi_command() -> list[str]:
