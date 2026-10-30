@@ -37,7 +37,9 @@ installed pi. ``PI_*`` session variables of a parent pi process are removed.
 The pi process does not inherit the Datadog credentials of the operator
 (``DD_API_KEY``, ``DD_APP_KEY`` and every other ``DD_*`` / ``DATADOG_*`` /
 ``_DD_*`` variable whose name contains ``KEY``, ``TOKEN``, ``SECRET``,
-``PASSWORD``, ``PASSWD``, ``AUTH``, ``CREDENTIAL`` or ``BEARER``, or whose
+``PASSWORD``, ``PASSWD``, ``AUTH``, ``CREDENTIAL``, ``BEARER`` or
+``ADDITIONAL_ENDPOINTS`` (names that end in ``_REGEXP`` or ``_REGEX`` are
+patterns and stay), or whose
 value has user information (``DD_PROXY_HTTPS``) or a credential query
 parameter (``?api_key=...``), see
 :func:`_is_datadog_credential_env`). These are for the airedale process only
@@ -163,9 +165,15 @@ DATADOG_ENV_PREFIXES: tuple[str, ...] = ("DD_", "DATADOG_", "_DD_")
 #: Name parts that identify a Datadog variable as a credential. ``AUTH`` does
 #: not match ``AUTHOR`` (for example ``DD_GIT_COMMIT_AUTHOR_NAME``), but does
 #: match ``AUTHORIZATION``.
+#: ``ADDITIONAL_ENDPOINTS`` variables (dual shipping, for example
+#: ``DD_ADDITIONAL_ENDPOINTS``) are JSON maps from a URL to API keys.
 DATADOG_CREDENTIAL_ENV_NAME_RE = re.compile(
-    r"KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|BEARER|AUTH(?!OR(?!IZ))", re.IGNORECASE
+    r"KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|BEARER|ADDITIONAL_ENDPOINTS|AUTH(?!OR(?!IZ))", re.IGNORECASE
 )
+#: Names that end like this hold a regular expression, not a secret (for example
+#: ``DD_APPSEC_OBFUSCATION_PARAMETER_KEY_REGEXP``, a pattern of parameter names
+#: to redact), so a credential word in the name does not make them credentials.
+DATADOG_PATTERN_ENV_SUFFIXES: tuple[str, ...] = ("_REGEXP", "_REGEX")
 #: A value with user information: ``scheme://user:pass@host``, ``//user:pass@host``
 #: or ``user:pass@host`` (a proxy URL without a scheme). A Datadog variable with
 #: such a value (for example ``DD_PROXY_HTTPS``) carries a credential.
@@ -576,10 +584,13 @@ def _is_datadog_credential_env(name: str, value: str = "") -> bool:
     - The value has a query parameter with a credential word in its name, for
       example ``?api_key=...``.
 
-    Other Datadog variables (``DD_SITE``, ``DD_SERVICE``, ...) are not
-    credentials and stay.
+    A name that ends in ``_REGEXP`` or ``_REGEX`` is a pattern, not a secret:
+    it is never a credential. Other Datadog variables (``DD_SITE``,
+    ``DD_SERVICE``, ...) are not credentials and stay.
     """
     if not name.upper().startswith(DATADOG_ENV_PREFIXES):
+        return False
+    if name.upper().endswith(DATADOG_PATTERN_ENV_SUFFIXES):
         return False
     if DATADOG_CREDENTIAL_ENV_NAME_RE.search(name):
         return True

@@ -339,8 +339,10 @@ Notes:
   evaluate repositories you trust. The pi process does not inherit Datadog
   credentials: `DD_API_KEY`, `DD_APP_KEY`, and every other `DD_*` /
   `DATADOG_*` / `_DD_*` variable whose name contains `KEY`, `TOKEN`, `SECRET`,
-  `PASSWORD`, `PASSWD`, `AUTH`, `CREDENTIAL` or `BEARER` (but not `AUTHOR`, as
-  in `DD_GIT_COMMIT_AUTHOR_NAME`), and every other `DD_*` / `DATADOG_*` /
+  `PASSWORD`, `PASSWD`, `AUTH`, `CREDENTIAL`, `BEARER` or `ADDITIONAL_ENDPOINTS`
+  (dual shipping), but not `AUTHOR` (as in `DD_GIT_COMMIT_AUTHOR_NAME`) and not
+  names that end in `_REGEXP` or `_REGEX` (patterns, for example
+  `DD_APPSEC_OBFUSCATION_PARAMETER_KEY_REGEXP`), and every other `DD_*` / `DATADOG_*` /
   `_DD_*` variable whose value has user information (a proxy URL such as
   `DD_PROXY_HTTPS=http://user:pass@host`) or a credential query parameter
   (`?api_key=...`). So pi, its tools and stdio MCP
