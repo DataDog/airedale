@@ -445,10 +445,21 @@ FAKE_PI = textwrap.dedent(
     with open(record, "w") as handle:
         json.dump({"argv": sys.argv[1:], "agent_dir": agent_dir, "files": files, "stdin": stdin,
                    "session": os.environ.get("PI_SESSION_ID"), "cwd": os.getcwd()}, handle)
+    with open(record + ".runs", "a") as handle:
+        handle.write(json.dumps(sys.argv[1:]) + chr(10))
+    if os.environ.get("FAKE_PI_REJECT_EXTENSION") and "--extension" in sys.argv:
+        path = sys.argv[sys.argv.index("--extension") + 1]
+        sys.stderr.write(f'Error: Failed to load extension "{path}": unsupported' + chr(10))
+        sys.exit(1)
     events = json.loads(os.environ["FAKE_PI_EVENTS"])
     if os.environ.get("FAKE_PI_GARBAGE"):
         print("not json", flush=True)
     for event in events:
+        if "__sleep" in event:  # a pause between two records
+            time.sleep(event["__sleep"])
+            continue
+        if "__now_ms" in event:  # set the timestamp of a message to now
+            event["message"]["timestamp"] = time.time() * 1000 + event.pop("__now_ms")
         print(json.dumps(event), flush=True)
     if os.environ.get("FAKE_PI_CHILD_HOLDS_STDOUT"):
         # A child keeps stdout open after pi exits; it records its pid.
@@ -713,56 +724,35 @@ class TestProcessLifecycle:
 
 
 class TestPiSpans:
-    """The pi path makes the same agent -> llm + tool spans as Codex."""
+    """The pi path makes agent -> (llm per model call + tool per execution) spans."""
 
-    def test_spans_and_annotations(self, tmp_path, fake_pi, monkeypatch):
-        import contextlib
-
+    def test_spans_and_annotations(self, tmp_path, fake_pi, monkeypatch, fake_span_llmobs):
         import airedale.harness.base as base
 
-        class _FakeLLMObs:
-            enabled = True
+        fake = fake_span_llmobs
+        agent_spans: list[dict[str, Any]] = []
 
-            def __init__(self) -> None:
-                self.annotations: list[dict[str, Any]] = []
-                self.tool_spans: list[str] = []
+        def _agent(**kwargs):
+            def wrap(func):
+                async def inner(*args, **kw):
+                    # The agent span is the active parent of the manual spans.
+                    span = fake._start("agent", kwargs.get("name"))
+                    agent_spans.append(kwargs)
+                    try:
+                        return await func(*args, **kw)
+                    finally:
+                        span.finish()
 
-            def annotate(self, **kwargs: Any) -> None:
-                self.annotations.append(kwargs)
+                return inner
 
-            @contextlib.contextmanager
-            def tool(self, *, name: str):
-                self.tool_spans.append(name)
-                self.tool_parents.append(active[-1] if active else None)
-                yield object()
+            return wrap
 
-        _FakeLLMObs.tool_parents = []
-        fake = _FakeLLMObs()
-        spans: list[tuple[str, dict[str, Any]]] = []
-        active: list[str] = []
-        parents: dict[str, str | None] = {}
-
-        def _decorator(kind):
-            def factory(**kwargs):
-                def wrap(func):
-                    async def inner(*args, **kw):
-                        spans.append((kind, kwargs))
-                        parents[kind] = active[-1] if active else None
-                        active.append(kind)
-                        try:
-                            return await func(*args, **kw)
-                        finally:
-                            active.pop()
-
-                    return inner
-
-                return wrap
-
-            return factory
+        def _no_llm_decorator(**kwargs):
+            raise AssertionError("the pi runner must not make the single llm span")
 
         monkeypatch.setattr(base, "LLMObs", fake)
-        monkeypatch.setattr(base, "agent", _decorator("agent"))
-        monkeypatch.setattr(base, "llm", _decorator("llm"))
+        monkeypatch.setattr(base, "agent", _agent)
+        monkeypatch.setattr(base, "llm", _no_llm_decorator)
 
         async def _no_catalog(servers, headers):
             return {}
@@ -780,30 +770,220 @@ class TestPiSpans:
             runner.run(model=MODEL, system_prompt="SYS", user_prompt="Q", prompt_version="v", harness="pi-s")
         )
         assert result.answer == "The directory is empty."
-        assert [kind for kind, _ in spans] == ["agent", "llm"]
-        assert spans[1][1]["model_provider"] == "anthropic"
-        assert spans[1][1]["model_name"] == "claude-sonnet-4-6"
-        assert fake.tool_spans == ["ls"]
-        # Topology: agent -> llm, and tool spans are children of the agent span
-        # (siblings of the llm span), like the native Claude integration.
-        assert parents == {"agent": None, "llm": "agent"}
-        assert fake.tool_parents == ["agent"]
+        assert [(span.kind, span.name) for span in fake.spans] == [
+            ("agent", "eval.anthropic_agent_loop"),
+            ("llm", "eval.anthropic_agent"),
+            ("tool", "ls"),
+            ("llm", "eval.anthropic_agent"),
+        ]
+        agent_span = fake.spans[0]
+        first_llm, tool, final_llm = fake.spans[1:]
+        # Topology: every manual span is a child of the agent span.
+        assert all(span.parent is agent_span for span in fake.spans[1:])
+        assert first_llm.kwargs == {"model_name": "claude-sonnet-4-6", "model_provider": "anthropic"}
+        # Real times: each span starts after the previous one started.
+        assert first_llm.start_ns <= tool.start_ns <= final_llm.start_ns
+        assert all(span.end_ns >= span.start_ns for span in fake.spans[1:])
 
-        llm_annotation = next(a for a in fake.annotations if "tool_definitions" in a)
-        assert llm_annotation["metadata"]["sdk"] == "pi"
-        assert llm_annotation["metrics"]["output_tokens"] == 20
-        names = [definition["name"] for definition in llm_annotation["tool_definitions"]]
+        first = first_llm.annotations
+        assert first["metadata"]["sdk"] == "pi"
+        assert first["metadata"]["turn"] == 1
+        assert first["metadata"]["stop_reason"] == "toolUse"
+        assert first["metrics"]["output_tokens"] == 8
+        assert final_llm.annotations["metrics"]["output_tokens"] == 12
+        names = [definition["name"] for definition in first["tool_definitions"]]
         assert names == [*PI_BUILTIN_TOOLS, "mcp__apm__s"]
-        assert llm_annotation["input_data"] == [{"role": "system", "content": "SYS"}, {"role": "user", "content": "Q"}]
-        assert llm_annotation["output_data"][-1] == {"role": "assistant", "content": "The directory is empty."}
+        # The input of a call is the transcript before it.
+        assert first["input_data"] == [{"role": "user", "content": "hi"}]
+        assert first["output_data"][-1]["role"] == "assistant"
+        final_input = final_llm.annotations["input_data"]
+        assert [message["role"] for message in final_input] == ["user", "assistant"]
+        assert final_input[-1]["tool_calls"][0]["tool_id"] == "call_1"
+        assert final_llm.annotations["output_data"][-1] == {"role": "assistant", "content": "The directory is empty."}
+        assert tool.annotations["input_data"] == {"path": "."}
+        assert tool.annotations["output_data"] == "(empty directory)"
+        assert tool.annotations["metadata"]["duration_ms"] == 2
 
         agent_annotation = next(a for a in fake.annotations if "_dd" in a.get("metadata", {}))
         manifest = agent_annotation["metadata"]["_dd"]["agent_manifest"]
         assert manifest["framework"] == "pi"
         assert {"name": "mcp__apm__s"} in manifest["tools"]
-        # Trace headers reach the MCP server config pi receives.
+        assert agent_annotation["metrics"]["output_tokens"] == 20
+        # Trace headers reach the MCP server config pi receives, and pi loads
+        # the collector extension.
         seen = json.loads(record.read_text())
         assert json.loads(seen["files"]["mcp.json"])["mcpServers"]["apm"]["headers"] == {"traceparent": "00-t"}
+        assert "--extension" in seen["argv"]
+
+    def test_no_spans_when_llmobs_is_disabled(self, tmp_path, fake_pi, monkeypatch, fake_span_llmobs):
+        import airedale.harness.base as base
+
+        fake_span_llmobs.enabled = False
+        monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
+        command, record = fake_pi(_events_tool_run())
+        runner = PiRunner(cwd=tmp_path, pi_command=command)
+        result = _bounded(
+            runner.run(model=MODEL, system_prompt="SYS", user_prompt="Q", prompt_version="v", harness="pi-s")
+        )
+        assert result.answer == "The directory is empty."
+        assert fake_span_llmobs.spans == []
+        # No spans: pi does not load the collector extension.
+        assert "--extension" not in json.loads(record.read_text())["argv"]
+
+    def test_real_times_through_the_subprocess(self, tmp_path, fake_pi, monkeypatch, fake_span_llmobs):
+        import airedale.harness.base as base
+
+        monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
+        monkeypatch.setattr(base, "agent", lambda **kwargs: lambda func: func)
+
+        async def _no_catalog(servers, headers):
+            return {}
+
+        monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _no_catalog)
+        messages = [event["message"] for event in _events_tool_run() if event["type"] == "message_end"]
+        first, final = messages[1], messages[2]
+        events = [
+            {"type": "turn_start"},
+            {"type": "message_end", "message": {"role": "user", "content": "Q"}},
+            # The request started 300 ms before the message ends.
+            {"type": "message_end", "message": first, "__now_ms": -300},
+            {"type": "tool_execution_start", "toolCallId": "call_1", "toolName": "ls", "args": {}},
+            {"__sleep": 0.4},
+            {"type": "tool_execution_end", "toolCallId": "call_1", "toolName": "ls", "result": "x", "durationMs": 250},
+            {"type": "turn_start"},
+            {"type": "compaction_start", "reason": "threshold"},
+            {"__sleep": 0.2},
+            {"type": "compaction_end", "reason": "threshold", "result": {"summary": "S"}},
+            {"type": "message_end", "message": final, "__now_ms": -100},
+            {"type": "agent_settled", "aborted": False},
+        ]
+        command, _ = fake_pi(events)
+        result = _bounded(
+            PiRunner(cwd=tmp_path, pi_command=command).run(
+                model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"
+            )
+        )
+        assert result.answer == "The directory is empty."
+        llm_1, tool, compaction, llm_2 = fake_span_llmobs.spans
+        assert [span.kind for span in fake_span_llmobs.spans] == ["llm", "tool", "task", "llm"]
+        ms = 1_000_000
+        # Durations come from the recorded times, not from the time of the
+        # emission (all spans are sent at the same time, after the run). The
+        # bounds allow a slow reader: a record can only arrive late.
+        # - llm: from the message timestamp (300 ms before it was written).
+        assert 300 * ms <= llm_1.end_ns - llm_1.start_ns <= 30_000 * ms
+        assert 100 * ms <= llm_2.end_ns - llm_2.start_ns <= 30_000 * ms
+        # - tool: the pi duration, but never past the arrival of its end record.
+        assert 0 <= tool.end_ns - tool.start_ns <= 250 * ms + 1000
+        assert tool.annotations["metadata"]["duration_ms"] == 250
+        assert compaction.end_ns >= compaction.start_ns
+        assert llm_1.start_ns < tool.start_ns <= compaction.start_ns < llm_2.end_ns
+
+    def test_cancelled_run_still_sends_spans(self, tmp_path, fake_pi, monkeypatch, fake_span_llmobs):
+        import airedale.harness.base as base
+        import airedale.harness.pi as pi_module
+
+        monkeypatch.setattr(pi_module, "PI_TERMINATE_GRACE_SECONDS", 0.5)
+        monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
+        monkeypatch.setattr(base, "agent", lambda **kwargs: lambda func: func)
+
+        async def _no_catalog(servers, headers):
+            return {}
+
+        monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _no_catalog)
+        events = [
+            {"type": "turn_start"},
+            {"type": "tool_execution_start", "toolCallId": "call_1", "toolName": "bash", "args": {}},
+        ]
+        command, _ = fake_pi(events, FAKE_PI_HANG="1")
+        runner = PiRunner(cwd=tmp_path, pi_command=command)
+        tool_started = asyncio.Event()
+
+        class _SignalingRecorder(pi_module.PiSpanRecorder):
+            def feed(self, event, *, received_ns=None):
+                super().feed(event, received_ns=received_ns)
+                if event.get("type") == "tool_execution_start":
+                    tool_started.set()
+
+        monkeypatch.setattr(pi_module, "PiSpanRecorder", _SignalingRecorder)
+
+        async def scenario():
+            task = asyncio.create_task(
+                runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h")
+            )
+            # Cancel only after the recorder has the tool start.
+            await asyncio.wait_for(tool_started.wait(), timeout=10)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+        asyncio.run(asyncio.wait_for(scenario(), timeout=20))
+        [tool] = fake_span_llmobs.spans
+        assert (tool.kind, tool.name, tool.error) == ("tool", "bash", 1)
+        assert tool.annotations["metadata"]["error"] == "tool did not finish"
+        assert fake_span_llmobs.active == []
+
+    def test_run_without_the_collector_when_pi_cannot_load_it(self, tmp_path, fake_pi, monkeypatch, fake_span_llmobs):
+        import airedale.harness.base as base
+
+        monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
+        monkeypatch.setattr(base, "agent", lambda **kwargs: lambda func: func)
+
+        async def _no_catalog(servers, headers):
+            return {}
+
+        monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _no_catalog)
+        command, record = fake_pi(_events_tool_run(), FAKE_PI_REJECT_EXTENSION="1")
+        result = _bounded(
+            PiRunner(cwd=tmp_path, pi_command=command).run(
+                model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"
+            )
+        )
+        assert result.answer == "The directory is empty."
+        runs = [json.loads(line) for line in Path(str(record) + ".runs").read_text().splitlines()]
+        assert ["--extension" in argv for argv in runs] == [True, False]
+        # The spans use the stream data only.
+        assert [span.kind for span in fake_span_llmobs.spans] == ["llm", "tool", "llm"]
+
+    def test_other_startup_failures_are_not_run_again(self, tmp_path, fake_pi, monkeypatch, fake_span_llmobs):
+        import airedale.harness.base as base
+
+        monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
+        monkeypatch.setattr(base, "agent", lambda **kwargs: lambda func: func)
+
+        async def _no_catalog(servers, headers):
+            return {}
+
+        monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _no_catalog)
+        command, record = fake_pi([], FAKE_PI_EXIT="1", FAKE_PI_STDERR="Error: Failed to load extension other.ts")
+        with pytest.raises(RuntimeError, match="exited with status 1"):
+            _bounded(
+                PiRunner(cwd=tmp_path, pi_command=command).run(
+                    model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"
+                )
+            )
+        assert len(Path(str(record) + ".runs").read_text().splitlines()) == 1
+
+    def test_spans_are_sent_when_the_run_fails(self, tmp_path, fake_pi, monkeypatch, fake_span_llmobs):
+        import airedale.harness.base as base
+
+        monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
+        monkeypatch.setattr(base, "agent", lambda **kwargs: lambda func: func)
+
+        async def _no_catalog(servers, headers):
+            return {}
+
+        monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _no_catalog)
+        events = _events_tool_run()[:6]  # pi stops while the tool runs.
+        command, _ = fake_pi(events, FAKE_PI_EXIT="1")
+        runner = PiRunner(cwd=tmp_path, pi_command=command)
+        with pytest.raises(RuntimeError, match="exited with status 1"):
+            _bounded(runner.run(model=MODEL, system_prompt="SYS", user_prompt="Q", prompt_version="v", harness="h"))
+        kinds = [(span.kind, span.name) for span in fake_span_llmobs.spans]
+        assert kinds == [("llm", "eval.anthropic_agent"), ("tool", "ls")]
+        tool = fake_span_llmobs.spans[1]
+        assert tool.error == 1
+        assert tool.annotations["metadata"]["error"] == "tool did not finish"
 
 
 def test_finish_cleanup_completes_and_keeps_cancellation():

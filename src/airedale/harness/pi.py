@@ -7,9 +7,29 @@
 A scenario with ``harness = "pi"`` runs its models through the `pi` coding
 agent. Pi has no Python API and no ddtrace integration. This runner starts
 ``pi --mode json`` as a subprocess for each run, reads its JSONL event stream
-(see pi ``docs/json.md``), and makes the same manual spans as the Codex runner
-(``@agent`` + ``@llm`` + one ``tool`` span per tool call, see
-:class:`DecoratorSpanAgentRunner`).
+(see pi ``docs/json.md``), and makes manual LLMObs spans.
+
+Spans
+-----
+The outer ``@agent`` span is the same as for Codex (see
+:class:`DecoratorSpanAgentRunner`). Its children are more detailed than for
+Codex, because the pi stream shows each step while it runs (see
+:mod:`airedale.harness.pi_spans`):
+
+- one ``llm`` span for each model call, with the input, the output, the usage
+  and the real start and end times of that call;
+- one ``tool`` span for each tool execution, with its real times. A tool call
+  made by another tool (for example from a codemode script) is a child of
+  that tool span;
+- one ``task`` span for each compaction.
+
+When LLMObs is enabled, pi also loads the airedale collector extension
+(``pi_llmobs_extension.ts``, with ``-e``). It adds the request time, the time
+to the first response byte, the HTTP status, the request ID and the messages of
+each model request to the stream (see the limits in
+:mod:`airedale.harness.pi_spans`). Without its data, the spans use the data of
+the stream only. Pi stops at startup when it cannot load an extension (for
+example an old pi): the runner then runs pi again without the collector.
 
 Isolation
 ---------
@@ -75,10 +95,12 @@ import shlex
 import shutil
 import signal
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from airedale.harness import base as _base
 from airedale.harness.base import (
     AgentOutputSegment,
     AgentRunResult,
@@ -86,8 +108,14 @@ from airedale.harness.base import (
     AgentToolCall,
     DecoratorSpanAgentRunner,
     ProgressCallback,
+    _llmobs_tool_definitions,
     _notify,
-    json_dumps_compact,
+)
+from airedale.harness.pi_spans import (
+    PI_LLMOBS_EXTENSION_PATH,
+    PiSpanRecorder,
+    message_text,
+    tool_result_text,
 )
 from airedale.mcp import pi_literal
 from airedale.skills import pi_skill_dirs
@@ -194,6 +222,50 @@ class PiRunner(DecoratorSpanAgentRunner):
             return PI_BUILTIN_TOOLS
         return tuple(dict.fromkeys(PI_TOOL_ALIASES.get(name, name) for name in self.allowed_builtin_tools))
 
+    async def _run_model_calls(
+        self,
+        *,
+        model: ModelSpec,
+        system_prompt: str,
+        user_prompt: str,
+        prompt_version: str,
+        harness: str,
+        progress: ProgressCallback | None,
+    ) -> tuple[AgentRunResult, RuntimeError | None]:
+        """Run pi and make one span for each model call, tool call and compaction."""
+        trace_headers, mcp_tool_metadata = await self._span_context()
+        llmobs = _base.LLMObs
+        spans: PiSpanRecorder | None = None
+        if llmobs.enabled:
+            spans = PiSpanRecorder(
+                model=model,
+                sdk_name=self.sdk_name,
+                harness=harness,
+                prompt_version=prompt_version,
+                tool_definitions=_llmobs_tool_definitions(
+                    self.mcp_servers,
+                    sdk_name=self.sdk_name,
+                    allowed_builtin_tools=self._effective_builtin_tools(),
+                    mcp_tool_metadata=mcp_tool_metadata,
+                ),
+            )
+        try:
+            run_result = await self._run_agent(
+                model=model,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                trace_headers=trace_headers,
+                progress=progress,
+                spans=spans,
+            )
+        finally:
+            # Also after a failure or a cancellation: the spans show the steps
+            # that ran. The agent span is still active, so it is their parent.
+            if spans is not None:
+                spans.close()
+                spans.emit(llmobs)
+        return run_result, self._missing_usage_error(run_result, model)
+
     async def _run_agent(
         self,
         *,
@@ -202,6 +274,7 @@ class PiRunner(DecoratorSpanAgentRunner):
         user_prompt: str,
         trace_headers: Mapping[str, str],
         progress: ProgressCallback | None,
+        spans: PiSpanRecorder | None = None,
     ) -> AgentRunResult:
         self._check_project_mcp_collisions()
         skill_dirs = pi_skill_dirs(self.skills, self.cwd)
@@ -210,16 +283,30 @@ class PiRunner(DecoratorSpanAgentRunner):
             system_prompt_path = self._write_agent_dir(
                 agent_dir, model=model, system_prompt=system_prompt, trace_headers=trace_headers
             )
-            command = self._command(model=model, system_prompt_path=system_prompt_path, skill_dirs=skill_dirs)
-            collector = _PiEventCollector(max_turns=self.max_turns)
-            returncode, stderr_tail = await self._run_process(
-                command,
-                user_prompt=user_prompt,
-                env=self._env(agent_dir),
-                collector=collector,
-                model=model,
-                progress=progress,
-            )
+            collector_extension = spans is not None
+            while True:
+                command = self._command(
+                    model=model,
+                    system_prompt_path=system_prompt_path,
+                    skill_dirs=skill_dirs,
+                    collector_extension=collector_extension,
+                )
+                collector = _PiEventCollector(max_turns=self.max_turns, spans=spans)
+                returncode, stderr_tail = await self._run_process(
+                    command,
+                    user_prompt=user_prompt,
+                    env=self._env(agent_dir),
+                    collector=collector,
+                    model=model,
+                    progress=progress,
+                )
+                if not (collector_extension and _collector_extension_failed(collector, returncode, stderr_tail)):
+                    break
+                # Pi stops at startup when it cannot load an extension, before
+                # any model call: run it again without the collector, so that
+                # telemetry never fails a run. The spans then use the stream.
+                logger.warning("pi cannot load the airedale collector extension; running without it:\n%s", stderr_tail)
+                collector_extension = False
         finally:
             shutil.rmtree(agent_dir, ignore_errors=True)
         return collector.result(model=model, returncode=returncode, stderr_tail=stderr_tail)
@@ -333,7 +420,14 @@ class PiRunner(DecoratorSpanAgentRunner):
     # ------------------------------------------------------------------ #
     # Command line
     # ------------------------------------------------------------------ #
-    def _command(self, *, model: ModelSpec, system_prompt_path: Path, skill_dirs: list[str]) -> list[str]:
+    def _command(
+        self,
+        *,
+        model: ModelSpec,
+        system_prompt_path: Path,
+        skill_dirs: list[str],
+        collector_extension: bool = False,
+    ) -> list[str]:
         """Build the pi command line.
 
         The user prompt is not on the command line: pi reads an ``@path``
@@ -356,6 +450,9 @@ class PiRunner(DecoratorSpanAgentRunner):
             "--append-system-prompt",
             str(system_prompt_path),
         ]
+        if collector_extension:
+            # Only when spans are made. Pi exits when it cannot load it.
+            command.extend(["--extension", str(PI_LLMOBS_EXTENSION_PATH)])
         for skill_dir in skill_dirs:
             command.extend(["--skill", skill_dir])
         if self.effort:
@@ -522,11 +619,21 @@ async def _read_events(
             return
         if not line:
             return
-        message = collector.feed_line(line)
+        message = collector.feed_line(line, received_ns=time.time_ns())
         if message:
             await _notify(progress, f"{SDK_NAME}/{model.label}: {message}")
         if collector.stop_requested or collector.settled:
             return
+
+
+def _collector_extension_failed(collector: _PiEventCollector, returncode: int | None, stderr_tail: str) -> bool:
+    """Return ``True`` when pi stopped at startup because it cannot load the collector extension."""
+    return (
+        returncode not in (0, None)
+        and collector.records == 0
+        and "Failed to load extension" in stderr_tail
+        and str(PI_LLMOBS_EXTENSION_PATH) in stderr_tail
+    )
 
 
 def _default_pi_command() -> list[str]:
@@ -633,6 +740,10 @@ class _PiEventCollector:
     #: True when the run settled but pi did not exit, so the runner stopped it.
     #: The exit status is then not a run failure.
     stopped_after_settle: bool = False
+    #: Receives every event with its arrival time, to make the spans.
+    spans: PiSpanRecorder | None = None
+    #: Number of JSON records read from stdout.
+    records: int = 0
 
     @property
     def stop_requested(self) -> bool:
@@ -642,8 +753,11 @@ class _PiEventCollector:
         if self.failure is None:
             self.failure = message
 
-    def feed_line(self, line: bytes) -> str | None:
-        """Process one JSONL record; return a short progress message, if any."""
+    def feed_line(self, line: bytes, *, received_ns: int | None = None) -> str | None:
+        """Process one JSONL record; return a short progress message, if any.
+
+        ``received_ns`` is the time (epoch ns) when the record arrived.
+        """
         text = line.decode("utf-8", errors="replace").rstrip("\r\n")
         if not text.strip():
             return None
@@ -657,6 +771,9 @@ class _PiEventCollector:
             # Pi writes one JSON object per record; anything else is damage.
             self.invalid_lines += 1
             return None
+        self.records += 1
+        if self.spans is not None:
+            self.spans.feed(event, received_ns=received_ns)
         return self.feed(event)
 
     def feed(self, event: dict[str, Any]) -> str | None:
@@ -816,30 +933,5 @@ class _PiEventCollector:
         )
 
 
-def _message_text(message: dict[str, Any]) -> str:
-    content = message.get("content")
-    if isinstance(content, str):
-        return content.strip()
-    if not isinstance(content, list):
-        return ""
-    parts = [
-        str(block.get("text") or "") for block in content if isinstance(block, dict) and block.get("type") == "text"
-    ]
-    return "\n\n".join(part.strip() for part in parts if part.strip())
-
-
-def _tool_result_text(result: Any) -> str:
-    """Render a pi tool result (``{"content": [...], "details": ...}``) as text."""
-    if isinstance(result, dict) and isinstance(result.get("content"), list):
-        parts: list[str] = []
-        for block in result["content"]:
-            if not isinstance(block, dict):
-                continue
-            if block.get("type") == "text":
-                parts.append(str(block.get("text") or ""))
-            else:
-                parts.append(f"[{block.get('type') or 'content'}]")
-        return "\n".join(parts)
-    if isinstance(result, str):
-        return result
-    return json_dumps_compact(result)
+_message_text = message_text
+_tool_result_text = tool_result_text

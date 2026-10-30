@@ -42,8 +42,19 @@ The model provider selects the execution engine:
 A scenario can set `harness = "pi"` (default `"native"`, which is the table
 above). Then every model of that scenario runs through the **pi** coding agent
 (`pi --mode json` subprocess, `harness/pi.py`), for both providers. Pi has no
-Python API and no ddtrace integration, so it gets the same decorator spans as
-Codex.
+Python API and no ddtrace integration. It gets the same outer `@agent` span as
+Codex, but its children are more detailed: the pi JSON stream shows each step
+while it runs, so `harness/pi_spans.py` makes one `llm` span for each model
+call, one `tool` span for each tool execution (nested tool calls are children
+of the tool that made them) and one `task` span for each compaction, all with
+their real start and end times. When LLMObs is enabled, pi also loads the
+collector extension `harness/pi_llmobs_extension.ts` (`-e`). It adds the
+request time, the time to the first response byte, the HTTP status, the request
+ID and the pi messages of each model request to the stream (as
+`entry_appended` records; limits in the `pi_spans.py` docstring). The extension
+does not make spans and does not send data out of pi: Python makes all the
+spans. Its data comes from the pi process (repo code can write the same
+entries), so it is validated, limited, and used for telemetry only.
 
 MCP servers and skills are passed **natively** to these SDKs — we do NOT
 reimplement a tool-calling loop. This is what enables:
@@ -51,7 +62,8 @@ reimplement a tool-calling loop. This is what enables:
 - **Skills & subagents** support (both SDKs consume the open SKILL.md format).
 - **Native LLMObs spans** for Claude (the ddtrace integration owns its spans);
   **decorator spans** (`@agent` / `@llm`) for Codex and pi, which have no native
-  integration (shared in `harness/base.py` `DecoratorSpanAgentRunner`).
+  integration (shared in `harness/base.py` `DecoratorSpanAgentRunner`; pi
+  overrides `_run_model_calls` to make one `llm` span per model call).
 - **Distributed tracing for complete token counting:** before each run we call
   `LLMObs.inject_distributed_headers(...)` and merge the resulting headers into
   the HTTP headers sent to MCP servers. When the MCP server is itself
@@ -367,6 +379,9 @@ src/airedale/
     codex.py             openai-codex runner (decorator spans; skills; MCP; gateway)
     pi.py                pi coding-agent runner (`pi --mode json` subprocess; decorator spans;
                          isolated agent dir; skills; MCP; gateway via built-in provider override)
+    pi_spans.py          PiSpanRecorder: pi events -> llm/tool/task spans with real times
+    pi_llmobs_extension.ts  pi extension (loaded with -e): request times, response
+                         details and request messages as `entry_appended` records
 
   scoring/
     __init__.py
@@ -465,9 +480,12 @@ def slugify(value: str) -> str: ...
   - `runs` = configured runs
 - **Prefer native integrations** (`integrations_enabled=True`); only add manual
   spans where a provider has no native integration. Concretely: Claude runs emit
-  no synthetic agent/LLM/tool spans (the SDK integration owns them); Codex and
-  pi runs are wrapped in `@agent` + `@llm` decorator spans (plus one `tool` span
-  per tool call) and annotated with usage, tool definitions, and I/O.
+  no synthetic agent/LLM/tool spans (the SDK integration owns them); Codex runs
+  are wrapped in `@agent` + `@llm` decorator spans (plus one `tool` span per tool
+  call) and annotated with usage, tool definitions, and I/O. Pi runs get the
+  `@agent` span, then one `llm` span per model call, one `tool` span per tool
+  execution and one `task` span per compaction, sent after the run with the
+  times recorded while it ran (`span.start_ns` + `finish(finish_time=...)`).
 - The experiment `config` and tags also carry `harness` (`native` / `pi`).
 - Always `LLMObs.annotate(metrics=usage.to_llmobs_metrics(), ...)` on the active
   experiment span so token totals are complete even when the harness sees usage
