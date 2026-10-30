@@ -334,10 +334,24 @@ Notes:
   tools, add `codemode` to `allowed_builtin_tools`). Because
   pi lets a project server replace a same-named scenario server, such a name
   collision fails the run. **Trust:** with `--approve`, a cloned repo's
-  `.pi/extensions` and project packages run inside the pi process with the
-  harness environment (as `.claude/settings.json` hooks do for Claude). Only
-  evaluate repositories you trust. The task prompt goes to pi on stdin, so a
-  prompt that starts with `@` is not read as a file.
+  `.pi/extensions` and project packages run inside the pi process with its
+  environment (as `.claude/settings.json` hooks do for Claude). Only
+  evaluate repositories you trust. The pi process does not inherit Datadog
+  credentials: `DD_API_KEY`, `DD_APP_KEY`, and every other `DD_*` /
+  `DATADOG_*` / `_DD_*` variable whose name contains `KEY`, `TOKEN`, `SECRET`,
+  `PASSWORD`, `PASSWD`, `AUTH`, `CREDENTIAL` or `BEARER` (but not `AUTHOR`, as
+  in `DD_GIT_COMMIT_AUTHOR_NAME`), and every other `DD_*` / `DATADOG_*` /
+  `_DD_*` variable whose value has user information (a proxy URL such as
+  `DD_PROXY_HTTPS=http://user:pass@host`) or a credential query parameter
+  (`?api_key=...`). So pi, its tools and stdio MCP
+  servers do not inherit them. This is not a sandbox (repo code runs as the
+  same OS user). A gateway `api_key_env` credential still goes to pi (in its
+  private `models.json`). **Compatibility:** a pi stdio MCP server that used
+  the inherited `DD_API_KEY` (or a similar variable) does not get it any more.
+  There is no safe way to give it one at this time: `$NAME` in an MCP `env`
+  value is not expanded, and a literal key in `env` goes to the LLMObs
+  experiment metadata. The task prompt goes to pi on stdin, so a prompt
+  that starts with `@` is not read as a file.
 
 ---
 
