@@ -20,3 +20,14 @@ base_url = "https://ai-gateway.example.com/v1"
 # api_key_env = "MY_OPENAI_GATEWAY_KEY"
 credentials_helper = "mytool auth token --datacenter us1"
 headers = { source = "evals", provider = "openai" }
+
+# Optional, pi harness only (`harness = "pi"` scenarios): pi takes model details
+# (context window, output limit, cost) from its built-in catalog. Add a pi model
+# definition only for a model that is not in that catalog. Each entry is a pi
+# models.json `models` entry, passed as-is.
+# [[providers.openai.pi_models]]
+# id = "gpt-next"
+# reasoning = true
+# contextWindow = 400000
+# maxTokens = 128000
+# cost = { input = 1.25, output = 10, cacheRead = 0.125, cacheWrite = 0 }

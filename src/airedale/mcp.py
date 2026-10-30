@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import logging
 import os
@@ -44,6 +45,12 @@ MCP_TOOL_METADATA_TIMEOUT_SECONDS = 10.0
 # of recent output for error reporting.
 MANAGED_MCP_OUTPUT_TAIL_BYTES = 64 * 1024
 MANAGED_MCP_DRAIN_CHUNK_BYTES = 4096
+
+
+# Pi accepts only these characters in MCP server names (see pi docs/mcp.md).
+PI_MCP_SERVER_NAME_RE = re.compile(r"[A-Za-z0-9_-]+")
+_PI_TOOL_NAME_UNSAFE_RE = re.compile(r"[^A-Za-z0-9_]")
+PI_MAX_TOOL_NAME_LENGTH = 64
 
 
 @dataclass(frozen=True)
@@ -122,6 +129,44 @@ class McpServerSpec:
             return overrides
         raise ValueError(f"MCP server {self.name!r} has unsupported type {self.type!r}")
 
+    def to_pi_config(self, trace_headers: Mapping[str, str]) -> dict[str, Any]:
+        """Render this spec as a pi ``mcp.json`` ``mcpServers`` entry.
+
+        Every tool gets ``direct`` exposure, so the model sees MCP tools as
+        declared tools (the same as with Claude and Codex), not through pi's
+        ``codemode`` scripts. When ``tool_names`` is set, all other tools of the
+        server are ``hidden``. Pi resolves ``$NAME`` and ``!command`` in header
+        and env values; :func:`pi_literal` escapes the values so they stay
+        literal.
+        """
+        if not PI_MCP_SERVER_NAME_RE.fullmatch(self.name):
+            raise ValueError(
+                f"MCP server name {self.name!r} is not valid for pi; use only letters, digits, '_' and '-'"
+            )
+        entry: dict[str, Any]
+        if self.type == "http":
+            entry = {"type": "http", "url": self.url}
+            headers = self.merged_headers(trace_headers)
+            if headers:
+                entry["headers"] = {name: pi_literal(value) for name, value in headers.items()}
+        elif self.type == "stdio":
+            entry = {"type": "stdio", "command": self.command, "args": list(self.args)}
+            if self.env:
+                entry["env"] = {name: pi_literal(value) for name, value in self.env.items()}
+        else:
+            raise ValueError(f"MCP server {self.name!r} has unsupported type {self.type!r}")
+        tool_names = configured_tool_names(self)
+        if any("*" in tool_name for tool_name in tool_names):
+            # Pi reads `*` in a `toolExposure` key as a pattern; `tool_names`
+            # is a list of exact names.
+            raise ValueError(f"MCP server {self.name!r} tool_names must be exact tool names; '*' is not allowed")
+        if tool_names:
+            entry["exposure"] = "hidden"
+            entry["toolExposure"] = dict.fromkeys(tool_names, "direct")
+        else:
+            entry["exposure"] = "direct"
+        return entry
+
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serializable representation for runtime config."""
         return {
@@ -193,7 +238,38 @@ def provider_mcp_tool_name(server_name: str, tool_name: str, *, sdk_name: str) -
     """Return the provider-specific MCP tool name format."""
     if sdk_name == "claude-agent-sdk":
         return f"mcp__{server_name}__{tool_name}"
+    if sdk_name == "pi":
+        return pi_mcp_tool_name(server_name, tool_name)
     return f"mcp.{server_name}.{tool_name}"
+
+
+def pi_mcp_tool_name(server_name: str, tool_name: str) -> str:
+    """Return the name pi gives an MCP tool: ``mcp__<server>__<tool>``.
+
+    Same rule as pi's ``createMcpToolName``: every character other than letters,
+    digits and ``_`` becomes ``_``; a name longer than 64 characters is cut and
+    gets ``_`` + the first 8 hex digits of ``sha256("<server>\0<tool>")``. (Pi
+    also adds that suffix when two tools of the configuration get the same name
+    after sanitizing; that rare case is not reproduced here.)
+    """
+    name = _PI_TOOL_NAME_UNSAFE_RE.sub("_", f"mcp__{server_name}__{tool_name}")
+    if len(name) <= PI_MAX_TOOL_NAME_LENGTH:
+        return name
+    digest = hashlib.sha256(f"{server_name}\0{tool_name}".encode()).hexdigest()[:8]
+    return f"{name[: PI_MAX_TOOL_NAME_LENGTH - len(digest) - 1]}_{digest}"
+
+
+def pi_literal(value: str) -> str:
+    """Escape a value so that pi config resolution keeps it literal.
+
+    Pi treats a leading ``!`` as a shell command and ``$NAME`` / ``${NAME}`` as
+    environment interpolation in ``models.json`` and ``mcp.json`` values. In
+    those values, ``$$`` gives a literal ``$`` and ``$!`` a literal ``!``.
+    """
+    escaped = str(value).replace("$", "$$")
+    if escaped.startswith("!"):
+        escaped = "$!" + escaped[1:]
+    return escaped
 
 
 @dataclass(frozen=True)

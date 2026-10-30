@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 from ddtrace.llmobs import LLMObs
 
 from airedale import dataset as dataset_module
+from airedale.config.experiment import HARNESS_NATIVE
 from airedale.harness import create_runner, mcp_system_prompt
 from airedale.mcp import McpServerSpec, managed_servers
 from airedale.observability import enable_llmobs
@@ -221,6 +222,7 @@ async def _run_cell(
         description=f"{scenario.name} / {model.label} / {task.id}",
         tags={
             "scenario": scenario.name,
+            "harness": scenario.harness,
             "prompt_version": scenario.name,
             "model_name": model.label,
             "task_slug": task.id,
@@ -229,6 +231,7 @@ async def _run_cell(
         config={
             "model_name": model.label,
             "scenario": scenario.name,
+            "harness": scenario.harness,
             "prompt_version": scenario.name,
             "task": task.id,
             "judge_model": judge_model,
@@ -339,7 +342,8 @@ def _print_matrix(matrix: list[tuple[ModelSpec, ScenarioConfig, TaskConfig]]) ->
     """Print the resolved matrix for a dry run."""
     print(f"Matrix: {len(matrix)} cell(s)")
     for model, scenario, task in matrix:
-        print(f"  {model.label} | {scenario.name} | {task.id}")
+        harness = "" if scenario.harness == HARNESS_NATIVE else f" [harness={scenario.harness}]"
+        print(f"  {model.label} | {scenario.name}{harness} | {task.id}")
 
 
 def _experiment_name(scenario: ScenarioConfig, model: ModelSpec, task: TaskConfig) -> str:

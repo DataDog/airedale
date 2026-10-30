@@ -39,13 +39,19 @@ The model provider selects the execution engine:
 | `anthropic` | `claude-agent-sdk` (Claude Code)        |
 | `openai`    | `openai-codex` (Codex)                  |
 
+A scenario can set `harness = "pi"` (default `"native"`, which is the table
+above). Then every model of that scenario runs through the **pi** coding agent
+(`pi --mode json` subprocess, `harness/pi.py`), for both providers. Pi has no
+Python API and no ddtrace integration, so it gets the same decorator spans as
+Codex.
+
 MCP servers and skills are passed **natively** to these SDKs — we do NOT
 reimplement a tool-calling loop. This is what enables:
 
 - **Skills & subagents** support (both SDKs consume the open SKILL.md format).
 - **Native LLMObs spans** for Claude (the ddtrace integration owns its spans);
-  **decorator spans** (`@agent` / `@llm`) for Codex, which has no native
-  integration.
+  **decorator spans** (`@agent` / `@llm`) for Codex and pi, which have no native
+  integration (shared in `harness/base.py` `DecoratorSpanAgentRunner`).
 - **Distributed tracing for complete token counting:** before each run we call
   `LLMObs.inject_distributed_headers(...)` and merge the resulting headers into
   the HTTP headers sent to MCP servers. When the MCP server is itself
@@ -129,6 +135,7 @@ effort = "medium"       # reasoning effort hint passed to the SDKs
 # reference shared skills / MCP servers BY NAME (no inline definitions).
 [scenarios.fat-mcp]
 description = "Full MCP orchestrator tool"
+# harness = "pi"                      # optional; "native" (default) | "pi" (pi coding agent for every model)
 system_prompt = "..."                 # optional; appended to the base system prompt
 skills = ["apm"]                      # optional; names from the [skills] registry
 # allowed_builtin_tools omitted -> ALL built-in tools allowed.
@@ -177,7 +184,9 @@ Notes:
   copy-paste. A scenario naming a skill/server absent from the registry is a
   `ConfigError`. Inline `[scenarios.<name>.mcp_servers.<x>]` tables and raw skill
   paths inside a scenario are rejected.
-- `[defaults]` may set `max_turns`, `effort`, `system_prompt`, `skills`,
+- `harness` (scenario or `[defaults]`): `"native"` (default; engine selected
+  from the model provider) or `"pi"`. Any other value is a `ConfigError`.
+- `[defaults]` may set `harness`, `max_turns`, `effort`, `system_prompt`, `skills`,
   `allowed_builtin_tools`, and `mcp_servers`. When a scenario sets one of these,
   its value replaces the default **entirely** — lists/tables are never merged.
 - `system_prompt` is optional on both scenarios and `[defaults]`; when present it
@@ -191,7 +200,13 @@ Notes:
   In code this is the `None`-vs-`()`-vs-tuple distinction on
   `ScenarioConfig.allowed_builtin_tools`. For Claude (`dontAsk` permission mode)
   the "all" case pre-approves the full `CLAUDE_BUILTIN_TOOLS` set; for Codex the
-  field is informational only (Codex does not gate built-ins on it).
+  field is informational only (Codex does not gate built-ins on it). For pi the
+  list becomes `--tools` (Claude names such as `Read`/`Glob` are mapped to the pi
+  tools `read`/`find`; "all" = `PI_BUILTIN_TOOLS`), plus `mcp__*` when any MCP
+  server exists, because pi declares an MCP tool only when `--tools` matches it.
+  `mcp__*` matches pi's real names (pi shortens long names and adds a hash on
+  collisions); the scenario `tool_names` allow-list is enforced by
+  `toolExposure` (`hidden` + `direct`) in the generated `mcp.json`.
 - A scenario need not reference any MCP server — scenarios with no MCP servers
   are valid (model answers from skills/builtins only).
 - `type` is optional; when omitted it is inferred ("http" if `url` is set,
@@ -236,6 +251,33 @@ Notes:
     keeps working without inheriting the global `config.toml`. A repo-scoped
     `<cwd>/.codex/config.toml` is **not** read by Codex for MCP servers
     (verified), so there is no Codex project MCP discovery.
+  - **Pi hermeticity.** Pi reads all user-level config (settings, packages,
+    extensions, `mcp.json`, `models.json`, skills, `AGENTS.md`, `auth.json`)
+    from its agent dir (default `~/.pi/agent`). `PiRunner` **always** sets
+    `PI_CODING_AGENT_DIR` to a fresh private temp dir **outside** `cwd`
+    (removed after the run) that holds only the generated `settings.json`,
+    `models.json`, `mcp.json`, the appended system prompt and — only without
+    gateway/env auth — a **copy** of the operator's pi `auth.json`. Pi runs with
+    `--no-session`, `--no-skills` (blocks `~/.agents/skills`; scenario skills and
+    `<cwd>/.pi/skills` / `<cwd>/.agents/skills` are passed with `--skill`),
+    `--approve` (project `.pi/` files are honored) and `PI_OFFLINE=1`. Parent
+    `PI_*` session variables are removed from the env. Pi does not read
+    `.mcp.json`; it reads `<cwd>/.pi/mcp.json` itself, where a project server
+    would replace a same-named scenario server, so such a collision raises.
+    Project `.pi/mcp.json` servers stay in the `--tools` selection
+    (`mcp__*`); their `codemode`-exposed tools need `codemode` in
+    `allowed_builtin_tools` (never added implicitly: it can call other models). `--approve` lets repo `.pi/extensions` run in-process with
+    the harness env — the same trust as Claude project hooks; evaluate only
+    trusted repos. The prompt is sent on **stdin** (pi reads `@path` argv
+    entries as files, even after `--`). A run fails unless pi settles and the
+    final assistant message has `stopReason == "stop"`; malformed JSONL also
+    fails it. The pi process group is always stopped and reaped (also on
+    cancellation — also a second one during cleanup — and when pi exits while a
+    child keeps stdout open; exit is detected from `returncode`, not
+    `process.wait()`, which can wait for the pipes).
+    Pi has no turn limit: the runner counts `turn_start` events and stops the
+    pi process group above `max_turns`. `effort` becomes `--thinking` when it
+    is a pi thinking level.
   - Filesystem paths in the config (`[skills]` entries, workdir local `repo`
     paths, `write.source`) resolve relative to `experiment.toml`'s directory.
     Command-style values (MCP `command`/`args`, gateway `credentials_helper`) are
@@ -260,6 +302,12 @@ headers = { source = "evals", "org-id" = "2", provider = "anthropic" }
 base_url = "https://ai-gateway.example.com/v1"
 credentials_helper = "mytool auth token --datacenter us1"
 headers = { source = "evals" }
+
+# Optional, pi harness only: extra pi model definitions (pi models.json
+# `models` entries, passed as-is) for a model not in pi's built-in catalog.
+# [[providers.openai.pi_models]]
+# id = "gpt-next"
+# contextWindow = 400000
 ```
 
 Resolution rules (`gateway.py`):
@@ -272,6 +320,14 @@ Resolution rules (`gateway.py`):
   settings (the SDK runs the helper itself with a TTL). For Codex, through config
   overrides (base URL + headers + bearer). For the judge (direct SDK clients), we
   run the helper ourselves and set `base_url` / `api_key` / `default_headers`.
+- For pi, the generated `models.json` changes pi's **built-in** provider of the
+  model (`baseUrl`, `headers`, `apiKey`; `authHeader = true` for a helper token
+  so it is sent as `Authorization: Bearer`). Pi's built-in catalog supplies the
+  model details (API, context window, output limit, cost), so no hardcoded model
+  list is needed; `pi_models` covers models outside the catalog. Values are
+  escaped (`$$` / `$!`) because pi interpolates `$NAME` and runs `!command`. The
+  token is written to that private file, not to the pi env. The runner fails
+  the run when pi reports a provider/model other than the requested one.
 
 ---
 
@@ -305,9 +361,12 @@ src/airedale/
   harness/
     __init__.py          create_runner(model, *, scenario, gateway, cwd) -> AgentRunner;
                          merges scenario + project-discovered MCP servers (scenario wins)
-    base.py              AgentRunner protocol; AgentRunResult; AgentToolCall
+    base.py              AgentRunner protocol; AgentRunResult; AgentToolCall;
+                         DecoratorSpanAgentRunner (manual agent/llm/tool spans for Codex + pi)
     claude.py            claude-agent-sdk runner (native LLMObs; skills; MCP; gateway)
     codex.py             openai-codex runner (decorator spans; skills; MCP; gateway)
+    pi.py                pi coding-agent runner (`pi --mode json` subprocess; decorator spans;
+                         isolated agent dir; skills; MCP; gateway via built-in provider override)
 
   scoring/
     __init__.py
@@ -406,9 +465,10 @@ def slugify(value: str) -> str: ...
   - `runs` = configured runs
 - **Prefer native integrations** (`integrations_enabled=True`); only add manual
   spans where a provider has no native integration. Concretely: Claude runs emit
-  no synthetic agent/LLM/tool spans (the SDK integration owns them); Codex runs
-  are wrapped in `@agent` + `@llm` decorator spans and annotated with usage,
-  tool definitions, and I/O.
+  no synthetic agent/LLM/tool spans (the SDK integration owns them); Codex and
+  pi runs are wrapped in `@agent` + `@llm` decorator spans (plus one `tool` span
+  per tool call) and annotated with usage, tool definitions, and I/O.
+- The experiment `config` and tags also carry `harness` (`native` / `pi`).
 - Always `LLMObs.annotate(metrics=usage.to_llmobs_metrics(), ...)` on the active
   experiment span so token totals are complete even when the harness sees usage
   the integration didn't.
@@ -434,7 +494,12 @@ into each engine's discoverable location:
   so Codex discovers them by scope, and enable/approve via the thread `config`
   (`skill_approval`) so the non-interactive run may invoke them.
 
-Both engines consume the same SKILL.md package format, so a single configured
+- **Pi:** nothing is staged. `skills.pi_skill_dirs()` returns the scenario skill
+  dirs plus the project skills in `<cwd>/.pi/skills` and `<cwd>/.agents/skills`;
+  each is passed with `--skill` (pi runs with `--no-skills`). A scenario/project
+  name collision raises, as for the other engines.
+
+All engines consume the same SKILL.md package format, so a single configured
 directory is staged for whichever engine the model uses. Keep staging idempotent
 and confined to the per-run temp `cwd`.
 
