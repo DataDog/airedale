@@ -134,6 +134,52 @@ def discover_claude_skill_names(cwd: str) -> list[str]:
     return _discover_skill_names(Path(cwd) / ".claude" / "skills")
 
 
+#: Project skill locations pi discovers under the working directory.
+PI_PROJECT_SKILL_SUBDIRS: tuple[str, ...] = (".pi/skills", ".agents/skills")
+
+
+def pi_skill_dirs(skill_dirs: list[str], cwd: str) -> list[str]:
+    """Return the skill directories to pass to pi with ``--skill``.
+
+    The pi harness runs pi with ``--no-skills`` so that user-global skills
+    (for example ``~/.agents/skills``) never load. This function returns the
+    scenario skills plus the project skills that pi would discover in the run
+    ``cwd`` (``.pi/skills/<name>`` and ``.agents/skills/<name>``). Nothing is
+    copied: pi loads each directory where it is. A scenario skill whose name
+    is the same as a project skill raises ``ValueError``, as for the other
+    harnesses.
+    """
+    resolved: list[str] = []
+    names: dict[str, str] = {}
+
+    def _add(path: Path, *, origin: str) -> None:
+        name = _derive_skill_name(path.name)
+        if name in names and origin == "project skill" and names[name].startswith("project skill"):
+            # Two project locations ship the same skill: pi keeps the first one.
+            logger.warning("Project skill %s shadowed by %s", path, names[name])
+            return
+        if name in names:
+            raise ValueError(
+                f"Skill '{name}' ({origin} {path}) collides with {names[name]}; skill names must be unique"
+            )
+        names[name] = f"{origin} {path}"
+        resolved.append(str(path))
+
+    for skill_dir in skill_dirs:
+        source_path = Path(skill_dir).resolve()
+        if not source_path.exists():
+            raise ValueError(f"Skill directory does not exist: {skill_dir}")
+        if not source_path.is_dir():
+            raise ValueError(f"Skill path is not a directory: {skill_dir}")
+        _add(source_path, origin="scenario skill")
+
+    for subdir in PI_PROJECT_SKILL_SUBDIRS:
+        base = Path(cwd) / subdir
+        for name in _discover_skill_names(base):
+            _add(base / name, origin="project skill")
+    return resolved
+
+
 def _discover_skill_names(skills_base: Path) -> list[str]:
     if not skills_base.is_dir():
         return []

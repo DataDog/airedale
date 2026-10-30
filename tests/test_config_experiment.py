@@ -955,3 +955,33 @@ class TestLoadExperimentErrors:
         """
         with pytest.raises(ConfigError, match="missing required 'prompt'"):
             load_experiment(write_toml(tmp_path, toml))
+
+
+# ---------------------------------------------------------------------------
+# harness selection
+# ---------------------------------------------------------------------------
+
+
+class TestHarness:
+    def test_default_is_native(self, tmp_path):
+        config = load_experiment(write_toml(tmp_path, MINIMAL))
+        assert config.scenarios[0].harness == "native"
+
+    def test_scenario_sets_pi(self, tmp_path):
+        content = MINIMAL.replace('description = "Default scenario"', 'description = "x"\nharness = "pi"')
+        config = load_experiment(write_toml(tmp_path, content))
+        assert config.scenarios[0].harness == "pi"
+
+    def test_defaults_harness_and_scenario_override(self, tmp_path):
+        content = (
+            MINIMAL.replace("[scenarios.default]", '[defaults]\nharness = "pi"\n\n[scenarios.default]')
+            + '\n[scenarios.native]\nharness = "native"\n'
+        )
+        config = load_experiment(write_toml(tmp_path, content))
+        by_name = {scenario.name: scenario.harness for scenario in config.scenarios}
+        assert by_name == {"default": "pi", "native": "native"}
+
+    def test_unknown_harness_rejected(self, tmp_path):
+        content = MINIMAL.replace('description = "Default scenario"', 'harness = "opencode"')
+        with pytest.raises(ConfigError, match="unknown harness 'opencode'"):
+            load_experiment(write_toml(tmp_path, content))

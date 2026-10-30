@@ -89,6 +89,18 @@ description = "Stdio MCP server only; built-in tools disabled."
 allowed_builtin_tools = []
 mcp_servers = ["tools"]
 
+# Scenario C2: the same runtime as Scenario A, but every model runs through the
+# pi coding agent instead of Claude Code / Codex. Compare its results with
+# `fat-mcp` to compare the harnesses. `pi` must be on PATH (or set
+# AIREDALE_PI_COMMAND). Claude tool names in `allowed_builtin_tools` (Read,
+# Grep, Glob, ...) are mapped to the pi tools (read, grep, find, ...).
+[scenarios.fat-mcp-pi]
+description = "Full MCP orchestrator tool, through the pi harness"
+harness = "pi"
+system_prompt = "Prefer MCP tools over internal knowledge."
+skills = ["apm"]
+mcp_servers = ["apm"]
+
 # Scenario D: run inside a git worktree of a repository. Without a `workdir`
 # block the agent runs in a fresh empty temp dir (hermetic sandbox). With one,
 # each run/repetition gets a fresh `git worktree` of a cached clone, and the

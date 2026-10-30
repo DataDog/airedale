@@ -4,8 +4,10 @@
 
 """Harness layer: provider-native agent SDK runners.
 
-``create_runner`` selects the engine from the model provider (Claude Agent SDK
-for ``anthropic``, OpenAI Codex for ``openai``), builds the MCP server specs and
+``create_runner`` selects the engine from the scenario ``harness`` and the model
+provider: for ``harness = "native"`` (the default) the Claude Agent SDK runs
+``anthropic`` models and OpenAI Codex runs ``openai`` models; for
+``harness = "pi"`` the pi coding agent runs every model. It builds the MCP server specs and
 gateway wiring from config, and returns a ready-to-run :class:`AgentRunner`.
 ``mcp_system_prompt`` returns a domain-neutral system prompt instructing the
 model to prefer the available MCP tools/skills over answering from memory.
@@ -16,6 +18,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from airedale.config.experiment import HARNESS_PI
 from airedale.gateway import resolve_provider_config
 from airedale.harness.base import (
     AgentRunner,
@@ -25,6 +28,7 @@ from airedale.harness.base import (
 )
 from airedale.harness.claude import ClaudeRunner
 from airedale.harness.codex import CodexRunner
+from airedale.harness.pi import PiRunner
 from airedale.mcp import McpServerSpec, discover_claude_project_mcp_servers
 
 logger = logging.getLogger(__name__)
@@ -40,6 +44,7 @@ __all__ = [
     "AgentToolCall",
     "ClaudeRunner",
     "CodexRunner",
+    "PiRunner",
     "ProgressCallback",
     "create_runner",
     "mcp_system_prompt",
@@ -62,9 +67,29 @@ def create_runner(
     caller (the ``WorkspaceManager``).
     """
     scenario_specs = [McpServerSpec.from_config(server) for server in scenario.mcp_servers]
-    mcp_servers = _merge_project_mcp_servers(model, scenario_specs, cwd=cwd)
     skills = list(scenario.skills)
     allowed_builtin_tools = scenario.allowed_builtin_tools
+
+    if scenario.harness == HARNESS_PI:
+        # Pi reads a repo's `.pi/mcp.json` itself (project trust is approved),
+        # and does not read `.mcp.json`; so no project discovery here.
+        resolved = resolve_provider_config(model.provider, gateway)
+        provider_config = gateway.get(model.provider) if gateway is not None else None
+        return PiRunner(
+            mcp_servers=scenario_specs,
+            allowed_builtin_tools=allowed_builtin_tools,
+            skills=skills,
+            max_turns=scenario.max_turns,
+            effort=scenario.effort,
+            cwd=cwd,
+            gateway_base_url=resolved.base_url,
+            gateway_headers=resolved.headers,
+            gateway_bearer_token=resolved.bearer_token,
+            gateway_api_key=resolved.api_key,
+            pi_models=provider_config.pi_models if provider_config is not None else (),
+        )
+
+    mcp_servers = _merge_project_mcp_servers(model, scenario_specs, cwd=cwd)
 
     if model.provider == "anthropic":
         resolved = resolve_provider_config("anthropic", gateway)

@@ -137,3 +137,42 @@ class TestProviderGatewayConfig:
     def test_headers_none_becomes_empty_dict(self):
         p = ProviderGatewayConfig(provider="anthropic", headers=None)
         assert p.headers == {}
+
+
+class TestPiModels:
+    def test_pi_models_parsed(self, tmp_path):
+        config = load_gateway(
+            write_toml(
+                tmp_path,
+                """
+                [providers.anthropic]
+                base_url = "https://gw"
+
+                [[providers.anthropic.pi_models]]
+                id = "claude-next"
+                contextWindow = 200000
+                cost = { input = 3, output = 15, cacheRead = 0.3, cacheWrite = 3.75 }
+                """,
+            )
+        )
+        (model,) = config.get("anthropic").pi_models
+        assert model["id"] == "claude-next"
+        assert model["contextWindow"] == 200000
+        assert config.get("anthropic").pi_models
+
+    def test_default_is_empty(self, tmp_path):
+        config = load_gateway(write_toml(tmp_path, '[providers.openai]\nbase_url = "https://gw"\n'))
+        assert config.get("openai").pi_models == ()
+
+    @pytest.mark.parametrize(
+        ("body", "message"),
+        [
+            ('pi_models = "x"', "array of tables"),
+            ("pi_models = [1]", "must be a table"),
+            ("[[providers.openai.pi_models]]\nname = 'no id'", "non-empty string 'id'"),
+            ("[[providers.openai.pi_models]]\nid = 'a'\n[[providers.openai.pi_models]]\nid = 'a'", "more than once"),
+        ],
+    )
+    def test_invalid_pi_models(self, tmp_path, body, message):
+        with pytest.raises(ConfigError, match=message):
+            load_gateway(write_toml(tmp_path, "[providers.openai]\n" + body + "\n"))

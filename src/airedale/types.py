@@ -158,6 +158,37 @@ class UsageMetrics:
             reasoning_output_tokens=coerce_int(getattr(total, "reasoning_output_tokens", 0)),
         )
 
+    @classmethod
+    def from_pi(cls, usage: Any) -> UsageMetrics:
+        """Build usage metrics from one pi assistant-message ``usage`` dictionary.
+
+        Pi reports ``input`` without the cached tokens (for every provider API),
+        so the effective input is ``input + cacheRead + cacheWrite``, as for the
+        Claude Agent SDK. ``reasoning`` is a subset of ``output``. ``cost.total``
+        is the cost pi computes from its model catalog.
+        """
+        usage_dict = usage if isinstance(usage, dict) else {}
+        input_tokens = coerce_int(usage_dict.get("input"))
+        output_tokens = coerce_int(usage_dict.get("output"))
+        cache_write = coerce_int(usage_dict.get("cacheWrite"))
+        cache_read = coerce_int(usage_dict.get("cacheRead"))
+        effective_input = input_tokens + cache_write + cache_read
+        total_tokens = coerce_int(usage_dict.get("totalTokens")) or effective_input + output_tokens
+        cost = usage_dict.get("cost")
+        try:
+            cost_total = float(cost.get("total") or 0.0) if isinstance(cost, dict) else 0.0
+        except (TypeError, ValueError):
+            cost_total = 0.0
+        return cls(
+            input_tokens=effective_input,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+            cache_write_input_tokens=cache_write,
+            cache_read_input_tokens=cache_read,
+            reasoning_output_tokens=coerce_int(usage_dict.get("reasoning")),
+            estimated_cost_usd=max(0.0, cost_total),
+        )
+
 
 @dataclass
 class HarnessResult:

@@ -24,6 +24,12 @@ class ProviderGatewayConfig:
     credentials_helper: str | None = None
     api_key_env: str | None = None
     headers: dict[str, str] | None = None
+    #: Extra pi model definitions for this provider (pi ``models.json``
+    #: ``models`` entries, passed through as-is). Pi already knows the details
+    #: (context window, output limit, cost, ...) of the models in its built-in
+    #: catalog; use this only for a model the catalog does not have, or to
+    #: replace a catalog entry. Only the pi harness reads it.
+    pi_models: tuple[dict[str, Any], ...] = ()
 
     def __post_init__(self) -> None:
         """Validate that headers is not None."""
@@ -42,6 +48,29 @@ class GatewayConfig:
         return self.providers.get(provider)
 
 
+def _parse_pi_models(provider: str, raw: Any) -> tuple[dict[str, Any], ...]:
+    """Validate ``pi_models``: a list of tables, each with a non-empty string ``id``."""
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise ConfigError(
+            f"Provider '{provider}' 'pi_models' must be an array of tables ([[providers.{provider}.pi_models]])"
+        )
+    models: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            raise ConfigError(f"Provider '{provider}' 'pi_models[{index}]' must be a table")
+        model_id = entry.get("id")
+        if not isinstance(model_id, str) or not model_id.strip():
+            raise ConfigError(f"Provider '{provider}' 'pi_models[{index}]' must set a non-empty string 'id'")
+        if model_id in seen:
+            raise ConfigError(f"Provider '{provider}' 'pi_models' defines model '{model_id}' more than once")
+        seen.add(model_id)
+        models.append(dict(entry))
+    return tuple(models)
+
+
 def _parse_provider(name: str, config: dict[str, Any]) -> ProviderGatewayConfig:
     """Parse provider gateway config from TOML data."""
     return ProviderGatewayConfig(
@@ -50,6 +79,7 @@ def _parse_provider(name: str, config: dict[str, Any]) -> ProviderGatewayConfig:
         credentials_helper=config.get("credentials_helper"),
         api_key_env=config.get("api_key_env"),
         headers=config.get("headers") or {},
+        pi_models=_parse_pi_models(name, config.get("pi_models")),
     )
 
 
@@ -67,7 +97,7 @@ def load_gateway(path: str | Path) -> GatewayConfig:
     if "providers" in data:
         for provider_name, provider_config in data["providers"].items():
             # Check for unknown provider keys
-            known_provider_keys = {"base_url", "credentials_helper", "api_key_env", "headers"}
+            known_provider_keys = {"base_url", "credentials_helper", "api_key_env", "headers", "pi_models"}
             unknown_provider_keys = set(provider_config.keys()) - known_provider_keys
             if unknown_provider_keys:
                 raise ConfigError(
