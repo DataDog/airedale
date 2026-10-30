@@ -348,6 +348,50 @@ class TestRunnerConfig:
         assert env["PI_OFFLINE"] == "1"
         assert env["KEEP_ME"] == "1"
 
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "DD_API_KEY",
+            "DD_APP_KEY",
+            "DD_APPLICATION_KEY",
+            "DD_CLIENT_TOKEN",
+            "DD_API_KEY_SECRET_ARN",
+            "DD_CLIENT_SECRET",
+            "DD_DB_PASSWORD",
+            "DD_AUTH",
+            "DATADOG_MCP_AUTHORIZATION",
+            "DD_CREDENTIALS",
+            "DD_MCP_BEARER",
+            "DATADOG_API_KEY",
+            "DATADOG_APP_KEY",
+            "_DD_API_KEY",
+            "dd_api_key",
+        ],
+    )
+    def test_env_drops_datadog_credentials(self, tmp_path, monkeypatch, name):
+        secret = f"operator-secret-{name}"
+        monkeypatch.setenv(name, secret)
+        env = PiRunner(cwd=tmp_path)._env(tmp_path / "agent")
+        assert name not in env
+        assert secret not in env.values()
+
+    def test_env_keeps_other_variables(self, tmp_path, monkeypatch):
+        # Datadog settings that are not credentials, and provider API keys
+        # (pi reads ANTHROPIC_API_KEY / OPENAI_API_KEY itself), stay.
+        keep = {
+            "DD_SITE": "datadoghq.com",
+            "DD_SERVICE": "svc",
+            "DD_ENV": "dev",
+            "ANTHROPIC_API_KEY": "anthropic-key",
+            "OPENAI_API_KEY": "openai-key",
+            "MY_DD_API_KEY_NOTE": "not a datadog variable",
+        }
+        for name, value in keep.items():
+            monkeypatch.setenv(name, value)
+        env = PiRunner(cwd=tmp_path)._env(tmp_path / "agent")
+        for name, value in keep.items():
+            assert env[name] == value
+
     def test_auth_json_copied_only_without_env_auth(self, tmp_path, monkeypatch):
         operator = tmp_path / "operator"
         operator.mkdir()
@@ -444,7 +488,9 @@ FAKE_PI = textwrap.dedent(
     stdin = sys.stdin.read()
     with open(record, "w") as handle:
         json.dump({"argv": sys.argv[1:], "agent_dir": agent_dir, "files": files, "stdin": stdin,
-                   "session": os.environ.get("PI_SESSION_ID"), "cwd": os.getcwd()}, handle)
+                   "session": os.environ.get("PI_SESSION_ID"), "cwd": os.getcwd(),
+                   "dd_env": {k: v for k, v in os.environ.items() if k.upper().startswith(("DD_", "DATADOG_", "_DD_"))}},
+                  handle)
     events = json.loads(os.environ["FAKE_PI_EVENTS"])
     if os.environ.get("FAKE_PI_GARBAGE"):
         print("not json", flush=True)
@@ -531,6 +577,23 @@ class TestSubprocess:
         assert not Path(seen["agent_dir"]).exists()
         assert not Path(seen["agent_dir"]).resolve().is_relative_to(cwd.resolve())
         assert list(cwd.iterdir()) == []
+
+    def test_datadog_credentials_do_not_reach_pi(self, tmp_path, fake_pi):
+        command, record = fake_pi(
+            _events_tool_run(),
+            DD_API_KEY="dd-api",
+            DD_APP_KEY="dd-app",
+            DATADOG_API_KEY="dd-api-2",
+            _DD_API_KEY="dd-api-3",
+            DD_SITE="site",
+        )
+        result = _run(PiRunner(cwd=tmp_path, pi_command=command))
+        assert result.error is None
+        seen = json.loads(record.read_text())
+        for name in ("DD_API_KEY", "DD_APP_KEY", "DATADOG_API_KEY", "_DD_API_KEY"):
+            assert name not in seen["dd_env"]
+        assert not {"dd-api", "dd-app", "dd-api-2", "dd-api-3"} & set(seen["dd_env"].values())
+        assert seen["dd_env"]["DD_SITE"] == "site"
 
     def test_non_zero_exit(self, tmp_path, fake_pi):
         command, _ = fake_pi([], FAKE_PI_EXIT="3", FAKE_PI_STDERR="unknown model")

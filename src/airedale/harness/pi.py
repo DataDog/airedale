@@ -34,6 +34,18 @@ files of a cloned repo load, like ``.claude/`` for Claude). ``PI_OFFLINE`` stops
 model-catalog refreshes, so each run uses the catalog bundled with the
 installed pi. ``PI_*`` session variables of a parent pi process are removed.
 
+The pi process does not inherit the Datadog credentials of the operator
+(``DD_API_KEY``, ``DD_APP_KEY`` and every other ``DD_*`` / ``DATADOG_*`` /
+``_DD_*`` variable whose name contains ``KEY``, ``TOKEN``, ``SECRET``,
+``PASSWORD``, ``AUTH``, ``CREDENTIAL`` or ``BEARER``, see
+:func:`_is_datadog_credential_env`). These are for the airedale process only
+(LLMObs). Without this, pi, its ``bash`` tool, stdio MCP servers and repo code
+that pi loads (``--approve``) get them in their environment. This is not a
+sandbox: repo code runs as the same OS user, so only evaluate trusted
+repositories. A gateway credential that ``gateway.toml`` names explicitly
+(``api_key_env``) still goes to pi in ``models.json``. A stdio MCP server that
+used the inherited ``DD_API_KEY`` does not get it any more.
+
 Gateway and model details
 -------------------------
 Pi needs model details (API type, context window, output limit, cost) for each
@@ -142,6 +154,11 @@ PI_INHERITED_ENV_TO_DROP: tuple[str, ...] = (
     "PI_TELEMETRY",
     "PI_SKIP_VERSION_CHECK",
 )
+#: Name prefixes of Datadog variables (``_DD_`` is used by Datadog tools for
+#: internal settings).
+DATADOG_ENV_PREFIXES: tuple[str, ...] = ("DD_", "DATADOG_", "_DD_")
+#: Name parts that identify a Datadog variable as a credential.
+DATADOG_CREDENTIAL_ENV_MARKERS: tuple[str, ...] = ("KEY", "TOKEN", "SECRET", "PASSWORD", "AUTH", "CREDENTIAL", "BEARER")
 #: Maximum size of one JSONL record on pi stdout (agent_end carries every message).
 PI_STREAM_LIMIT_BYTES = 64 * 1024 * 1024
 PI_STDERR_TAIL_BYTES = 16 * 1024
@@ -323,7 +340,11 @@ class PiRunner(DecoratorSpanAgentRunner):
         return bool(env_name and os.environ.get(env_name))
 
     def _env(self, agent_dir: Path) -> dict[str, str]:
-        env = {name: value for name, value in os.environ.items() if name not in PI_INHERITED_ENV_TO_DROP}
+        env = {
+            name: value
+            for name, value in os.environ.items()
+            if name not in PI_INHERITED_ENV_TO_DROP and not _is_datadog_credential_env(name)
+        }
         env["PI_CODING_AGENT_DIR"] = str(agent_dir)
         env["PI_OFFLINE"] = "1"
         env["PI_SKIP_VERSION_CHECK"] = "1"
@@ -527,6 +548,18 @@ async def _read_events(
             await _notify(progress, f"{SDK_NAME}/{model.label}: {message}")
         if collector.stop_requested or collector.settled:
             return
+
+
+def _is_datadog_credential_env(name: str) -> bool:
+    """Return True when ``name`` is a Datadog credential variable (``DD_API_KEY``, ``DD_APP_KEY``, ...).
+
+    The check ignores case. Other Datadog variables (``DD_SITE``,
+    ``DD_SERVICE``, ...) are not credentials and stay.
+    """
+    upper = name.upper()
+    if not upper.startswith(DATADOG_ENV_PREFIXES):
+        return False
+    return any(marker in upper for marker in DATADOG_CREDENTIAL_ENV_MARKERS)
 
 
 def _default_pi_command() -> list[str]:
