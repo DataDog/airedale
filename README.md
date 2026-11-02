@@ -336,24 +336,22 @@ Notes:
   collision fails the run. **Trust:** with `--approve`, a cloned repo's
   `.pi/extensions` and project packages run inside the pi process with its
   environment (as `.claude/settings.json` hooks do for Claude). Only
-  evaluate repositories you trust. The pi process does not inherit Datadog
-  credentials: `DD_API_KEY`, `DD_APP_KEY`, and every other `DD_*` /
-  `DATADOG_*` / `_DD_*` variable whose name contains `KEY`, `TOKEN`, `SECRET`,
-  `PASSWORD`, `PASSWD`, `AUTH`, `CREDENTIAL`, `BEARER` or `ADDITIONAL_ENDPOINTS`
-  (dual shipping), but not `AUTHOR` (as in `DD_GIT_COMMIT_AUTHOR_NAME`) and not
-  names that end in `_REGEXP` or `_REGEX` (patterns, for example
-  `DD_APPSEC_OBFUSCATION_PARAMETER_KEY_REGEXP`), and every other `DD_*` / `DATADOG_*` /
-  `_DD_*` variable whose value has user information (a proxy URL such as
-  `DD_PROXY_HTTPS=http://user:pass@host`) or a `name=value` / `name:value`
-  pair with a credential name (`?api_key=...`, `DD_ML_JOB_ENV=DD_API_KEY:...`).
-  `DD_SECRET_BACKEND_COMMAND`, `_TIMEOUT` and `_OUTPUT_MAX_SIZE` stay. So pi, its tools and stdio MCP
-  servers do not inherit them. This is not a sandbox (repo code runs as the
-  same OS user). A gateway `api_key_env` credential still goes to pi (in its
-  private `models.json`). **Compatibility:** a pi stdio MCP server that used
-  the inherited `DD_API_KEY` (or a similar variable) does not get it any more.
-  There is no safe way to give it one at this time: `$NAME` in an MCP `env`
-  value is not expanded, and a literal key in `env` goes to the LLMObs
-  experiment metadata. The task prompt goes to pi on stdin, so a prompt
+  evaluate repositories you trust. The pi process gets **no** Datadog variable
+  from the operator: every `DD_*`, `DATADOG_*` and `_DD_*` variable is removed
+  (an allowlist, `PI_DATADOG_ENV_ALLOWLIST` in `harness/pi.py`, is empty).
+  These variables are for the airedale process (LLMObs). They hold credentials,
+  some inside the value (`DD_ADDITIONAL_ENDPOINTS`, `DD_PROXY_HTTPS`), and
+  settings that would make Datadog-instrumented repo code report to your
+  account. So pi, its tools and stdio MCP servers do not inherit them. Other
+  variables are not filtered: a Datadog key stored under another name (for
+  example in `OTEL_EXPORTER_OTLP_HEADERS`) still reaches pi. This is not a
+  sandbox (repo code runs as the same OS user). A gateway `api_key_env`
+  credential still goes to pi (in its private `models.json`).
+  **Compatibility:** a pi stdio MCP server that used an inherited Datadog
+  variable (for example `DD_API_KEY`) does not get it any more. There is no
+  safe way to give it one at this time: `$NAME` in an MCP `env` value is not
+  expanded, and a literal key in `env` goes to the LLMObs experiment metadata.
+  The task prompt goes to pi on stdin, so a prompt
   that starts with `@` is not read as a file.
 
 ---

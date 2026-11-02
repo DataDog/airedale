@@ -34,21 +34,22 @@ files of a cloned repo load, like ``.claude/`` for Claude). ``PI_OFFLINE`` stops
 model-catalog refreshes, so each run uses the catalog bundled with the
 installed pi. ``PI_*`` session variables of a parent pi process are removed.
 
-The pi process does not inherit the Datadog credentials of the operator
-(``DD_API_KEY``, ``DD_APP_KEY`` and every other ``DD_*`` / ``DATADOG_*`` /
-``_DD_*`` variable whose name contains ``KEY``, ``TOKEN``, ``SECRET``,
-``PASSWORD``, ``PASSWD``, ``AUTH``, ``CREDENTIAL``, ``BEARER`` or
-``ADDITIONAL_ENDPOINTS`` (names that end in ``_REGEXP`` or ``_REGEX`` are
-patterns and stay), or whose
-value has user information (``DD_PROXY_HTTPS``) or a pair with a credential
-name (``?api_key=...``, ``DD_ML_JOB_ENV``), see
-:func:`_is_datadog_credential_env`). These are for the airedale process only
-(LLMObs). Without this, pi, its ``bash`` tool, stdio MCP servers and repo code
-that pi loads (``--approve``) get them in their environment. This is not a
-sandbox: repo code runs as the same OS user, so only evaluate trusted
-repositories. A gateway credential that ``gateway.toml`` names explicitly
-(``api_key_env``) still goes to pi in ``models.json``. A stdio MCP server that
-used the inherited ``DD_API_KEY`` does not get it any more.
+The pi process gets no Datadog variable from the operator: every ``DD_*``,
+``DATADOG_*`` and ``_DD_*`` variable is removed, except the names in
+``PI_DATADOG_ENV_ALLOWLIST`` (empty: pi needs none). The operator sets these
+for the airedale process only (LLMObs). They hold credentials (``DD_API_KEY``,
+``DD_APP_KEY``, keys inside values such as ``DD_ADDITIONAL_ENDPOINTS``, proxy
+URLs with a password, ...) and settings that would make Datadog-instrumented
+repo code under test report to the operator's account. A denylist of
+credential names cannot be complete, so the filter is an allowlist. Without
+it, pi, its ``bash`` tool, stdio MCP servers and repo code that pi loads
+(``--approve``) get them in their environment. This is not a sandbox: repo
+code runs as the same OS user, so only evaluate trusted repositories. Only
+the variables above are removed: a Datadog key stored under another name
+(for example in ``OTEL_EXPORTER_OTLP_HEADERS``) still reaches pi. A
+gateway credential that ``gateway.toml`` names explicitly (``api_key_env``)
+still goes to pi in ``models.json``. A stdio MCP server that
+used an inherited Datadog variable (for example ``DD_API_KEY``) does not get it any more.
 
 Gateway and model details
 -------------------------
@@ -87,7 +88,6 @@ import contextlib
 import json
 import logging
 import os
-import re
 import shlex
 import shutil
 import signal
@@ -160,33 +160,13 @@ PI_INHERITED_ENV_TO_DROP: tuple[str, ...] = (
     "PI_SKIP_VERSION_CHECK",
 )
 #: Name prefixes of Datadog variables (``_DD_`` is used by Datadog tools for
-#: internal settings).
+#: internal settings). Variables with these prefixes do not reach pi, except the
+#: names in ``PI_DATADOG_ENV_ALLOWLIST``. Case is ignored.
 DATADOG_ENV_PREFIXES: tuple[str, ...] = ("DD_", "DATADOG_", "_DD_")
-#: Name parts that identify a Datadog variable as a credential. ``AUTH`` does
-#: not match ``AUTHOR`` (for example ``DD_GIT_COMMIT_AUTHOR_NAME``), but does
-#: match ``AUTHORIZATION``.
-#: ``ADDITIONAL_ENDPOINTS`` variables (dual shipping, for example
-#: ``DD_ADDITIONAL_ENDPOINTS``) are JSON maps from a URL to API keys.
-DATADOG_CREDENTIAL_ENV_NAME_RE = re.compile(
-    r"KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|BEARER|ADDITIONAL_ENDPOINTS|AUTH(?!OR(?!IZ))", re.IGNORECASE
-)
-#: Names that end like this hold a regular expression, not a secret (for example
-#: ``DD_APPSEC_OBFUSCATION_PARAMETER_KEY_REGEXP``, a pattern of parameter names
-#: to redact), so a credential word in the name does not make them credentials.
-DATADOG_PATTERN_ENV_SUFFIXES: tuple[str, ...] = ("_REGEXP", "_REGEX")
-#: A value with user information: ``scheme://user:pass@host``, ``//user:pass@host``
-#: or ``user:pass@host`` (a proxy URL without a scheme). A Datadog variable with
-#: such a value (for example ``DD_PROXY_HTTPS``) carries a credential.
-VALUE_WITH_USERINFO_RE = re.compile(r"^(?:(?:[a-z][a-z0-9+.-]*:)?//[^/?#\s]*@|[^/?#\s@:]+:[^/?#\s@]+@)", re.IGNORECASE)
-#: A ``name=value`` or ``name:value`` pair inside a value: a URL query parameter
-#: (``?api_key=...``), an entry of ``DD_ML_JOB_ENV`` (``DD_API_KEY:...;X:y``) or a
-#: JSON key. Group 1 is the pair name.
-VALUE_PAIR_NAME_RE = re.compile(r"(?:^|[?&;,\s{])[\"']?([A-Za-z0-9_.-]+)[\"']?\s*[:=]")
-#: Datadog variables whose name has a credential word but whose value is not a
-#: secret (the Agent secret-management command and its limits).
-DATADOG_NON_SECRET_ENV_NAMES: frozenset[str] = frozenset(
-    {"DD_SECRET_BACKEND_COMMAND", "DD_SECRET_BACKEND_TIMEOUT", "DD_SECRET_BACKEND_OUTPUT_MAX_SIZE"}
-)
+#: Datadog variables (upper case names) that reach pi. Empty: pi needs none.
+#: Add a name here only when pi, or repo code run by pi, must read it, and its
+#: value is not a secret.
+PI_DATADOG_ENV_ALLOWLIST: frozenset[str] = frozenset()
 
 #: Maximum size of one JSONL record on pi stdout (agent_end carries every message).
 PI_STREAM_LIMIT_BYTES = 64 * 1024 * 1024
@@ -372,7 +352,7 @@ class PiRunner(DecoratorSpanAgentRunner):
         env = {
             name: value
             for name, value in os.environ.items()
-            if name not in PI_INHERITED_ENV_TO_DROP and not _is_datadog_credential_env(name, value)
+            if name not in PI_INHERITED_ENV_TO_DROP and not _is_blocked_datadog_env(name)
         }
         env["PI_CODING_AGENT_DIR"] = str(agent_dir)
         env["PI_OFFLINE"] = "1"
@@ -579,34 +559,10 @@ async def _read_events(
             return
 
 
-def _is_datadog_credential_env(name: str, value: str = "") -> bool:
-    """Return True when a variable is a Datadog credential (``DD_API_KEY``, ``DD_APP_KEY``, ...).
-
-    A variable is a credential when its name starts with a Datadog prefix and
-    one of these is true. The check ignores case.
-
-    - The name has a credential word (see ``DATADOG_CREDENTIAL_ENV_NAME_RE``).
-    - The value has user information, for example a ``DD_PROXY_HTTPS`` proxy URL
-      with a password.
-    - The value has a ``name=value`` or ``name:value`` pair with a credential
-      word in the name, for example ``?api_key=...`` or ``DD_ML_JOB_ENV``
-      (``DD_API_KEY:...;X:y``).
-
-    A name that ends in ``_REGEXP`` or ``_REGEX`` is a pattern, not a secret:
-    it is never a credential. The names in ``DATADOG_NON_SECRET_ENV_NAMES``
-    skip the name check (their value is still checked). Other Datadog variables (``DD_SITE``,
-    ``DD_SERVICE``, ...) are not credentials and stay.
-    """
-    if not name.upper().startswith(DATADOG_ENV_PREFIXES):
-        return False
-    if name.upper().endswith(DATADOG_PATTERN_ENV_SUFFIXES):
-        return False
-    if name.upper() not in DATADOG_NON_SECRET_ENV_NAMES and DATADOG_CREDENTIAL_ENV_NAME_RE.search(name):
-        return True
-    value = value.strip()
-    if VALUE_WITH_USERINFO_RE.match(value):
-        return True
-    return any(DATADOG_CREDENTIAL_ENV_NAME_RE.search(param) for param in VALUE_PAIR_NAME_RE.findall(value))
+def _is_blocked_datadog_env(name: str) -> bool:
+    """Return True when a Datadog variable must not reach pi (see ``PI_DATADOG_ENV_ALLOWLIST``)."""
+    upper = name.upper()
+    return upper.startswith(DATADOG_ENV_PREFIXES) and upper not in PI_DATADOG_ENV_ALLOWLIST
 
 
 def _default_pi_command() -> list[str]:
