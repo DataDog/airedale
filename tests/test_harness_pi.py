@@ -380,7 +380,9 @@ class TestRunnerConfig:
         assert name not in env
         assert secret not in env.values()
 
-    @pytest.mark.parametrize("name", ["DD_PROXY_HTTP", "DD_PROXY_HTTPS", "DD_TRACE_AGENT_URL", "dd_proxy_https"])
+    @pytest.mark.parametrize(
+        "name", ["DD_PROXY_HTTP", "DD_PROXY_HTTPS", "DD_TRACE_AGENT_URL", "dd_proxy_https", "DD_ML_JOB_ENV"]
+    )
     @pytest.mark.parametrize(
         "value",
         [
@@ -390,6 +392,9 @@ class TestRunnerConfig:
             "user:pass@proxy:3128",
             "https://agent.example/ingest?api_key=secret",
             "https://agent.example/ingest?x=1&access_token=secret",
+            "DD_API_KEY:operator-secret",
+            "X:y;DD_API_KEY:operator-secret",
+            '{"api_key": "operator-secret"}',
         ],
     )
     def test_env_drops_datadog_values_with_credentials(self, tmp_path, monkeypatch, name, value):
@@ -399,7 +404,13 @@ class TestRunnerConfig:
 
     @pytest.mark.parametrize(
         "value",
-        ["jane@example.com", "http://proxy.example.com:3128", "https://agent.example/ingest?author=jane&x=1", "plain"],
+        [
+            "jane@example.com",
+            "env:prod,team:core",
+            "http://proxy.example.com:3128",
+            "https://agent.example/ingest?author=jane&x=1",
+            "plain",
+        ],
     )
     def test_env_keeps_datadog_values_without_credentials(self, tmp_path, monkeypatch, value):
         monkeypatch.setenv("DD_SOMETHING", value)
@@ -423,6 +434,8 @@ class TestRunnerConfig:
             "OPENAI_API_KEY": "openai-key",
             "MY_DD_API_KEY_NOTE": "not a datadog variable",
             "DD_GIT_COMMIT_AUTHOR_NAME": "Jane",
+            "DD_SECRET_BACKEND_COMMAND": "/usr/local/bin/resolve-secrets",
+            "DD_SECRET_BACKEND_TIMEOUT": "30",
             "DD_APPSEC_OBFUSCATION_PARAMETER_KEY_REGEXP": "(?i)custom_secret_field",
             "DD_APPSEC_OBFUSCATION_PARAMETER_VALUE_REGEX": "(?i)token=[^&]+",
             "DD_GIT_COMMIT_AUTHOR_EMAIL": "jane@example.com",

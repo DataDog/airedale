@@ -40,8 +40,8 @@ The pi process does not inherit the Datadog credentials of the operator
 ``PASSWORD``, ``PASSWD``, ``AUTH``, ``CREDENTIAL``, ``BEARER`` or
 ``ADDITIONAL_ENDPOINTS`` (names that end in ``_REGEXP`` or ``_REGEX`` are
 patterns and stay), or whose
-value has user information (``DD_PROXY_HTTPS``) or a credential query
-parameter (``?api_key=...``), see
+value has user information (``DD_PROXY_HTTPS``) or a pair with a credential
+name (``?api_key=...``, ``DD_ML_JOB_ENV``), see
 :func:`_is_datadog_credential_env`). These are for the airedale process only
 (LLMObs). Without this, pi, its ``bash`` tool, stdio MCP servers and repo code
 that pi loads (``--approve``) get them in their environment. This is not a
@@ -178,8 +178,15 @@ DATADOG_PATTERN_ENV_SUFFIXES: tuple[str, ...] = ("_REGEXP", "_REGEX")
 #: or ``user:pass@host`` (a proxy URL without a scheme). A Datadog variable with
 #: such a value (for example ``DD_PROXY_HTTPS``) carries a credential.
 VALUE_WITH_USERINFO_RE = re.compile(r"^(?:(?:[a-z][a-z0-9+.-]*:)?//[^/?#\s]*@|[^/?#\s@:]+:[^/?#\s@]+@)", re.IGNORECASE)
-#: A query parameter name in a URL value (``?api_key=...&x=...``).
-VALUE_QUERY_PARAM_RE = re.compile(r"[?&;]([^=&#;\s]+)=")
+#: A ``name=value`` or ``name:value`` pair inside a value: a URL query parameter
+#: (``?api_key=...``), an entry of ``DD_ML_JOB_ENV`` (``DD_API_KEY:...;X:y``) or a
+#: JSON key. Group 1 is the pair name.
+VALUE_PAIR_NAME_RE = re.compile(r"(?:^|[?&;,\s{])[\"']?([A-Za-z0-9_.-]+)[\"']?\s*[:=]")
+#: Datadog variables whose name has a credential word but whose value is not a
+#: secret (the Agent secret-management command and its limits).
+DATADOG_NON_SECRET_ENV_NAMES: frozenset[str] = frozenset(
+    {"DD_SECRET_BACKEND_COMMAND", "DD_SECRET_BACKEND_TIMEOUT", "DD_SECRET_BACKEND_OUTPUT_MAX_SIZE"}
+)
 
 #: Maximum size of one JSONL record on pi stdout (agent_end carries every message).
 PI_STREAM_LIMIT_BYTES = 64 * 1024 * 1024
@@ -581,23 +588,25 @@ def _is_datadog_credential_env(name: str, value: str = "") -> bool:
     - The name has a credential word (see ``DATADOG_CREDENTIAL_ENV_NAME_RE``).
     - The value has user information, for example a ``DD_PROXY_HTTPS`` proxy URL
       with a password.
-    - The value has a query parameter with a credential word in its name, for
-      example ``?api_key=...``.
+    - The value has a ``name=value`` or ``name:value`` pair with a credential
+      word in the name, for example ``?api_key=...`` or ``DD_ML_JOB_ENV``
+      (``DD_API_KEY:...;X:y``).
 
     A name that ends in ``_REGEXP`` or ``_REGEX`` is a pattern, not a secret:
-    it is never a credential. Other Datadog variables (``DD_SITE``,
+    it is never a credential. The names in ``DATADOG_NON_SECRET_ENV_NAMES``
+    skip the name check (their value is still checked). Other Datadog variables (``DD_SITE``,
     ``DD_SERVICE``, ...) are not credentials and stay.
     """
     if not name.upper().startswith(DATADOG_ENV_PREFIXES):
         return False
     if name.upper().endswith(DATADOG_PATTERN_ENV_SUFFIXES):
         return False
-    if DATADOG_CREDENTIAL_ENV_NAME_RE.search(name):
+    if name.upper() not in DATADOG_NON_SECRET_ENV_NAMES and DATADOG_CREDENTIAL_ENV_NAME_RE.search(name):
         return True
     value = value.strip()
     if VALUE_WITH_USERINFO_RE.match(value):
         return True
-    return any(DATADOG_CREDENTIAL_ENV_NAME_RE.search(param) for param in VALUE_QUERY_PARAM_RE.findall(value))
+    return any(DATADOG_CREDENTIAL_ENV_NAME_RE.search(param) for param in VALUE_PAIR_NAME_RE.findall(value))
 
 
 def _default_pi_command() -> list[str]:

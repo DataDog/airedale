@@ -344,8 +344,9 @@ Notes:
   names that end in `_REGEXP` or `_REGEX` (patterns, for example
   `DD_APPSEC_OBFUSCATION_PARAMETER_KEY_REGEXP`), and every other `DD_*` / `DATADOG_*` /
   `_DD_*` variable whose value has user information (a proxy URL such as
-  `DD_PROXY_HTTPS=http://user:pass@host`) or a credential query parameter
-  (`?api_key=...`). So pi, its tools and stdio MCP
+  `DD_PROXY_HTTPS=http://user:pass@host`) or a `name=value` / `name:value`
+  pair with a credential name (`?api_key=...`, `DD_ML_JOB_ENV=DD_API_KEY:...`).
+  `DD_SECRET_BACKEND_COMMAND`, `_TIMEOUT` and `_OUTPUT_MAX_SIZE` stay. So pi, its tools and stdio MCP
   servers do not inherit them. This is not a sandbox (repo code runs as the
   same OS user). A gateway `api_key_env` credential still goes to pi (in its
   private `models.json`). **Compatibility:** a pi stdio MCP server that used
