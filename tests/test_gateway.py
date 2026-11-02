@@ -117,6 +117,20 @@ class TestResolveCredentialsHelper:
         with pytest.raises(RuntimeError, match="failed"):
             resolve_provider_config("anthropic", gw)
 
+    def test_failed_helper_does_not_log_stderr(self, mocker, clear_credential_cache, caplog):
+        import subprocess
+        import traceback
+
+        mocker.patch("airedale.gateway.time.sleep")
+        mocker.patch(
+            "airedale.gateway.subprocess.run",
+            side_effect=subprocess.CalledProcessError(7, "helper", stderr="synthetic-secret"),
+        )
+        with pytest.raises(RuntimeError) as error:
+            _run_credentials_helper("helper")
+        assert "synthetic-secret" not in caplog.text
+        assert "synthetic-secret" not in "".join(traceback.format_exception(error.value))
+
     def test_failed_helper_retries_up_to_max_attempts(self, mocker, clear_credential_cache):
         import subprocess
 

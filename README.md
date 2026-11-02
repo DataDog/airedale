@@ -145,12 +145,16 @@ See `examples/` for fully-worked configs and a sample skill directory.
 | `scenarios` | table | yes | Named scenario blocks (see below) |
 | `tasks` | table | yes | Prompt + criteria definitions, keyed by task id (see below) |
 | `description` | string | no | Human description applied to the dataset |
-| `judge_model` | string | no | Model for rubric scoring (default `anthropic/claude-sonnet-4-6`) |
+| `judge_model` | string | no | Model for normal rubric scoring (default `anthropic/claude-sonnet-4-6`) |
+| `judge_type` | string | no | `rubric` (default) or opt-in `decisions` |
+| `decisions_threshold` | float | no | Predicate probability threshold for `judge_type = "decisions"` (default `0.5`) |
 | `runs` | int | no | Runs per cell (default `1`) |
 | `dataset_name` | string | no | Stable LLMObs dataset name (default: `project`) |
 | `skills` | table | no | Skill registry: each `<name>` maps to an Agent Skill directory path (referenced by name from scenarios) |
 | `mcp_servers` | table | no | MCP server registry: each `<name>` maps to a server block (referenced by name from scenarios; see below) |
 | `defaults` | table | no | Defaults applied to every scenario (see below) |
+
+When `judge_type = "decisions"`, each criterion is a predicate. A probability at or above `decisions_threshold` scores `1`; otherwise it scores `0`. The threshold must be a number in `[0, 1]`. The evaluator score is the mean of the binary scores and passes at `0.8`. The request supports at most 200 criteria. Refusals and invalid or missing answers fail the evaluation. Metadata records `refusal_count`, `invalid_answer_count`, criterion status, and valid probabilities. Provider request failures raise a safe evaluator error. Decisions does not provide per-criterion free-text explanations.
 
 #### Shared registries (`skills` / `mcp_servers`)
 

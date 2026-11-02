@@ -9,6 +9,11 @@ models = ["anthropic/claude-sonnet-4-6", "openai/gpt-4.1"]
 
 # Optional: judge model for rubric scoring (default shown).
 judge_model = "anthropic/claude-sonnet-4-6"
+# Opt-in binary Decisions grader (uses gpt-6-luna predicate answers):
+# judge_type = "decisions"
+# decisions_threshold = 0.5 # inclusive: probability >= threshold produces 1; allowed range is 0..1
+# Decisions uses binary scores, then the normal 0.8 mean-score pass rule. Refusals,
+# invalid or missing answers fail and are counted in metadata; no text reasoning is returned.
 
 # Optional: stable dataset name (defaults to `project`).
 dataset_name = "my-evals"
