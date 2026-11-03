@@ -2,7 +2,7 @@
 "PyJWT","https://github.com/jpadilla/pyjwt","['MIT']","['Jose Padilla']"
 "Pygments","https://github.com/pygments/pygments","['BSD-2-Clause']","['Georg Brandl <georg@python.org>']"
 "annotated-types","https://github.com/annotated-types/annotated-types","['MIT']","['the contributors']"
-"anthropic","https://github.com/anthropics/anthropic-sdk-python","['MIT']","['Anthropic, PBC.', 'Karen Petrosyan']"
+"anthropic","https://github.com/anthropics/anthropic-sdk-python","['Apache-2.0']","['Anthropic, PBC.', 'Karen Petrosyan']"
 "anyio","https://github.com/agronholm/anyio","['MIT']","['Alex Gronholm']"
 "attrs","https://github.com/python-attrs/attrs","['MIT']","['Hynek Schlawack']"
 "bytecode","https://github.com/MatthieuDartiailh/bytecode","['MIT']","['Contributors to the bytecode project', 'MatthieuDartiailh']"
