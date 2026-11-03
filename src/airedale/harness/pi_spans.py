@@ -15,8 +15,11 @@ Times
 -----
 - ``llm`` span: it starts when pi sends the request. This is the
   ``timestamp`` of the assistant message (pi sets it when the request starts),
-  or the request time from the collector extension. It ends when the
-  ``message_end`` record arrives.
+  or the request time from the collector extension. It ends at
+  ``timestamp + durationMs`` (pi 1.5+ measures ``durationMs`` with a monotonic
+  clock), but never after the ``message_end`` record arrives; without
+  ``durationMs``, it ends when that record arrives. A request that started but
+  did not end (the run stopped) is an error span that ends when the run stops.
 - ``tool`` span: it starts when ``tool_execution_start`` arrives. Its duration
   is the ``durationMs`` that pi measured, or the time until
   ``tool_execution_end`` arrives.
@@ -40,8 +43,10 @@ Limits:
 - The messages are pi messages, not the provider payload: pi still converts
   some roles (for example a compaction summary) before it sends them. Opaque
   signatures, tool ``details`` and image data are removed.
-- The request time is taken before the provider retries of pi's HTTP client,
-  and the response data (HTTP status, time to first byte) exists only for a
+- The request time is taken before the provider retries of pi's HTTP client
+  and before the ``before_provider_request`` handlers of the extensions loaded
+  after the collector (pi has no hook after them: ``before_provider_headers``
+  runs before ``before_provider_request``). The response data (HTTP status, time to first byte) exists only for a
   successful response.
 - Compaction usage and the usage of model work inside tools are not on the
   ``llm`` spans (the compaction ``task`` span has it as metadata). The agent
@@ -59,6 +64,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import math
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -199,40 +205,68 @@ def assistant_segments(message: dict[str, Any], *, include_text: bool) -> list[A
     return segments
 
 
-def _tool_call_entries(message: dict[str, Any]) -> list[dict[str, Any]]:
-    entries: list[dict[str, Any]] = []
+def _tool_call_entry(block: dict[str, Any]) -> dict[str, Any]:
+    arguments = block.get("arguments")
+    entry: dict[str, Any] = {
+        "name": str(block.get("name") or "unknown"),
+        "arguments": json_safe(arguments) if isinstance(arguments, dict) else {"value": json_safe(arguments)},
+        "type": "tool_use",
+    }
+    if block.get("id"):
+        entry["tool_id"] = str(block["id"])
+    return entry
+
+
+def _assistant_input_messages(message: dict[str, Any]) -> list[dict[str, Any]]:
+    """Render an earlier assistant message in the input of a later call.
+
+    The blocks keep their order. A thinking block becomes its own assistant
+    message (as in the span outputs), because pi sends it back to the model.
+    Text blocks next to each other become one message; a tool call is added to
+    the current message.
+    """
     content = message.get("content")
-    if not isinstance(content, list):
-        return entries
-    for block in content:
-        if isinstance(block, dict) and block.get("type") == "toolCall":
-            arguments = block.get("arguments")
-            entry: dict[str, Any] = {
-                "name": str(block.get("name") or "unknown"),
-                "arguments": json_safe(arguments) if isinstance(arguments, dict) else {"value": json_safe(arguments)},
-                "type": "tool_use",
-            }
-            if block.get("id"):
-                entry["tool_id"] = str(block["id"])
-            entries.append(entry)
-    return entries
+    if isinstance(content, str):
+        return [{"role": "assistant", "content": content.strip()}]
+    rendered: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+    for block in content if isinstance(content, list) else []:
+        if not isinstance(block, dict):
+            continue
+        block_type = block.get("type")
+        if block_type == "thinking":
+            text = str(block.get("thinking") or "").strip()
+            if text:
+                rendered.append({"role": "assistant", "content": text})
+                current = None
+        elif block_type == "text":
+            text = str(block.get("text") or "").strip()
+            if not text:
+                continue
+            if current is None or current.get("tool_calls"):
+                current = {"role": "assistant", "content": text}
+                rendered.append(current)
+            else:
+                current["content"] = f"{current['content']}\n\n{text}" if current["content"] else text
+        elif block_type == "toolCall":
+            if current is None:
+                current = {"role": "assistant", "content": ""}
+                rendered.append(current)
+            current.setdefault("tool_calls", []).append(_tool_call_entry(block))
+    return rendered or [{"role": "assistant", "content": ""}]
 
 
-def llmobs_input_message(message: Any) -> dict[str, Any] | None:
-    """Render one pi message as an LLMObs input message (``None``: not sent to the model)."""
+def llmobs_input_message(message: Any) -> list[dict[str, Any]]:
+    """Render one pi message as LLMObs input messages (empty: not sent to the model)."""
     if not isinstance(message, dict):
-        return None
+        return []
     role = message.get("role")
     if role == "system":
-        return {"role": "system", "content": _system_text(message)}
+        return [{"role": "system", "content": _system_text(message)}]
     if role in _USER_TEXT_ROLES:
-        return {"role": "user", "content": _content_text(message.get("content"))}
+        return [{"role": "user", "content": _content_text(message.get("content"))}]
     if role == "assistant":
-        rendered: dict[str, Any] = {"role": "assistant", "content": message_text(message)}
-        tool_calls = _tool_call_entries(message)
-        if tool_calls:
-            rendered["tool_calls"] = tool_calls
-        return rendered
+        return _assistant_input_messages(message)
     if role == "toolResult":
         result: dict[str, Any] = {
             "name": str(message.get("toolName") or "unknown"),
@@ -241,19 +275,18 @@ def llmobs_input_message(message: Any) -> dict[str, Any] | None:
         }
         if message.get("toolCallId"):
             result["tool_id"] = str(message["toolCallId"])
-        return {"role": "user", "content": "", "tool_results": [result]}
+        return [{"role": "user", "content": "", "tool_results": [result]}]
     if role == "bashExecution":
         if message.get("excludeFromContext"):
-            return None
-        return {"role": "user", "content": f"$ {message.get('command') or ''}\n{message.get('output') or ''}"}
+            return []
+        return [{"role": "user", "content": f"$ {message.get('command') or ''}\n{message.get('output') or ''}"}]
     if role in ("branchSummary", "compactionSummary"):
-        return {"role": "user", "content": str(message.get("summary") or "")}
-    return None
+        return [{"role": "user", "content": str(message.get("summary") or "")}]
+    return []
 
 
 def llmobs_input_messages(messages: list[Any]) -> list[dict[str, Any]]:
-    rendered = (llmobs_input_message(message) for message in messages)
-    return [message for message in rendered if message is not None]
+    return [rendered for message in messages for rendered in llmobs_input_message(message)]
 
 
 # --------------------------------------------------------------------------- #
@@ -381,6 +414,7 @@ class PiSpanRecorder:
         # made it, so that it is attached to it.
         for tool_id in reversed(list(self._open_tools)):
             self.close_tool(tool_id, now, error="tool did not finish")
+        self._close_unfinished_call(now)
         if self._compaction is not None:
             self._compaction.end_ns = max(self._compaction.start_ns, now)
             self._compaction.error = "compaction did not finish"
@@ -395,19 +429,7 @@ class PiSpanRecorder:
         request = self._pending_request
         self._pending_request = None
         start_ns = self._call_start_ns(message, request, now)
-        input_truncated = False
-        if request is not None and request.messages is not None:
-            input_messages = request.messages
-            input_source = "extension"
-        elif len(self._transcript) <= self._input_budget:
-            self._input_budget -= len(self._transcript)
-            input_messages = list(self._transcript)
-            input_source = "transcript"
-        else:
-            # Budget used up: only the messages since the previous call.
-            input_messages = self._transcript[self._previous_call_index :]
-            input_source = "transcript"
-            input_truncated = True
+        input_messages, input_source, input_truncated = self._call_input(request)
         self._previous_call_index = len(self._transcript) + 1
         segments = assistant_segments(message, include_text=False)
         stop_reason = message.get("stopReason")
@@ -445,7 +467,7 @@ class PiSpanRecorder:
             _llm_record(
                 name=f"eval.{self.model.provider}_agent",
                 start_ns=start_ns,
-                end_ns=now,
+                end_ns=self._call_end_ns(message, start_ns, now, metadata),
                 input_messages=input_messages,
                 output_messages=_llm_output_messages(message_text(message), segments),
                 metadata=metadata,
@@ -459,15 +481,79 @@ class PiSpanRecorder:
             )
         )
 
+    def _call_input(self, request: _ExtensionRequest | None) -> tuple[list[Any], str, bool]:
+        """Return the input messages of a model call, their source, and if they are truncated."""
+        if request is not None and request.messages is not None:
+            return request.messages, "extension", False
+        if len(self._transcript) <= self._input_budget:
+            self._input_budget -= len(self._transcript)
+            return list(self._transcript), "transcript", False
+        # Budget used up: only the messages since the previous call.
+        return self._transcript[self._previous_call_index :], "transcript", True
+
+    def _close_unfinished_call(self, now: int) -> None:
+        """Record the model request that started but did not end (the run stopped)."""
+        request = self._pending_request
+        self._pending_request = None
+        if request is None:
+            return
+        start_ns = request.start_ns if request.start_ns is not None and _plausible_start(request.start_ns, now) else now
+        input_messages, input_source, input_truncated = self._call_input(request)
+        metadata: dict[str, Any] = {
+            "harness": self.harness,
+            "reported_model_name": self.model.label,
+            "sdk": self.sdk_name,
+            "turn": self._turn,
+            "input_source": input_source,
+            "input_truncated": input_truncated,
+        }
+        if request.http_status is not None:
+            metadata["http_status"] = request.http_status
+        if request.request_id:
+            metadata["request_id"] = request.request_id
+        self.records.append(
+            _llm_record(
+                name=f"eval.{self.model.provider}_agent",
+                start_ns=start_ns,
+                end_ns=now,
+                input_messages=input_messages,
+                output_messages=[],
+                metadata=metadata,
+                metrics=None,
+                tags=self._tags(),
+                tool_definitions=self.tool_definitions,
+                prompt=self._prompt(),
+                error="model call did not finish",
+                provider=self.model.provider,
+                model_name=self.model.name,
+            )
+        )
+
+    @staticmethod
+    def _call_end_ns(message: dict[str, Any], start_ns: int, now: int, metadata: dict[str, Any]) -> int:
+        """Return the end of a model call.
+
+        Pi 1.5+ sets ``durationMs``: the time from the message ``timestamp``
+        until the response ended, measured with a monotonic clock. Use it when
+        it is there, but never after the record arrived. Else the call ends when
+        the record arrives (a slow reader makes the call look longer).
+        """
+        timestamp_ns, duration_ms = _message_timestamp_ns(message, now), message.get("durationMs")
+        if timestamp_ns is None or not _is_number(duration_ms) or duration_ms < 0:
+            return now
+        metadata["duration_ms"] = duration_ms
+        end_ns = timestamp_ns + int(min(duration_ms, _MAX_CALL_DURATION_NS / _NS_PER_MS) * _NS_PER_MS)
+        return max(start_ns, min(end_ns, now))
+
     def _call_start_ns(self, message: dict[str, Any], request: _ExtensionRequest | None, now: int) -> int:
         candidates: list[int] = []
         if request is not None and request.start_ns is not None:
             candidates.append(request.start_ns)
-        timestamp = message.get("timestamp")
-        if isinstance(timestamp, int | float) and not isinstance(timestamp, bool):
-            candidates.append(int(timestamp * _NS_PER_MS))
+        timestamp_ns = _message_timestamp_ns(message, now)
+        if timestamp_ns is not None:
+            candidates.append(timestamp_ns)
         for candidate in candidates:
-            if now - _MAX_CALL_DURATION_NS <= candidate <= now:
+            if _plausible_start(candidate, now):
                 return candidate
         return self._last_event_ns if self._last_event_ns is not None and self._last_event_ns <= now else now
 
@@ -712,7 +798,7 @@ def _llm_record(
     input_messages: list[Any],
     output_messages: list[dict[str, Any]],
     metadata: dict[str, Any],
-    metrics: dict[str, Any],
+    metrics: dict[str, Any] | None,
     tags: dict[str, str],
     tool_definitions: list[dict[str, Any]] | None,
     prompt: dict[str, Any],
@@ -798,11 +884,36 @@ def _emit_record(llmobs: Any, record: SpanRecord) -> None:
         span.finish(finish_time=record.end_ns / 1e9)
 
 
-def _is_int(value: Any) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool)
+def _is_number(value: Any) -> bool:
+    """Return ``True`` for an int or a finite float (JSON can carry ``Infinity`` / ``NaN``)."""
+    if isinstance(value, bool):
+        return False
+    # Do not convert an int to a float: a very large int cannot be converted.
+    return isinstance(value, int) or (isinstance(value, float) and math.isfinite(value))
+
+
+#: Largest epoch time in ms that is accepted (year 5138); larger values are not
+#: times and cannot always be converted to ns.
+_MAX_EPOCH_MS = 100_000_000_000_000
 
 
 def _epoch_ms_to_ns(value: Any) -> int | None:
-    if isinstance(value, int | float) and not isinstance(value, bool) and value > 0:
+    """Convert an epoch time in ms to ns; ``None`` when it is not a usable time."""
+    if _is_number(value) and 0 < value <= _MAX_EPOCH_MS:
         return int(value * _NS_PER_MS)
     return None
+
+
+def _plausible_start(start_ns: int, now: int) -> bool:
+    """A start time is used only when it is at most ``_MAX_CALL_DURATION_NS`` before ``now``."""
+    return now - _MAX_CALL_DURATION_NS <= start_ns <= now
+
+
+def _message_timestamp_ns(message: dict[str, Any], now: int) -> int | None:
+    """Return the plausible ``timestamp`` (request start) of a message in ns, else ``None``."""
+    timestamp_ns = _epoch_ms_to_ns(message.get("timestamp"))
+    return timestamp_ns if timestamp_ns is not None and _plausible_start(timestamp_ns, now) else None
+
+
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)

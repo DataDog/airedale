@@ -880,7 +880,9 @@ class TestPiSpans:
         assert first["input_data"] == [{"role": "user", "content": "hi"}]
         assert first["output_data"][-1]["role"] == "assistant"
         final_input = final_llm.annotations["input_data"]
-        assert [message["role"] for message in final_input] == ["user", "assistant"]
+        # The first reply: its thinking block, then its text with the tool call.
+        assert [message["role"] for message in final_input] == ["user", "assistant", "assistant"]
+        assert final_input[1]["content"] == "I should list files."
         assert final_input[-1]["tool_calls"][0]["tool_id"] == "call_1"
         assert final_llm.annotations["output_data"][-1] == {"role": "assistant", "content": "The directory is empty."}
         assert tool.annotations["input_data"] == {"path": "."}

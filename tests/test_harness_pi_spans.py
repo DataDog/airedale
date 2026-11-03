@@ -97,8 +97,10 @@ USER = {"role": "user", "content": "Q"}
 # --------------------------------------------------------------------------- #
 class TestMessageRendering:
     def test_system_message_uses_sections_when_content_is_empty(self):
-        assert llmobs_input_message(SYSTEM) == {"role": "system", "content": "You are pi.\n\nSYS"}
-        assert llmobs_input_message({"role": "system", "content": "Direct"}) == {"role": "system", "content": "Direct"}
+        assert llmobs_input_message(SYSTEM) == [{"role": "system", "content": "You are pi.\n\nSYS"}]
+        assert llmobs_input_message({"role": "system", "content": "Direct"}) == [
+            {"role": "system", "content": "Direct"}
+        ]
 
     def test_tool_result_and_assistant(self):
         assistant = _assistant(
@@ -108,11 +110,15 @@ class TestMessageRendering:
                 {"type": "toolCall", "id": "c1", "name": "ls", "arguments": {"path": "."}},
             ]
         )
-        assert llmobs_input_message(assistant) == {
-            "role": "assistant",
-            "content": "Look",
-            "tool_calls": [{"name": "ls", "arguments": {"path": "."}, "type": "tool_use", "tool_id": "c1"}],
-        }
+        # The thinking block is kept (pi sends it back to the model), in order.
+        assert llmobs_input_message(assistant) == [
+            {"role": "assistant", "content": "hmm"},
+            {
+                "role": "assistant",
+                "content": "Look",
+                "tool_calls": [{"name": "ls", "arguments": {"path": "."}, "type": "tool_use", "tool_id": "c1"}],
+            },
+        ]
         result = {
             "role": "toolResult",
             "toolCallId": "c1",
@@ -120,22 +126,47 @@ class TestMessageRendering:
             "content": [{"type": "text", "text": "a"}, {"type": "image", "data": "xx"}],
             "isError": False,
         }
-        assert llmobs_input_message(result) == {
-            "role": "user",
-            "content": "",
-            "tool_results": [{"name": "ls", "result": "a\n[image]", "type": "tool_result", "tool_id": "c1"}],
-        }
+        assert llmobs_input_message(result) == [
+            {
+                "role": "user",
+                "content": "",
+                "tool_results": [{"name": "ls", "result": "a\n[image]", "type": "tool_result", "tool_id": "c1"}],
+            }
+        ]
 
     def test_other_roles(self):
-        assert llmobs_input_message({"role": "custom", "content": "note"}) == {"role": "user", "content": "note"}
-        assert llmobs_input_message({"role": "compactionSummary", "summary": "S"}) == {"role": "user", "content": "S"}
-        assert llmobs_input_message({"role": "bashExecution", "command": "ls", "output": "x"}) == {
-            "role": "user",
-            "content": "$ ls\nx",
-        }
-        assert llmobs_input_message({"role": "bashExecution", "command": "ls", "excludeFromContext": True}) is None
-        assert llmobs_input_message({"role": "unknown"}) is None
-        assert llmobs_input_message("not a message") is None
+        assert llmobs_input_message({"role": "custom", "content": "note"}) == [{"role": "user", "content": "note"}]
+        assert llmobs_input_message({"role": "compactionSummary", "summary": "S"}) == [{"role": "user", "content": "S"}]
+        assert llmobs_input_message({"role": "bashExecution", "command": "ls", "output": "x"}) == [
+            {"role": "user", "content": "$ ls\nx"}
+        ]
+        assert llmobs_input_message({"role": "bashExecution", "command": "ls", "excludeFromContext": True}) == []
+        assert llmobs_input_message({"role": "unknown"}) == []
+        assert llmobs_input_message("not a message") == []
+
+    def test_assistant_blocks_keep_their_order(self):
+        message = _assistant(
+            [
+                {"type": "text", "text": "A"},
+                {"type": "text", "text": "B"},
+                {"type": "toolCall", "id": "c1", "name": "ls", "arguments": {}},
+                {"type": "thinking", "thinking": "T"},
+                {"type": "toolCall", "id": "c2", "name": "ls", "arguments": {}},
+                {"type": "text", "text": "C"},
+                {"type": "thinking", "thinking": " "},
+            ]
+        )
+        rendered = llmobs_input_message(message)
+        assert [(item["content"], [call["tool_id"] for call in item.get("tool_calls", [])]) for item in rendered] == [
+            ("A\n\nB", ["c1"]),
+            ("T", []),
+            ("", ["c2"]),
+            ("C", []),
+        ]
+        assert llmobs_input_message(_assistant([])) == [{"role": "assistant", "content": ""}]
+        assert llmobs_input_message({"role": "assistant", "content": " plain "}) == [
+            {"role": "assistant", "content": "plain"}
+        ]
         assert llmobs_input_messages([USER, None, {"role": "unknown"}]) == [{"role": "user", "content": "Q"}]
 
 
@@ -181,6 +212,88 @@ class TestModelCalls:
         message["timestamp"] = timestamp
         recorder = _feed(_recorder(), [(3, {"type": "turn_start"}), (900, {"type": "message_end", "message": message})])
         assert recorder.records[0].start_ns == _ns(T0_MS + 3)
+
+    def test_end_uses_the_pi_duration(self):
+        message = _assistant([], timestamp=T0_MS + 5, durationMs=200)
+        recorder = _feed(_recorder(), [(900, {"type": "message_end", "message": message})])
+        record = recorder.records[0]
+        assert (record.start_ns, record.end_ns) == (_ns(T0_MS + 5), _ns(T0_MS + 205))
+        assert record.metadata["duration_ms"] == 200
+
+    @pytest.mark.parametrize("duration_ms", [5000, -1, "x", None, float("inf"), float("nan"), 1e300, 10**400])
+    def test_end_is_bounded_by_the_arrival(self, duration_ms):
+        message = _assistant([], timestamp=T0_MS + 5, durationMs=duration_ms)
+        recorder = _feed(_recorder(), [(900, {"type": "message_end", "message": message})])
+        assert recorder.records[0].end_ns == _ns(T0_MS + 900)
+
+    @pytest.mark.parametrize("timestamp", [0, float("inf"), T0_MS + 10_000, 1e300, 10**400, -5])
+    def test_duration_needs_a_plausible_timestamp(self, timestamp):
+        message = _assistant([], timestamp=timestamp, durationMs=1)
+        recorder = _feed(_recorder(), [(2, _request(1, 2, 0, [])), (900, {"type": "message_end", "message": message})])
+        record = recorder.records[0]
+        # The extension start is used; the end is the arrival, not 0 + 1 ms.
+        assert (record.start_ns, record.end_ns) == (_ns(T0_MS + 2), _ns(T0_MS + 900))
+        assert "duration_ms" not in record.metadata
+
+    def test_duration_with_an_earlier_extension_start(self):
+        message = _assistant([], timestamp=T0_MS + 5, durationMs=100)
+        recorder = _feed(_recorder(), [(2, _request(1, 3, 0, [])), (900, {"type": "message_end", "message": message})])
+        record = recorder.records[0]
+        assert (record.start_ns, record.end_ns) == (_ns(T0_MS + 3), _ns(T0_MS + 105))
+
+    @pytest.mark.parametrize("t", [1e300, 10**400, float("nan")])
+    def test_unusable_extension_time_is_ignored(self, t):
+        entry = _request(1, 0, 0, [])
+        entry["entry"]["data"]["t"] = t
+        message = _assistant([], timestamp=T0_MS + 5)
+        recorder = _feed(_recorder(), [(2, entry), (900, {"type": "message_end", "message": message})])
+        assert recorder.records[0].start_ns == _ns(T0_MS + 5)
+
+    def test_unfinished_request_with_an_old_start_uses_the_close_time(self):
+        entry = _request(1, 0, 0, [USER])
+        entry["entry"]["data"]["t"] = 1  # 1970
+        recorder = _feed(_recorder(), [(2, entry)])
+        recorder.close(received_ns=_ns(T0_MS + 50))
+        assert recorder.records[0].start_ns == _ns(T0_MS + 50)
+
+    def test_unfinished_request_and_open_tool(self):
+        recorder = _feed(_recorder(), [(1, _tool_start("a")), (2, _request(1, 2, 0, [USER]))])
+        recorder.close(received_ns=_ns(T0_MS + 9))
+        assert sorted((record.kind, record.error) for record in recorder.records) == [
+            ("llm", "model call did not finish"),
+            ("tool", "tool did not finish"),
+        ]
+
+    def test_unfinished_request_is_an_error_span(self):
+        recorder = _feed(
+            _recorder(),
+            [
+                (0, {"type": "turn_start"}),
+                (1, {"type": "message_end", "message": USER}),
+                (2, _request(1, 2, 0, [USER])),
+                (3, _response(1, 3)),
+            ],
+        )
+        recorder.close(received_ns=_ns(T0_MS + 50))
+        [record] = recorder.records
+        assert (record.kind, record.error) == ("llm", "model call did not finish")
+        assert (record.start_ns, record.end_ns) == (_ns(T0_MS + 2), _ns(T0_MS + 50))
+        assert record.metadata["input_source"] == "extension"
+        assert record.metadata["http_status"] == 200
+        assert record.metrics is None
+        assert _input(record) == [{"role": "user", "content": "Q"}]
+        # Closing again adds nothing.
+        recorder.close(received_ns=_ns(T0_MS + 60))
+        assert len(recorder.records) == 1
+
+    def test_unfinished_request_is_sent(self, fake_span_llmobs):
+        recorder = _feed(_recorder(), [(2, _request(1, 2, 0, [USER]))])
+        recorder.close(received_ns=_ns(T0_MS + 50))
+        recorder.emit(fake_span_llmobs)
+        [span] = fake_span_llmobs.spans
+        assert (span.kind, span.error) == ("llm", 1)
+        assert span.tags["error.message"] == "model call did not finish"
+        assert "metrics" not in span.annotations
 
     def test_failed_call_is_an_error_span(self):
         message = _assistant([], stop="error", errorMessage="529 overloaded", timestamp=T0_MS)
@@ -706,7 +819,8 @@ class TestCollectorExtension:
         recorder.feed({"type": "message_end", "message": _assistant([])}, received_ns=_ns(now + 1))
         assert [record.metadata["input_source"] for record in recorder.records] == ["extension", "extension"]
         roles = [message["role"] for message in _input(recorder.records[1])]
-        assert roles == ["system", "user", "assistant", "user"]
+        # The assistant message has a thinking block and a text block.
+        assert roles == ["system", "user", "assistant", "assistant", "user"]
         assert recorder.records[0].metadata["request_id"] == "req_9"
 
     def test_change_is_relative_to_the_last_sent_request(self, tmp_path):
