@@ -20,9 +20,9 @@ classifiers = [
 ]
 dependencies = [
     "ddtrace==4.16.0",
-    "anthropic==1.15.0",
-    "openai==3.35.1",
-    "claude-agent-sdk==0.2.168",
+    "anthropic==2.3.0",
+    "openai==3.37.0",
+    "claude-agent-sdk==0.2.174",
     "openai-codex==0.163.0",
     "mcp==1.30.0",
     "httpx==0.28.1",
