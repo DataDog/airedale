@@ -547,6 +547,10 @@ class DecoratorSpanAgentRunner(AgentRunner):
     ``@agent`` span, an inner ``@llm`` span, and one ``tool`` span for each tool
     call (children of the agent span). The decorators apply only when
     ``LLMObs.enabled``, so no empty spans are sent.
+
+    A subclass that can observe each model call (for example pi) overrides
+    :meth:`_run_model_calls` to make one ``llm`` span per model call instead
+    of the single inner ``llm`` span.
     """
 
     #: Framework label written in the agent-span manifest.
@@ -607,11 +611,7 @@ class DecoratorSpanAgentRunner(AgentRunner):
         harness: str,
         progress: ProgressCallback | None,
     ) -> HarnessResult:
-        run_in_llm_span = _decorate_when_llmobs_enabled(
-            self._run_llm_span,
-            llm(model_name=model.name, model_provider=model.provider, name=f"eval.{model.provider}_agent"),
-        )
-        run_result, missing_usage_error = await run_in_llm_span(
+        run_result, missing_usage_error = await self._run_model_calls(
             model=model,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -619,10 +619,6 @@ class DecoratorSpanAgentRunner(AgentRunner):
             harness=harness,
             progress=progress,
         )
-        # Emit per-tool child spans first so they attach to this active agent
-        # span (siblings of the inner llm span), reproducing the native Claude
-        # `agent -> llm + tool...` topology.
-        _emit_tool_spans(run_result.tool_calls)
         _annotate_agent_loop_span(
             model=model,
             sdk_name=self.sdk_name,
@@ -649,6 +645,55 @@ class DecoratorSpanAgentRunner(AgentRunner):
             harness=harness,
         )
 
+    async def _run_model_calls(
+        self,
+        *,
+        model: ModelSpec,
+        system_prompt: str,
+        user_prompt: str,
+        prompt_version: str,
+        harness: str,
+        progress: ProgressCallback | None,
+    ) -> tuple[AgentRunResult, RuntimeError | None]:
+        """Run the engine and make the child spans of the active ``agent`` span.
+
+        Default: one ``llm`` span for the full run, then one ``tool`` span for
+        each tool call. Return the run result and the usage error (if any).
+        """
+        run_in_llm_span = _decorate_when_llmobs_enabled(
+            self._run_llm_span,
+            llm(model_name=model.name, model_provider=model.provider, name=f"eval.{model.provider}_agent"),
+        )
+        run_result, missing_usage_error = await run_in_llm_span(
+            model=model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            prompt_version=prompt_version,
+            harness=harness,
+            progress=progress,
+        )
+        # Emit per-tool child spans first so they attach to this active agent
+        # span (siblings of the inner llm span), reproducing the native Claude
+        # `agent -> llm + tool...` topology.
+        _emit_tool_spans(run_result.tool_calls)
+        return run_result, missing_usage_error
+
+    async def _span_context(self) -> tuple[dict[str, str], Mapping[tuple[str, str], McpToolMetadata]]:
+        """Return the trace headers for MCP servers and the MCP tool catalog."""
+        trace_headers = current_trace_headers()
+        mcp_tool_metadata = await _mcp_tool_metadata_catalog(self.mcp_servers, trace_headers) if LLMObs.enabled else {}
+        return trace_headers, mcp_tool_metadata
+
+    def _missing_usage_error(self, run_result: AgentRunResult, model: ModelSpec) -> RuntimeError | None:
+        """Return the error for a successful run without token usage, else ``None``."""
+        if run_result.error is not None:
+            return None
+        try:
+            _raise_if_missing_usage(run_result.usage, sdk_name=self.sdk_name, model=model)
+        except RuntimeError as exc:
+            return exc
+        return None
+
     async def _run_llm_span(
         self,
         *,
@@ -659,8 +704,7 @@ class DecoratorSpanAgentRunner(AgentRunner):
         harness: str,
         progress: ProgressCallback | None,
     ) -> tuple[AgentRunResult, RuntimeError | None]:
-        trace_headers = current_trace_headers()
-        mcp_tool_metadata = await _mcp_tool_metadata_catalog(self.mcp_servers, trace_headers) if LLMObs.enabled else {}
+        trace_headers, mcp_tool_metadata = await self._span_context()
         run_result = await self._run_agent(
             model=model,
             system_prompt=system_prompt,
@@ -668,12 +712,7 @@ class DecoratorSpanAgentRunner(AgentRunner):
             trace_headers=trace_headers,
             progress=progress,
         )
-        missing_usage_error: RuntimeError | None = None
-        if run_result.error is None:
-            try:
-                _raise_if_missing_usage(run_result.usage, sdk_name=self.sdk_name, model=model)
-            except RuntimeError as exc:
-                missing_usage_error = exc
+        missing_usage_error = self._missing_usage_error(run_result, model)
         _annotate_llm_span(
             model=model,
             sdk_name=self.sdk_name,

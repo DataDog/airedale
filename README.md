@@ -47,7 +47,7 @@ are the same except for `harness`.
 | Scenario `harness` | Engine | LLMObs spans |
 |--------------------|--------|--------------|
 | `native` (default) | Selected from the model provider (table above) | See above |
-| `pi` | `pi --mode json` subprocess | Decorator spans (`@agent` / `@llm` + `tool`), as for Codex |
+| `pi` | `pi --mode json` subprocess | `@agent` span, then one `llm` span per model call, one `tool` span per tool execution and one `task` span per compaction, with real times |
 
 Pi is not a Python package. Install it separately so that `pi` is on `PATH`, or
 set `AIREDALE_PI_COMMAND` (for example `AIREDALE_PI_COMMAND="npx -y
