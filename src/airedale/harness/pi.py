@@ -34,6 +34,23 @@ files of a cloned repo load, like ``.claude/`` for Claude). ``PI_OFFLINE`` stops
 model-catalog refreshes, so each run uses the catalog bundled with the
 installed pi. ``PI_*`` session variables of a parent pi process are removed.
 
+The pi process gets no Datadog variable from the operator: every ``DD_*``,
+``DATADOG_*`` and ``_DD_*`` variable is removed, except the names in
+``PI_DATADOG_ENV_ALLOWLIST`` (empty: pi needs none). The operator sets these
+for the airedale process only (LLMObs). They hold credentials (``DD_API_KEY``,
+``DD_APP_KEY``, keys inside values such as ``DD_ADDITIONAL_ENDPOINTS``, proxy
+URLs with a password, ...) and settings that would make Datadog-instrumented
+repo code under test report to the operator's account. A denylist of
+credential names cannot be complete, so the filter is an allowlist. Without
+it, pi, its ``bash`` tool, stdio MCP servers and repo code that pi loads
+(``--approve``) get them in their environment. This is not a sandbox: repo
+code runs as the same OS user, so only evaluate trusted repositories. Only
+the variables above are removed: a Datadog key stored under another name
+(for example in ``OTEL_EXPORTER_OTLP_HEADERS``) still reaches pi. A
+gateway credential that ``gateway.toml`` names explicitly (``api_key_env``)
+still goes to pi in ``models.json``. A stdio MCP server that
+used an inherited Datadog variable (for example ``DD_API_KEY``) does not get it any more.
+
 Gateway and model details
 -------------------------
 Pi needs model details (API type, context window, output limit, cost) for each
@@ -142,6 +159,15 @@ PI_INHERITED_ENV_TO_DROP: tuple[str, ...] = (
     "PI_TELEMETRY",
     "PI_SKIP_VERSION_CHECK",
 )
+#: Name prefixes of Datadog variables (``_DD_`` is used by Datadog tools for
+#: internal settings). Variables with these prefixes do not reach pi, except the
+#: names in ``PI_DATADOG_ENV_ALLOWLIST``. Case is ignored.
+DATADOG_ENV_PREFIXES: tuple[str, ...] = ("DD_", "DATADOG_", "_DD_")
+#: Datadog variables (upper case names) that reach pi. Empty: pi needs none.
+#: Add a name here only when pi, or repo code run by pi, must read it, and its
+#: value is not a secret.
+PI_DATADOG_ENV_ALLOWLIST: frozenset[str] = frozenset()
+
 #: Maximum size of one JSONL record on pi stdout (agent_end carries every message).
 PI_STREAM_LIMIT_BYTES = 64 * 1024 * 1024
 PI_STDERR_TAIL_BYTES = 16 * 1024
@@ -323,7 +349,11 @@ class PiRunner(DecoratorSpanAgentRunner):
         return bool(env_name and os.environ.get(env_name))
 
     def _env(self, agent_dir: Path) -> dict[str, str]:
-        env = {name: value for name, value in os.environ.items() if name not in PI_INHERITED_ENV_TO_DROP}
+        env = {
+            name: value
+            for name, value in os.environ.items()
+            if name not in PI_INHERITED_ENV_TO_DROP and not _is_blocked_datadog_env(name)
+        }
         env["PI_CODING_AGENT_DIR"] = str(agent_dir)
         env["PI_OFFLINE"] = "1"
         env["PI_SKIP_VERSION_CHECK"] = "1"
@@ -527,6 +557,12 @@ async def _read_events(
             await _notify(progress, f"{SDK_NAME}/{model.label}: {message}")
         if collector.stop_requested or collector.settled:
             return
+
+
+def _is_blocked_datadog_env(name: str) -> bool:
+    """Return True when a Datadog variable must not reach pi (see ``PI_DATADOG_ENV_ALLOWLIST``)."""
+    upper = name.upper()
+    return upper.startswith(DATADOG_ENV_PREFIXES) and upper not in PI_DATADOG_ENV_ALLOWLIST
 
 
 def _default_pi_command() -> list[str]:
