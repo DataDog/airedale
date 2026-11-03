@@ -334,10 +334,25 @@ Notes:
   tools, add `codemode` to `allowed_builtin_tools`). Because
   pi lets a project server replace a same-named scenario server, such a name
   collision fails the run. **Trust:** with `--approve`, a cloned repo's
-  `.pi/extensions` and project packages run inside the pi process with the
-  harness environment (as `.claude/settings.json` hooks do for Claude). Only
-  evaluate repositories you trust. The task prompt goes to pi on stdin, so a
-  prompt that starts with `@` is not read as a file.
+  `.pi/extensions` and project packages run inside the pi process with its
+  environment (as `.claude/settings.json` hooks do for Claude). Only
+  evaluate repositories you trust. The pi process gets **no** Datadog variable
+  from the operator: every `DD_*`, `DATADOG_*` and `_DD_*` variable is removed
+  (an allowlist, `PI_DATADOG_ENV_ALLOWLIST` in `harness/pi.py`, is empty).
+  These variables are for the airedale process (LLMObs). They hold credentials,
+  some inside the value (`DD_ADDITIONAL_ENDPOINTS`, `DD_PROXY_HTTPS`), and
+  settings that would make Datadog-instrumented repo code report to your
+  account. So pi, its tools and stdio MCP servers do not inherit them. Other
+  variables are not filtered: a Datadog key stored under another name (for
+  example in `OTEL_EXPORTER_OTLP_HEADERS`) still reaches pi. This is not a
+  sandbox (repo code runs as the same OS user). A gateway `api_key_env`
+  credential still goes to pi (in its private `models.json`).
+  **Compatibility:** a pi stdio MCP server that used an inherited Datadog
+  variable (for example `DD_API_KEY`) does not get it any more. There is no
+  safe way to give it one at this time: `$NAME` in an MCP `env` value is not
+  expanded, and a literal key in `env` goes to the LLMObs experiment metadata.
+  The task prompt goes to pi on stdin, so a prompt
+  that starts with `@` is not read as a file.
 
 ---
 
