@@ -22,7 +22,10 @@ Times
   did not end (the run stopped) is an error span that ends when the run stops.
 - ``tool`` span: it starts when ``tool_execution_start`` arrives. Its duration
   is the ``durationMs`` that pi measured, or the time until
-  ``tool_execution_end`` arrives.
+  ``tool_execution_end`` arrives. When that duration ends after the
+  ``tool_execution_end`` record arrives (the records were late), the span ends
+  when the record arrives and starts earlier, so it keeps the pi duration, but
+  not before the end of the previous model call.
 - ``task`` span (compaction): from ``compaction_start`` to ``compaction_end``.
 
 Inputs of an ``llm`` span
@@ -42,7 +45,11 @@ Limits:
   messages of a request when they are too large (``skipped``).
 - The messages are pi messages, not the provider payload: pi still converts
   some roles (for example a compaction summary) before it sends them. Opaque
-  signatures, tool ``details`` and image data are removed.
+  signatures, tool ``details`` and image data are removed. A system message
+  that changes prompt sections is shown as it is (its new sections only).
+  Pi sends these messages in place to models that accept system messages in
+  the conversation, and replays them into one system prompt for the other
+  models.
 - The request time is taken before the provider retries of pi's HTTP client
   and before the ``before_provider_request`` handlers of the extensions loaded
   after the collector (pi has no hook after them: ``before_provider_headers``
@@ -205,6 +212,18 @@ def assistant_segments(message: dict[str, Any], *, include_text: bool) -> list[A
     return segments
 
 
+def _pop_answer(segments: list[AgentOutputSegment]) -> str:
+    """Remove the text segments at the end of ``segments`` and return them as the answer.
+
+    The other text segments stay in their position, so the output keeps the
+    order of the blocks (for example a text before a tool call).
+    """
+    parts: list[str] = []
+    while segments and isinstance(segments[-1], AgentThought) and segments[-1].kind == "text":
+        parts.append(segments.pop().text)
+    return "\n\n".join(reversed(parts))
+
+
 def _tool_call_entry(block: dict[str, Any]) -> dict[str, Any]:
     arguments = block.get("arguments")
     entry: dict[str, Any] = {
@@ -320,6 +339,9 @@ class SpanRecord:
 class _OpenTool:
     record: SpanRecord
     parent_id: str | None
+    #: End of the model call that asked for the tool: the tool cannot start
+    #: before it (``None`` when not known).
+    earliest_start_ns: int | None = None
 
 
 @dataclass
@@ -369,8 +391,12 @@ class PiSpanRecorder:
         self._last_request_seq = 0
         self._input_budget = MAX_INPUT_MESSAGE_REFS
         self._extension_disabled = False
-        #: Transcript length at the previous assistant message.
+        #: Transcript index of the previous assistant message. A truncated
+        #: input starts there, so that it keeps that response (for example the
+        #: tool calls of the tool results that follow it).
         self._previous_call_index = 0
+        #: End of the last model call (a tool that it asked for starts after it).
+        self._last_call_end_ns: int | None = None
         self.extension_entries = 0
         self.invalid_extension_entries = 0
 
@@ -430,8 +456,11 @@ class PiSpanRecorder:
         self._pending_request = None
         start_ns = self._call_start_ns(message, request, now)
         input_messages, input_source, input_truncated = self._call_input(request)
-        self._previous_call_index = len(self._transcript) + 1
-        segments = assistant_segments(message, include_text=False)
+        # The message is appended to the transcript after this method.
+        self._previous_call_index = len(self._transcript)
+        segments = assistant_segments(message, include_text=True)
+        # ``content`` can also be a string (only text).
+        answer = _pop_answer(segments) if isinstance(message.get("content"), list) else message_text(message)
         stop_reason = message.get("stopReason")
         metadata: dict[str, Any] = {
             "harness": self.harness,
@@ -463,13 +492,15 @@ class PiSpanRecorder:
             error = str(message.get("errorMessage") or f"stopReason={stop_reason}")
         model_name = str(message.get("model") or self.model.name)
         provider = str(message.get("provider") or self.model.provider)
+        end_ns = self._call_end_ns(message, start_ns, now, metadata)
+        self._last_call_end_ns = end_ns
         self.records.append(
             _llm_record(
                 name=f"eval.{self.model.provider}_agent",
                 start_ns=start_ns,
-                end_ns=self._call_end_ns(message, start_ns, now, metadata),
+                end_ns=end_ns,
                 input_messages=input_messages,
-                output_messages=_llm_output_messages(message_text(message), segments),
+                output_messages=_llm_output_messages(answer, segments),
                 metadata=metadata,
                 metrics=UsageMetrics.from_pi(message.get("usage")).to_llmobs_metrics(),
                 tags=self._tags(),
@@ -593,7 +624,9 @@ class PiSpanRecorder:
         if tool_id in self._open_tools:
             # A repeated id: close the earlier execution so that no data is lost.
             self.close_tool(tool_id, now, error="tool started again before it ended")
-        self._open_tools[tool_id] = _OpenTool(record=record, parent_id=parent_id)
+        self._open_tools[tool_id] = _OpenTool(
+            record=record, parent_id=parent_id, earliest_start_ns=self._last_call_end_ns
+        )
         if tool_id:
             self._tool_records[tool_id] = record
 
@@ -611,16 +644,25 @@ class PiSpanRecorder:
                 end_ns=now,
                 metadata={"source": SOURCE, "tool_id": tool_id or None},
             )
-            open_tool = _OpenTool(record=record, parent_id=parent_id)
+            open_tool = _OpenTool(record=record, parent_id=parent_id, earliest_start_ns=self._last_call_end_ns)
             self._open_tools[tool_id] = open_tool
         record = open_tool.record
         record.output_data = tool_result_text(event.get("result"))
         duration_ms = event.get("durationMs")
-        if isinstance(duration_ms, int | float) and not isinstance(duration_ms, bool) and duration_ms >= 0:
+        if _is_number(duration_ms) and duration_ms >= 0:
             record.metadata["duration_ms"] = duration_ms
-            # The pi duration is measured with a monotonic clock: prefer it, but
-            # never end after the end record arrived.
-            end_ns = min(record.start_ns + int(duration_ms * _NS_PER_MS), now)
+            # The pi duration is measured with a monotonic clock: prefer it.
+            # A record arrives at or after the time of its step, so the tool
+            # cannot end after the end record arrived. When the duration goes
+            # past it, the records were late: start earlier, keep the duration.
+            # But do not start before the end of the model call that asked for
+            # the tool.
+            duration_ns = int(min(duration_ms, _MAX_CALL_DURATION_NS / _NS_PER_MS) * _NS_PER_MS)
+            end_ns = min(record.start_ns + duration_ns, now)
+            earliest = end_ns - duration_ns
+            if open_tool.earliest_start_ns is not None:
+                earliest = max(earliest, open_tool.earliest_start_ns)
+            record.start_ns = min(record.start_ns, earliest)
         else:
             end_ns = now
         error = (record.output_data or "tool error") if event.get("isError") else None

@@ -33,7 +33,12 @@
 const REQUEST_ENTRY = "airedale.llmobs.request";
 const RESPONSE_ENTRY = "airedale.llmobs.response";
 const DATA_VERSION = 1;
-const OPAQUE_KEYS = new Set(["textSignature", "thinkingSignature", "thoughtSignature", "details"]);
+// Opaque pi fields that are removed: tool `details` on a message, and the
+// provider signatures on its content blocks. The data of an image content
+// block is replaced by its size. Only these places are changed: tool call
+// arguments can have keys and objects of the same shape, and they are kept.
+const MESSAGE_OPAQUE_KEYS = new Set(["details"]);
+const BLOCK_OPAQUE_KEYS = new Set(["textSignature", "thinkingSignature", "thoughtSignature"]);
 // Maximum size (UTF-16 code units of the serialized JSON) of the new messages
 // of one request entry. Above it, the entry has `skipped: true` and no
 // messages, so that one entry can never get near the stdout record limit of
@@ -131,13 +136,33 @@ export default function airedaleLlmobsCollector(pi: Api): void {
 }
 
 function serialize(message: unknown): string {
-	return JSON.stringify(message, (key, value) => {
-		if (OPAQUE_KEYS.has(key)) return undefined;
-		if (value !== null && typeof value === "object" && value.type === "image" && typeof value.data === "string") {
-			return { type: "image", mimeType: value.mimeType, bytes: value.data.length };
-		}
-		return value;
-	});
+	return JSON.stringify(withoutOpaqueFields(message));
+}
+
+function withoutOpaqueFields(message: unknown): unknown {
+	if (!isRecord(message)) return message;
+	const copy: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(message)) {
+		if (MESSAGE_OPAQUE_KEYS.has(key)) continue;
+		copy[key] = key === "content" && Array.isArray(value) ? value.map(blockWithoutOpaqueFields) : value;
+	}
+	return copy;
+}
+
+function blockWithoutOpaqueFields(block: unknown): unknown {
+	if (!isRecord(block)) return block;
+	if (block.type === "image" && typeof block.data === "string") {
+		return { type: "image", mimeType: block.mimeType, bytes: block.data.length };
+	}
+	const copy: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(block)) {
+		if (!BLOCK_OPAQUE_KEYS.has(key)) copy[key] = value;
+	}
+	return copy;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function requestId(headers: Record<string, string> | undefined): string | null {

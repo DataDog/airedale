@@ -206,6 +206,36 @@ class TestModelCalls:
         assert record.metrics["output_tokens"] == 5
         assert record.error is None
 
+    def test_output_keeps_the_block_order(self):
+        message = _assistant(
+            [
+                {"type": "text", "text": "First"},
+                {"type": "toolCall", "id": "c1", "name": "ls", "arguments": {}},
+                {"type": "thinking", "thinking": "hmm"},
+                {"type": "text", "text": "B"},
+                {"type": "text", "text": "C"},
+            ],
+            timestamp=T0_MS,
+        )
+        recorder = _feed(_recorder(), [(1, {"type": "message_end", "message": message})])
+        assert recorder.records[0].output_data == [
+            {"role": "assistant", "content": "First"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"name": "ls", "arguments": {}, "type": "tool_use", "tool_id": "c1"}],
+            },
+            {"role": "assistant", "content": "hmm"},
+            {"role": "assistant", "content": "B\n\nC"},
+        ]
+        text_only = _assistant([], timestamp=T0_MS)
+        text_only["content"] = "Plain"
+        recorder = _feed(_recorder(), [(1, {"type": "message_end", "message": text_only})])
+        assert recorder.records[0].output_data == [{"role": "assistant", "content": "Plain"}]
+        tool_only = _assistant([{"type": "text", "text": "T"}, {"type": "toolCall", "id": "c2", "name": "ls"}])
+        recorder = _feed(_recorder(), [(1, {"type": "message_end", "message": tool_only})])
+        assert [message["content"] for message in recorder.records[0].output_data] == ["T", "", ""]
+
     @pytest.mark.parametrize("timestamp", [None, T0_MS + 10_000, "soon", True])
     def test_untrusted_timestamp_falls_back_to_the_previous_event(self, timestamp):
         message = _assistant([{"type": "text", "text": "A"}])
@@ -499,8 +529,36 @@ class TestModelCalls:
         recorder = _feed(_recorder(), events)
         inputs = [[message["content"] for message in _input(record)] for record in recorder.records]
         # Call 1 copies 1 reference and call 2 copies 3 (more than the 2 left).
-        assert inputs == [["u0"], ["u1"], ["u2"]]
+        # A truncated input starts at the previous response.
+        assert inputs == [["u0"], ["A", "u1"], ["A", "u2"]]
         assert [record.metadata["input_truncated"] for record in recorder.records] == [False, True, True]
+
+    def test_truncated_input_keeps_the_tool_call_of_a_tool_result(self, monkeypatch):
+        import airedale.harness.pi_spans as pi_spans
+
+        monkeypatch.setattr(pi_spans, "MAX_INPUT_MESSAGE_REFS", 1)
+        call = _assistant([{"type": "toolCall", "id": "c1", "name": "ls", "arguments": {}}], timestamp=T0_MS)
+        result = {
+            "role": "toolResult",
+            "toolCallId": "c1",
+            "toolName": "ls",
+            "content": [{"type": "text", "text": "a"}],
+        }
+        recorder = _feed(
+            _recorder(),
+            [
+                (0, {"type": "message_end", "message": USER}),
+                (1, {"type": "message_end", "message": call}),
+                (2, {"type": "message_end", "message": result}),
+                (3, {"type": "message_end", "message": _assistant([], timestamp=T0_MS + 2)}),
+            ],
+        )
+        second = recorder.records[1]
+        assert second.metadata["input_truncated"] is True
+        assert [message.get("tool_calls", message.get("tool_results")) for message in _input(second)] == [
+            [{"name": "ls", "arguments": {}, "type": "tool_use", "tool_id": "c1"}],
+            [{"name": "ls", "result": "a", "type": "tool_result", "tool_id": "c1"}],
+        ]
 
     def test_other_entries_are_ignored(self):
         recorder = _feed(_recorder(), [(1, {"type": "entry_appended", "entry": {"customType": "other", "data": {}}})])
@@ -553,14 +611,46 @@ class TestTools:
                 (10, _tool_start("a")),
                 (20, _tool_start("b")),
                 (50, _tool_end("a", duration_ms=30)),
-                (60, _tool_end("b", duration_ms=500)),  # cannot end after its end record
+                # Cannot end after its end record: the records were late, so
+                # the span starts earlier and keeps the pi duration.
+                (60, _tool_end("b", duration_ms=500)),
             ],
         )
         a, b = recorder.records
         assert (a.start_ns, a.end_ns) == (_ns(T0_MS + 10), _ns(T0_MS + 40))
-        assert (b.start_ns, b.end_ns) == (_ns(T0_MS + 20), _ns(T0_MS + 60))
+        assert (b.start_ns, b.end_ns) == (_ns(T0_MS - 440), _ns(T0_MS + 60))
         assert a.output_data == "out"
         assert a.metadata["duration_ms"] == 30
+
+    def test_late_records_do_not_start_before_the_model_call_ended(self):
+        call = _assistant([{"type": "toolCall", "id": "a", "name": "bash"}], timestamp=T0_MS)
+        recorder = _feed(
+            _recorder(),
+            [
+                (100, {"type": "message_end", "message": call}),
+                (101, _tool_start("a")),
+                (102, _tool_end("a", duration_ms=500)),
+            ],
+        )
+        llm, tool = recorder.records
+        assert llm.end_ns == _ns(T0_MS + 100)
+        assert (tool.start_ns, tool.end_ns) == (_ns(T0_MS + 100), _ns(T0_MS + 102))
+
+    def test_late_records_use_the_model_call_that_asked_for_the_tool(self):
+        first = _assistant([{"type": "toolCall", "id": "a", "name": "bash"}], timestamp=T0_MS)
+        later = _assistant([], timestamp=T0_MS + 101, durationMs=19)
+        recorder = _feed(
+            _recorder(),
+            [
+                (0, {"type": "message_end", "message": first}),
+                (100, _tool_start("a")),
+                (120, {"type": "message_end", "message": later}),
+                (130, _tool_end("a", duration_ms=100)),
+            ],
+        )
+        tool = next(record for record in recorder.records if record.kind == "tool")
+        # The later model call (it ended at 120) does not limit the tool.
+        assert (tool.start_ns, tool.end_ns) == (_ns(T0_MS + 30), _ns(T0_MS + 130))
 
     def test_error_and_parallel_tools_are_siblings(self):
         recorder = _feed(
@@ -612,7 +702,8 @@ class TestTools:
 
     def test_end_without_start(self):
         recorder = _feed(_recorder(), [(5, _tool_end("x", duration_ms=1))])
-        assert recorder.records[0].start_ns == _ns(T0_MS + 5)
+        # The pi duration is kept.
+        assert recorder.records[0].start_ns == _ns(T0_MS + 4)
         assert recorder.records[0].end_ns == _ns(T0_MS + 5)
 
     def test_compaction_span(self):
@@ -772,7 +863,22 @@ class TestCollectorExtension:
     def test_entries_rebuild_the_requests(self, tmp_path):
         image_user = {"role": "user", "content": [{"type": "image", "data": "A" * 100, "mimeType": "image/png"}]}
         assistant = _assistant(
-            [{"type": "thinking", "thinking": "t", "thinkingSignature": "opaque"}, {"type": "text", "text": "A"}]
+            [
+                {"type": "thinking", "thinking": "t", "thinkingSignature": "opaque"},
+                {"type": "text", "text": "A", "textSignature": "opaque"},
+                # Tool arguments with the names of opaque pi fields are kept.
+                {
+                    "type": "toolCall",
+                    "id": "c",
+                    "name": "ls",
+                    "arguments": {
+                        "details": "d",
+                        "textSignature": "s",
+                        "nested": {"type": "image", "data": "abc", "thinkingSignature": "s"},
+                    },
+                    "thoughtSignature": "opaque",
+                },
+            ]
         )
         result = {"role": "toolResult", "toolCallId": "c", "toolName": "ls", "content": [], "details": {"big": 1}}
         first = [SYSTEM, image_user]
@@ -803,7 +909,13 @@ class TestCollectorExtension:
         assert request_1["appended"][1]["content"][0] == {"type": "image", "mimeType": "image/png", "bytes": 100}
         assert (response_1["seq"], response_1["status"], response_1["requestId"]) == (1, 200, "req_9")
         assert (request_2["seq"], request_2["prefix"], request_2["count"]) == (2, 2, 4)
-        assert "thinkingSignature" not in json.dumps(request_2)
+        assert "opaque" not in json.dumps(request_2)
+        assert "opaque" not in json.dumps(request_1)
+        assert request_2["appended"][0]["content"][2]["arguments"] == {
+            "details": "d",
+            "textSignature": "s",
+            "nested": {"type": "image", "data": "abc", "thinkingSignature": "s"},
+        }
         assert "details" not in request_2["appended"][1]
 
         # The recorder rebuilds the same request messages from the entries.
@@ -819,7 +931,7 @@ class TestCollectorExtension:
         recorder.feed({"type": "message_end", "message": _assistant([])}, received_ns=_ns(now + 1))
         assert [record.metadata["input_source"] for record in recorder.records] == ["extension", "extension"]
         roles = [message["role"] for message in _input(recorder.records[1])]
-        # The assistant message has a thinking block and a text block.
+        # The assistant message has a thinking block, then a text block with a tool call.
         assert roles == ["system", "user", "assistant", "assistant", "user"]
         assert recorder.records[0].metadata["request_id"] == "req_9"
 
