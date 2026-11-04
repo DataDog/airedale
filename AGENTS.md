@@ -267,7 +267,10 @@ Notes:
     extensions, `mcp.json`, `models.json`, skills, `AGENTS.md`, `auth.json`)
     from its agent dir (default `~/.pi/agent`). `PiRunner` **always** sets
     `PI_CODING_AGENT_DIR` to a fresh private temp dir **outside** `cwd`
-    (removed after the run) that holds only the generated `settings.json`,
+    (removed after the run; a temp parent inside `cwd`, for example from
+    `TMPDIR`/`TEMP`/`TMP`, also through a symlink or another letter case, is
+    skipped for the system
+    temp dirs or the home dir, else the run fails) that holds only the generated `settings.json`,
     `models.json`, `mcp.json`, the appended system prompt and — only without
     gateway/env auth — a **copy** of the operator's pi `auth.json`. Pi runs with
     `--no-session`, `--no-skills` (blocks `~/.agents/skills`; scenario skills and
@@ -338,7 +341,11 @@ Resolution rules (`gateway.py`):
   model details (API, context window, output limit, cost), so no hardcoded model
   list is needed; `pi_models` covers models outside the catalog. Values are
   escaped (`$$` / `$!`) because pi interpolates `$NAME` and runs `!command`. The
-  token is written to that private file, not to the pi env. The runner fails
+  token is written to that private file, not to the pi env, and the
+  `api_key_env` variables of all gateway providers are removed from the pi env
+  (the native key variable of the evaluated provider, `ANTHROPIC_API_KEY` or
+  `OPENAI_API_KEY`, stays when there is no `base_url`: pi reads it to
+  authenticate). The runner fails
   the run when pi reports a provider/model other than the requested one.
 
 ---

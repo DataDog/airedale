@@ -322,7 +322,8 @@ Notes:
   (settings, packages, extensions, MCP servers, models, skills, `AGENTS.md`,
   credentials) from its agent directory (default `~/.pi/agent`). The harness
   **always** points `PI_CODING_AGENT_DIR` at a fresh private temp directory
-  **outside** the workspace (deleted after the run), so none of the operator's
+  **outside** the workspace (deleted after the run; also when `TMPDIR`,
+  `TEMP` or `TMP` points into the workspace), so none of the operator's
   pi config loads. It holds only the generated `models.json` (gateway),
   `mcp.json` (scenario MCP servers) and, when no gateway credential or provider
   API-key env var is set, a **copy** of the operator's pi `auth.json`. Pi also
@@ -346,7 +347,10 @@ Notes:
   variables are not filtered: a Datadog key stored under another name (for
   example in `OTEL_EXPORTER_OTLP_HEADERS`) still reaches pi. This is not a
   sandbox (repo code runs as the same OS user). A gateway `api_key_env`
-  credential still goes to pi (in its private `models.json`).
+  credential goes to pi only in its private `models.json`: the `api_key_env`
+  variables of all gateway providers are removed from the pi environment (except the native key variable of the
+  evaluated provider, `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`, without a gateway
+  `base_url`: pi reads it to authenticate).
   **Compatibility:** a pi stdio MCP server that used an inherited Datadog
   variable (for example `DD_API_KEY`) does not get it any more. There is no
   safe way to give it one at this time: `$NAME` in an MCP `env` value is not

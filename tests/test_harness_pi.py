@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 import textwrap
 from pathlib import Path
@@ -342,7 +343,7 @@ class TestRunnerConfig:
         monkeypatch.setenv("PI_SESSION_ID", "parent-session")
         monkeypatch.setenv("PI_CODING_AGENT_DIR", "/operator/agent")
         monkeypatch.setenv("KEEP_ME", "1")
-        env = PiRunner(cwd=tmp_path)._env(tmp_path / "agent")
+        env = PiRunner(cwd=tmp_path)._env(tmp_path / "agent", model=MODEL)
         assert env["PI_CODING_AGENT_DIR"] == str(tmp_path / "agent")
         assert "PI_SESSION_ID" not in env
         assert env["PI_OFFLINE"] == "1"
@@ -376,7 +377,7 @@ class TestRunnerConfig:
     def test_env_drops_datadog_variables(self, tmp_path, monkeypatch, name):
         secret = f"operator-value-{name}"
         monkeypatch.setenv(name, secret)
-        env = PiRunner(cwd=tmp_path)._env(tmp_path / "agent")
+        env = PiRunner(cwd=tmp_path)._env(tmp_path / "agent", model=MODEL)
         assert name not in env
         assert secret not in env.values()
 
@@ -387,7 +388,7 @@ class TestRunnerConfig:
         monkeypatch.setenv("DD_SITE", "datadoghq.com")
         monkeypatch.setenv("dd_site_other", "x")
         monkeypatch.setenv("DD_API_KEY", "operator-secret")
-        env = PiRunner(cwd=tmp_path)._env(tmp_path / "agent")
+        env = PiRunner(cwd=tmp_path)._env(tmp_path / "agent", model=MODEL)
         assert env["DD_SITE"] == "datadoghq.com"
         assert "DD_API_KEY" not in env
         assert "dd_site_other" not in env
@@ -410,9 +411,211 @@ class TestRunnerConfig:
         }
         for name, value in keep.items():
             monkeypatch.setenv(name, value)
-        env = PiRunner(cwd=tmp_path)._env(tmp_path / "agent")
+        env = PiRunner(cwd=tmp_path)._env(tmp_path / "agent", model=MODEL)
         for name, value in keep.items():
             assert env[name] == value
+
+    @pytest.mark.parametrize("token_kind", ["api_key", "bearer"])
+    def test_env_drops_gateway_api_key_env(self, tmp_path, monkeypatch, token_kind):
+        # The gateway key goes to pi in models.json only, not in its environment.
+        monkeypatch.setenv("MY_GATEWAY_TOKEN", "gateway-secret")
+        monkeypatch.setenv("KEEP_ME", "1")
+        runner = PiRunner(
+            cwd=tmp_path,
+            gateway_base_url="https://gw",
+            gateway_api_key="gateway-secret" if token_kind == "api_key" else None,
+            gateway_bearer_token="helper-token" if token_kind == "bearer" else None,
+            gateway_api_key_env="MY_GATEWAY_TOKEN",
+        )
+        env = runner._env(tmp_path / "agent", model=MODEL)
+        assert "MY_GATEWAY_TOKEN" not in env
+        assert "gateway-secret" not in env.values()
+        assert env["KEEP_ME"] == "1"
+
+    def test_env_drops_gateway_native_key_env_when_in_models_json(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "gateway-secret")
+        runner = PiRunner(
+            cwd=tmp_path,
+            gateway_base_url="https://gw",
+            gateway_api_key="gateway-secret",
+            gateway_api_key_env="ANTHROPIC_API_KEY",
+        )
+        assert "ANTHROPIC_API_KEY" not in runner._env(tmp_path / "agent", model=MODEL)
+
+    def test_env_drops_custom_key_env_without_gateway_base_url(self, tmp_path, monkeypatch):
+        # Pi does not read a custom variable, so it is removed also without a base URL.
+        monkeypatch.setenv("MY_GATEWAY_TOKEN", "gateway-secret")
+        runner = PiRunner(cwd=tmp_path, gateway_api_key="gateway-secret", gateway_api_key_env="MY_GATEWAY_TOKEN")
+        assert "MY_GATEWAY_TOKEN" not in runner._env(tmp_path / "agent", model=MODEL)
+
+    def test_env_drops_other_gateway_provider_key_envs(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("OTHER_GATEWAY_TOKEN", "other-secret")
+        monkeypatch.setenv("OPENAI_API_KEY", "openai-gateway-secret")
+        runner = PiRunner(
+            cwd=tmp_path,
+            gateway_base_url="https://gw",
+            gateway_api_key="k",
+            other_gateway_api_key_envs=["OTHER_GATEWAY_TOKEN", "OPENAI_API_KEY"],
+        )
+        env = runner._env(tmp_path / "agent", model=MODEL)
+        assert "OTHER_GATEWAY_TOKEN" not in env
+        assert "OPENAI_API_KEY" not in env
+
+    def test_env_without_models_json_token_keeps_only_the_evaluated_native_key(self, tmp_path, monkeypatch):
+        # No base URL: pi can need ANTHROPIC_API_KEY (MODEL is an anthropic
+        # model) to authenticate. The OpenAI gateway key is not needed.
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "openai-gateway-key")
+        monkeypatch.setenv("OTHER_GATEWAY_TOKEN", "other-secret")
+        runner = PiRunner(
+            cwd=tmp_path, other_gateway_api_key_envs=["OPENAI_API_KEY", "OTHER_GATEWAY_TOKEN", "ANTHROPIC_API_KEY"]
+        )
+        env = runner._env(tmp_path / "agent", model=MODEL)
+        assert env["ANTHROPIC_API_KEY"] == "anthropic-key"
+        assert "OPENAI_API_KEY" not in env
+        assert "OTHER_GATEWAY_TOKEN" not in env
+
+    def test_native_key_exception_ignores_case_on_windows(self, tmp_path, monkeypatch):
+        import airedale.harness.pi as pi_module
+
+        runner = PiRunner(cwd=tmp_path, gateway_api_key="k", gateway_api_key_env="anthropic_api_key")
+        with monkeypatch.context() as patch:
+            patch.setattr(pi_module.os, "name", "nt")
+            dropped_on_windows = runner._dropped_gateway_envs("anthropic")
+        with monkeypatch.context() as patch:
+            patch.setattr(pi_module.os, "name", "posix")
+            dropped_on_posix = runner._dropped_gateway_envs("anthropic")
+        assert dropped_on_windows == []
+        # On POSIX, names are case-sensitive: "anthropic_api_key" is another variable.
+        assert dropped_on_posix == ["anthropic_api_key"]
+
+    def test_env_keeps_native_key_env_that_pi_needs(self, tmp_path, monkeypatch):
+        # No base URL: models.json has no key, and pi reads ANTHROPIC_API_KEY itself.
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "provider-key")
+        runner = PiRunner(cwd=tmp_path, gateway_api_key="provider-key", gateway_api_key_env="ANTHROPIC_API_KEY")
+        assert not runner._models_config(MODEL)
+        assert runner._env(tmp_path / "agent", model=MODEL)["ANTHROPIC_API_KEY"] == "provider-key"
+
+    def test_private_agent_dir_skips_parents_inside_workspace(self, tmp_path, monkeypatch):
+        import airedale.harness.pi as pi_module
+
+        workspace = tmp_path / "ws"
+        (workspace / "tmp").mkdir(parents=True)
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        monkeypatch.setattr(
+            pi_module,
+            "_agent_dir_parent_candidates",
+            lambda: [workspace / "tmp", workspace, outside / "missing", outside],
+        )
+        agent_dir = pi_module._make_private_agent_dir(workspace)
+        try:
+            assert agent_dir.parent.resolve() == outside.resolve()
+            assert agent_dir.stat().st_mode & 0o777 == 0o700
+        finally:
+            agent_dir.rmdir()
+        assert list(workspace.rglob("*")) == [workspace / "tmp"]
+
+    def test_private_agent_dir_detects_workspace_with_other_letter_case(self, tmp_path, monkeypatch):
+        import airedale.harness.pi as pi_module
+
+        workspace = tmp_path / "Workspace"
+        (workspace / "tmp").mkdir(parents=True)
+        other_case = tmp_path / "wORKSPACE" / "tmp"
+        if not other_case.exists():
+            pytest.skip("the file system is case-sensitive")
+        assert pi_module._is_inside(other_case, workspace)
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        monkeypatch.setattr(pi_module, "_agent_dir_parent_candidates", lambda: [other_case, outside])
+        agent_dir = pi_module._make_private_agent_dir(workspace)
+        try:
+            assert agent_dir.parent.resolve() == outside.resolve()
+        finally:
+            agent_dir.rmdir()
+        assert list((workspace / "tmp").iterdir()) == []
+
+    def test_is_inside_uses_file_identity(self, tmp_path):
+        from airedale.harness.pi import _is_inside
+
+        workspace = tmp_path / "ws"
+        (workspace / "a" / "b").mkdir(parents=True)
+        (tmp_path / "outside").mkdir()
+        link = tmp_path / "link"
+        link.symlink_to(workspace / "a", target_is_directory=True)
+        assert _is_inside(workspace, workspace)
+        assert _is_inside(workspace / "a" / "b", workspace)
+        assert _is_inside(link / "b", workspace)
+        assert not _is_inside(tmp_path / "outside", workspace)
+        assert not _is_inside(tmp_path, workspace)
+
+    def test_is_inside_detects_an_alias_by_file_identity(self, tmp_path, monkeypatch):
+        # The alias has another name than the workspace but the same device and
+        # inode (a case variant, a hard link, ...). Works on every file system.
+        from airedale.harness.pi import _is_inside
+
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        alias = tmp_path / "alias"
+        (alias / "tmp").mkdir(parents=True)
+        real_alias = Path(os.path.realpath(alias))
+        workspace_stat = workspace.stat()
+        real_stat = Path.stat
+
+        def fake_stat(self, *args, **kwargs):
+            if self == real_alias:
+                return workspace_stat
+            return real_stat(self, *args, **kwargs)
+
+        assert not _is_inside(alias / "tmp", workspace)
+        monkeypatch.setattr(Path, "stat", fake_stat)
+        assert _is_inside(alias / "tmp", workspace)
+
+    def test_is_inside_is_true_when_a_parent_cannot_be_examined(self, tmp_path, monkeypatch):
+        from airedale.harness.pi import _is_inside
+
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        candidate = tmp_path / "outside"
+        candidate.mkdir()
+        real_candidate = Path(os.path.realpath(candidate))
+        real_stat = Path.stat
+
+        def failing_stat(self, *args, **kwargs):
+            if self == real_candidate:
+                raise PermissionError("denied")
+            return real_stat(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "stat", failing_stat)
+        assert _is_inside(candidate, workspace)
+
+    def test_private_agent_dir_raises_when_every_parent_is_inside_workspace(self, tmp_path, monkeypatch):
+        import airedale.harness.pi as pi_module
+
+        workspace = tmp_path / "ws"
+        (workspace / "tmp").mkdir(parents=True)
+        monkeypatch.setattr(pi_module, "_agent_dir_parent_candidates", lambda: [workspace / "tmp", workspace])
+        with pytest.raises(RuntimeError, match="outside the workspace"):
+            pi_module._make_private_agent_dir(workspace)
+        assert list(workspace.rglob("*")) == [workspace / "tmp"]
+
+    def test_private_agent_dir_rejects_a_dir_that_ends_up_inside_workspace(self, tmp_path, monkeypatch):
+        # The parent check passes, but the created directory is in the workspace
+        # (the parent changed between the check and mkdtemp): it is removed.
+        import airedale.harness.pi as pi_module
+
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        real_mkdtemp = pi_module.tempfile.mkdtemp
+        monkeypatch.setattr(pi_module, "_agent_dir_parent_candidates", lambda: [outside])
+        monkeypatch.setattr(
+            pi_module.tempfile, "mkdtemp", lambda **kw: real_mkdtemp(prefix=kw["prefix"], dir=workspace)
+        )
+        with pytest.raises(RuntimeError):
+            pi_module._make_private_agent_dir(workspace)
+        assert list(workspace.iterdir()) == []
 
     def test_auth_json_copied_only_without_env_auth(self, tmp_path, monkeypatch):
         operator = tmp_path / "operator"
@@ -491,6 +694,7 @@ def test_create_runner_selects_pi(tmp_path):
     runner = create_runner(ModelSpec.parse("openai/gpt-5.5"), scenario=scenario, gateway=gateway, cwd=str(tmp_path))
     assert isinstance(runner, PiRunner)
     assert runner.gateway_base_url == "https://gw/v1"
+    assert runner.gateway_api_key_env == "GW_KEY"
     assert runner.pi_models == [{"id": "m"}]
     assert runner.max_turns == 5
 
@@ -511,6 +715,8 @@ FAKE_PI = textwrap.dedent(
     with open(record, "w") as handle:
         json.dump({"argv": sys.argv[1:], "agent_dir": agent_dir, "files": files, "stdin": stdin,
                    "session": os.environ.get("PI_SESSION_ID"), "cwd": os.getcwd(),
+                   "env_names": sorted(os.environ),
+                   "secret_in_env": any("gateway-secret" in v for v in os.environ.values()),
                    "dd_env": {k: v for k, v in os.environ.items() if k.upper().startswith(("DD_", "DATADOG_", "_DD_"))}},
                   handle)
     with open(record + ".runs", "a") as handle:
@@ -610,6 +816,65 @@ class TestSubprocess:
         assert not Path(seen["agent_dir"]).exists()
         assert not Path(seen["agent_dir"]).resolve().is_relative_to(cwd.resolve())
         assert list(cwd.iterdir()) == []
+
+    def test_gateway_api_key_env_does_not_reach_pi(self, tmp_path, fake_pi, monkeypatch):
+        command, record = fake_pi(_events_tool_run())
+        monkeypatch.setenv("MY_GATEWAY_TOKEN", "gateway-secret")
+        # The key of the other gateway provider does not reach pi either.
+        monkeypatch.setenv("OTHER_GATEWAY_TOKEN", "other-gateway-secret")
+        gateway = GatewayConfig(
+            providers={
+                "anthropic": ProviderGatewayConfig(
+                    provider="anthropic", base_url="https://gw", api_key_env="MY_GATEWAY_TOKEN"
+                ),
+                "openai": ProviderGatewayConfig(
+                    provider="openai", base_url="https://gw2", api_key_env="OTHER_GATEWAY_TOKEN"
+                ),
+            }
+        )
+        scenario = ScenarioConfig(name="s", harness=HARNESS_PI)
+        runner = create_runner(MODEL, scenario=scenario, gateway=gateway, cwd=str(tmp_path))
+        assert isinstance(runner, PiRunner)
+        runner.pi_command = command
+        result = _run(runner)
+        assert result.error is None
+
+        seen = json.loads(record.read_text())
+        assert "MY_GATEWAY_TOKEN" not in seen["env_names"]
+        assert "OTHER_GATEWAY_TOKEN" not in seen["env_names"]
+        assert seen["secret_in_env"] is False
+        # Pi still gets the key, in its private models.json.
+        assert json.loads(seen["files"]["models.json"])["providers"]["anthropic"]["apiKey"] == "gateway-secret"
+
+    @pytest.mark.parametrize("variable", ["TMPDIR", "TEMP", "TMP"])
+    @pytest.mark.parametrize("through_symlink", [False, True])
+    def test_agent_dir_outside_workspace_when_tmpdir_is_inside(
+        self, tmp_path, fake_pi, monkeypatch, variable, through_symlink
+    ):
+        import tempfile
+
+        command, record = fake_pi(_events_tool_run())
+        cwd = tmp_path / "cwd"
+        (cwd / "tmp").mkdir(parents=True)
+        temp_value = cwd / "tmp"
+        if through_symlink:
+            # A link outside the workspace that points into it.
+            temp_value = tmp_path / "link-to-workspace-tmp"
+            temp_value.symlink_to(cwd / "tmp", target_is_directory=True)
+        for name in ("TMPDIR", "TEMP", "TMP"):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv(variable, str(temp_value))
+        # tempfile keeps the directory it found first: make it read the variables again.
+        monkeypatch.setattr(tempfile, "tempdir", None)
+        assert Path(tempfile.gettempdir()).resolve() == (cwd / "tmp").resolve()
+
+        result = _run(PiRunner(cwd=cwd, pi_command=command, gateway_base_url="https://gw", gateway_api_key="k"))
+        assert result.error is None
+        seen = json.loads(record.read_text())
+        assert not Path(seen["agent_dir"]).resolve().is_relative_to(cwd.resolve())
+        assert "models.json" in seen["files"]
+        assert not Path(seen["agent_dir"]).exists()
+        assert list((cwd / "tmp").iterdir()) == []
 
     def test_datadog_variables_do_not_reach_pi(self, tmp_path, fake_pi):
         command, record = fake_pi(

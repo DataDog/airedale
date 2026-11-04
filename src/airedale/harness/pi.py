@@ -68,7 +68,9 @@ code runs as the same OS user, so only evaluate trusted repositories. Only
 the variables above are removed: a Datadog key stored under another name
 (for example in ``OTEL_EXPORTER_OTLP_HEADERS``) still reaches pi. A
 gateway credential that ``gateway.toml`` names explicitly (``api_key_env``)
-still goes to pi in ``models.json``. A stdio MCP server that
+goes to pi in ``models.json`` only: the variable with that name, and the
+``api_key_env`` variables of the other gateway providers, are removed from the
+pi environment (see ``PiRunner._dropped_gateway_envs``). A stdio MCP server that
 used an inherited Datadog variable (for example ``DD_API_KEY``) does not get it any more.
 
 Gateway and model details
@@ -225,6 +227,8 @@ class PiRunner(DecoratorSpanAgentRunner):
         gateway_headers: Mapping[str, str] | None = None,
         gateway_bearer_token: str | None = None,
         gateway_api_key: str | None = None,
+        gateway_api_key_env: str | None = None,
+        other_gateway_api_key_envs: Iterable[str] = (),
         pi_models: Iterable[Mapping[str, Any]] = (),
         pi_command: Iterable[str] | None = None,
     ) -> None:
@@ -240,6 +244,12 @@ class PiRunner(DecoratorSpanAgentRunner):
         self.gateway_headers = dict(gateway_headers or {})
         self.gateway_bearer_token = gateway_bearer_token
         self.gateway_api_key = gateway_api_key
+        #: Name of the variable that holds ``gateway_api_key`` (``api_key_env``
+        #: in ``gateway.toml``). It does not reach pi: see ``_dropped_gateway_envs``.
+        self.gateway_api_key_env = gateway_api_key_env
+        #: ``api_key_env`` names of the other gateway providers. Pi does not use
+        #: them, so they do not reach pi either.
+        self.other_gateway_api_key_envs = list(other_gateway_api_key_envs)
         self.pi_models = [dict(model) for model in pi_models]
         self.pi_command = list(pi_command) if pi_command is not None else _default_pi_command()
 
@@ -304,7 +314,7 @@ class PiRunner(DecoratorSpanAgentRunner):
     ) -> AgentRunResult:
         self._check_project_mcp_collisions()
         skill_dirs = pi_skill_dirs(self.skills, self.cwd)
-        agent_dir = Path(tempfile.mkdtemp(prefix="airedale-pi-agent-"))
+        agent_dir = _make_private_agent_dir(Path(self.cwd))
         try:
             system_prompt_path = self._write_agent_dir(
                 agent_dir, model=model, system_prompt=system_prompt, trace_headers=trace_headers
@@ -321,7 +331,7 @@ class PiRunner(DecoratorSpanAgentRunner):
                 returncode, stderr_tail = await self._run_process(
                     command,
                     user_prompt=user_prompt,
-                    env=self._env(agent_dir),
+                    env=self._env(agent_dir, model=model),
                     collector=collector,
                     model=model,
                     progress=progress,
@@ -375,7 +385,7 @@ class PiRunner(DecoratorSpanAgentRunner):
             entry["baseUrl"] = self.gateway_base_url
             if self.gateway_headers:
                 entry["headers"] = {name: pi_literal(value) for name, value in self.gateway_headers.items()}
-            token = self.gateway_bearer_token or self.gateway_api_key
+            token = self._models_json_token()
             if token:
                 entry["apiKey"] = pi_literal(token)
                 if self.gateway_bearer_token:
@@ -429,17 +439,44 @@ class PiRunner(DecoratorSpanAgentRunner):
             return []
         return [str(name) for name in servers]
 
+    def _models_json_token(self) -> str | None:
+        """Return the gateway token that ``models.json`` holds (``None`` when it holds no token)."""
+        if not self.gateway_base_url:
+            return None
+        return self.gateway_bearer_token or self.gateway_api_key
+
+    def _dropped_gateway_envs(self, provider: str) -> list[str]:
+        """Return the ``api_key_env`` variable names that must not reach pi.
+
+        The gateway key goes to pi in the private ``models.json``. The variable
+        that holds it would give the same key to pi, its ``bash`` tool, stdio
+        MCP servers and repo extensions, so it is removed. The ``api_key_env``
+        variables of the other gateway providers are removed too: pi does not
+        use them. One exception: when ``models.json`` holds no token (no
+        gateway ``base_url``), the key variable that pi reads itself for
+        ``provider`` (the provider of the evaluated model, for example
+        ``ANTHROPIC_API_KEY``) stays, because pi can need it to authenticate.
+        """
+        names = [name for name in (self.gateway_api_key_env, *self.other_gateway_api_key_envs) if name]
+        native = PI_PROVIDER_API_KEY_ENVS.get(provider)
+        if native and self._models_json_token() is None:
+            names = [name for name in names if not _same_env_name(name, native)]
+        return names
+
     def _has_env_auth(self, model: ModelSpec) -> bool:
-        if self.gateway_base_url and (self.gateway_bearer_token or self.gateway_api_key):
+        if self._models_json_token():
             return True
         env_name = PI_PROVIDER_API_KEY_ENVS.get(model.provider)
         return bool(env_name and os.environ.get(env_name))
 
-    def _env(self, agent_dir: Path) -> dict[str, str]:
+    def _env(self, agent_dir: Path, *, model: ModelSpec) -> dict[str, str]:
+        dropped_gateway_envs = self._dropped_gateway_envs(model.provider)
         env = {
             name: value
             for name, value in os.environ.items()
-            if name not in PI_INHERITED_ENV_TO_DROP and not _is_blocked_datadog_env(name)
+            if name not in PI_INHERITED_ENV_TO_DROP
+            and not _is_blocked_datadog_env(name)
+            and not any(_same_env_name(name, dropped) for dropped in dropped_gateway_envs)
         }
         env["PI_CODING_AGENT_DIR"] = str(agent_dir)
         env["PI_OFFLINE"] = "1"
@@ -670,6 +707,99 @@ def _is_blocked_datadog_env(name: str) -> bool:
     """Return True when a Datadog variable must not reach pi (see ``PI_DATADOG_ENV_ALLOWLIST``)."""
     upper = name.upper()
     return upper.startswith(DATADOG_ENV_PREFIXES) and upper not in PI_DATADOG_ENV_ALLOWLIST
+
+
+def _same_env_name(name: str, other: str) -> bool:
+    """Return True when ``name`` and ``other`` are the same variable name.
+
+    On Windows, variable names are not case-sensitive.
+    """
+    if os.name == "nt":
+        return name.upper() == other.upper()
+    return name == other
+
+
+def _agent_dir_parent_candidates() -> list[Path]:
+    """Return the parent directories to try for the private agent dir, in order.
+
+    The first one is the process temporary directory (``TMPDIR``, ``TEMP``,
+    ``TMP``, then the platform default). The others are the platform default
+    temporary directories, which do not depend on these variables, then the
+    home directory as a last option.
+    """
+    candidates = [Path(tempfile.gettempdir())]
+    if os.name == "nt":
+        system_root = os.environ.get("SYSTEMROOT")
+        if system_root:
+            candidates.append(Path(system_root) / "Temp")
+        candidates.extend([Path(r"C:\TEMP"), Path(r"C:\TMP")])
+    else:
+        candidates.extend([Path("/tmp"), Path("/var/tmp"), Path("/usr/tmp")])
+    with contextlib.suppress(RuntimeError):  # no home directory is known
+        candidates.append(Path.home())
+    return candidates
+
+
+def _is_inside(path: Path, root: Path) -> bool:
+    """Return True when ``path`` is ``root`` or inside it.
+
+    Symbolic links are resolved. The check also compares the file identity
+    (device and inode) of ``root`` with ``path`` and each of its parents, so it
+    is also correct on a case-insensitive file system (``/ws`` and ``/WS`` are
+    the same directory). It cannot find a mount point outside ``root`` that
+    shows a directory inside ``root`` (for example a bind mount of
+    ``root/tmp``). When a parent cannot be examined, the result is True (the
+    path is not used).
+    """
+    real_path = Path(os.path.realpath(path))
+    real_root = Path(os.path.realpath(root))
+    if real_path.is_relative_to(real_root):
+        return True
+    try:
+        root_stat = real_root.stat()
+    except OSError:
+        # No workspace on disk: nothing can be inside it.
+        return False
+    for ancestor in (real_path, *real_path.parents):
+        try:
+            if os.path.samestat(ancestor.stat(), root_stat):
+                return True
+        except OSError:
+            return True
+    return False
+
+
+def _make_private_agent_dir(workspace: Path) -> Path:
+    """Create the private pi agent dir (mode ``0700``) outside ``workspace``.
+
+    The agent dir holds ``models.json`` and can hold a copy of ``auth.json``
+    (credentials). The agent works in ``workspace``, so the agent dir must not
+    be in it. ``tempfile.mkdtemp()`` alone is not sufficient: ``TMPDIR``,
+    ``TEMP`` or ``TMP`` can point into the workspace (directly or through a
+    symbolic link). A parent inside the workspace is skipped, and the created
+    directory is checked again after it exists.
+
+    Raises:
+        RuntimeError: No candidate parent is outside the workspace and writable.
+    """
+    for parent in _agent_dir_parent_candidates():
+        try:
+            if not parent.is_dir() or _is_inside(parent, workspace):
+                continue
+            agent_dir = Path(tempfile.mkdtemp(prefix="airedale-pi-agent-", dir=os.path.realpath(parent)))
+        except OSError:
+            continue
+        if _is_inside(agent_dir, workspace):
+            # The parent changed after the check (for example a symbolic link
+            # replaced). Do not use it.
+            shutil.rmtree(agent_dir, ignore_errors=True)
+            continue
+        return agent_dir
+    raise RuntimeError(
+        f"Cannot create the private pi agent directory outside the workspace {workspace}: every candidate "
+        "parent directory (TMPDIR/TEMP/TMP, the system temporary directories, the home directory) is inside "
+        "the workspace or is not writable."
+    )
 
 
 def _default_pi_command() -> list[str]:

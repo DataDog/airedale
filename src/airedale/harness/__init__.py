@@ -86,6 +86,12 @@ def create_runner(
             gateway_headers=resolved.headers,
             gateway_bearer_token=resolved.bearer_token,
             gateway_api_key=resolved.api_key,
+            gateway_api_key_env=provider_config.api_key_env if provider_config is not None else None,
+            other_gateway_api_key_envs=[
+                config.api_key_env
+                for name, config in (gateway.providers.items() if gateway is not None else ())
+                if name != model.provider and config.api_key_env
+            ],
             pi_models=provider_config.pi_models if provider_config is not None else (),
         )
 
