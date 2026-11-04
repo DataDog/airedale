@@ -20,6 +20,8 @@ from ddtrace.llmobs import LLMObs
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+    from ddtrace.llmobs._experiment import DatasetRecordNew
+
     from airedale.config.experiment import TaskConfig
 
 
@@ -51,7 +53,14 @@ def task_to_record(task: TaskConfig) -> dict[str, Any]:
 def get_or_create_dataset(tasks: Iterable[TaskConfig], *, dataset_name: str, project: str) -> Any:
     """Pull an existing dataset by name or create it, then sync it to ``tasks``."""
     task_list = list(tasks)
-    records = [task_to_record(task) for task in task_list]
+    records: list[DatasetRecordNew] = [
+        {
+            "input_data": record["input_data"],
+            "expected_output": record["expected_output"],
+            "metadata": record["metadata"],
+        }
+        for record in (task_to_record(task) for task in task_list)
+    ]
     try:
         dataset = LLMObs.pull_dataset(dataset_name, project_name=project)
     except Exception:

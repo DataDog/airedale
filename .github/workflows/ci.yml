@@ -41,6 +41,11 @@ jobs:
       - name: Lint
         run: uv run ruff check --no-fix .
 
+      # Checks every call against the pinned SDK types, so a dependency bump
+      # that removes or renames a parameter fails here (see issue #30).
+      - name: Type check
+        run: uv run pyright
+
   test:
     name: test (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
