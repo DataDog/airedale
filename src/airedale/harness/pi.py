@@ -157,8 +157,11 @@ PI_FRAMEWORK = "pi"
 PI_COMMAND_ENV = "AIREDALE_PI_COMMAND"
 DEFAULT_PI_COMMAND = "pi"
 #: Every built-in pi tool. Used when a scenario allows all built-in tools
-#: (``allowed_builtin_tools`` omitted). ``powershell`` (Windows only) is left out.
+#: (``allowed_builtin_tools`` omitted). On Windows, ``PI_WINDOWS_BUILTIN_TOOLS``
+#: is added.
 PI_BUILTIN_TOOLS: tuple[str, ...] = ("read", "bash", "edit", "write", "grep", "find", "ls")
+#: Built-in pi tools that exist on Windows only.
+PI_WINDOWS_BUILTIN_TOOLS: tuple[str, ...] = ("powershell",)
 #: Claude Code built-in tool names mapped to the pi tool with the same job, so
 #: one ``allowed_builtin_tools`` list (for example in ``[defaults]``) works for
 #: both harnesses. Other names are passed to pi unchanged.
@@ -172,6 +175,9 @@ PI_TOOL_ALIASES: dict[str, str] = {
     "Glob": "find",
     "LS": "ls",
 }
+#: MCP resource tools of pi. They count as MCP tools, but ``mcp__*`` does not
+#: match them, so they are named in ``--tools`` when MCP servers are present.
+PI_MCP_RESOURCE_TOOLS: tuple[str, ...] = ("list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource")
 #: ``--tools`` pattern that matches every MCP tool.
 PI_MCP_TOOLS_PATTERN = "mcp__*"
 PI_THINKING_LEVELS: tuple[str, ...] = ("off", "minimal", "low", "medium", "high", "xhigh", "max")
@@ -258,7 +264,7 @@ class PiRunner(DecoratorSpanAgentRunner):
 
     def _effective_builtin_tools(self) -> tuple[str, ...]:
         if self.allowed_builtin_tools is None:
-            return PI_BUILTIN_TOOLS
+            return (*PI_BUILTIN_TOOLS, *PI_WINDOWS_BUILTIN_TOOLS) if _is_windows() else PI_BUILTIN_TOOLS
         return tuple(dict.fromkeys(PI_TOOL_ALIASES.get(name, name) for name in self.allowed_builtin_tools))
 
     async def _run_model_calls(
@@ -564,7 +570,7 @@ class PiRunner(DecoratorSpanAgentRunner):
         return command
 
     def _tool_entries(self) -> list[str]:
-        """Return the ``--tools`` allow-list: built-in tools, then ``mcp__*``.
+        """Return the ``--tools`` allow-list: built-in tools, then the MCP tools.
 
         Plain names replace pi's default tool set. Pi declares a ``direct`` MCP
         tool only when a ``--tools`` entry names or matches it. ``mcp__*``
@@ -575,10 +581,20 @@ class PiRunner(DecoratorSpanAgentRunner):
         exposure the repo sets; for ``codemode`` exposure, the scenario must
         allow the ``codemode`` tool in ``allowed_builtin_tools``. It is never
         added implicitly, as it can call other models.
+
+        A ``mcp__`` entry makes ``--tools`` filter the MCP tools, and the MCP
+        resource tools (``PI_MCP_RESOURCE_TOOLS``) do not match ``mcp__*``: they
+        are named, so that the model can read the resources of the servers.
+        Pi adds them only when a server has resources, and only for servers
+        that are not ``hidden``: a scenario server with a ``tool_names``
+        allow-list is ``hidden`` (only the listed tools are ``direct``), so its
+        resources stay unavailable, as everything that the list does not name.
+        The LLMObs tool definitions do not list the resource tools: the runner
+        does not know if pi adds them.
         """
         entries = list(self._effective_builtin_tools())
         if self.mcp_servers or self._project_mcp_server_names():
-            entries.append(PI_MCP_TOOLS_PATTERN)
+            entries.extend([PI_MCP_TOOLS_PATTERN, *PI_MCP_RESOURCE_TOOLS])
         return list(dict.fromkeys(entries))
 
     # ------------------------------------------------------------------ #

@@ -469,7 +469,11 @@ class TestRunnerConfig:
         assert command[command.index("--append-system-prompt") + 1] == "/p.md"
         # `mcp__*` matches pi's real MCP tool names (hashed when long or
         # colliding); `toolExposure` in mcp.json enforces `tool_names`.
-        assert command[command.index("--tools") + 1] == "read,mcp__*"
+        # The MCP resource tools do not match `mcp__*`: they are named.
+        assert (
+            command[command.index("--tools") + 1]
+            == "read,mcp__*,list_mcp_resources,list_mcp_resource_templates,read_mcp_resource"
+        )
         # The prompt is never on the command line (pi reads `@path` args as files).
         assert "--" not in command
 
@@ -477,11 +481,18 @@ class TestRunnerConfig:
         runner = PiRunner(cwd=tmp_path, allowed_builtin_tools=["Read", "Grep", "Glob", "Edit", "MultiEdit", "custom"])
         assert runner._effective_builtin_tools() == ("read", "grep", "find", "edit", "custom")
 
-    def test_command_all_builtins_when_omitted(self, tmp_path):
+    @pytest.mark.parametrize(
+        ("windows", "expected"),
+        [(False, ",".join(PI_BUILTIN_TOOLS)), (True, ",".join([*PI_BUILTIN_TOOLS, "powershell"]))],
+    )
+    def test_command_all_builtins_when_omitted(self, tmp_path, monkeypatch, windows, expected):
+        import airedale.harness.pi as pi_module
+
+        monkeypatch.setattr(pi_module, "_is_windows", lambda: windows)
         command = PiRunner(cwd=tmp_path, pi_command=["pi"])._command(
             model=MODEL, system_prompt_path=Path("/p"), skill_dirs=[]
         )
-        assert command[command.index("--tools") + 1] == ",".join(PI_BUILTIN_TOOLS)
+        assert command[command.index("--tools") + 1] == expected
         assert "--thinking" not in command
 
     def test_command_no_tools(self, tmp_path):
@@ -1215,9 +1226,20 @@ class TestPiToolNames:
         (tmp_path / ".pi").mkdir()
         (tmp_path / ".pi" / "mcp.json").write_text(json.dumps({"mcpServers": {"repo-docs": {"command": "x"}}}))
         runner = PiRunner(cwd=tmp_path, allowed_builtin_tools=[], mcp_servers=[McpServerSpec(name="apm", command="y")])
-        assert runner._tool_entries() == ["mcp__*"]
+        assert runner._tool_entries() == [
+            "mcp__*",
+            "list_mcp_resources",
+            "list_mcp_resource_templates",
+            "read_mcp_resource",
+        ]
         # Without any scenario server, project servers still keep MCP selected.
-        assert PiRunner(cwd=tmp_path, allowed_builtin_tools=["read"])._tool_entries() == ["read", "mcp__*"]
+        assert PiRunner(cwd=tmp_path, allowed_builtin_tools=["read"])._tool_entries() == [
+            "read",
+            "mcp__*",
+            "list_mcp_resources",
+            "list_mcp_resource_templates",
+            "read_mcp_resource",
+        ]
 
     def test_codemode_only_when_allowed_explicitly(self, tmp_path):
         runner = PiRunner(cwd=tmp_path, mcp_servers=[McpServerSpec(name="apm", command="y")])
@@ -1225,7 +1247,27 @@ class TestPiToolNames:
         runner = PiRunner(
             cwd=tmp_path, allowed_builtin_tools=["codemode"], mcp_servers=[McpServerSpec(name="a", command="y")]
         )
-        assert runner._tool_entries() == ["codemode", "mcp__*"]
+        assert runner._tool_entries() == [
+            "codemode",
+            "mcp__*",
+            "list_mcp_resources",
+            "list_mcp_resource_templates",
+            "read_mcp_resource",
+        ]
+
+    def test_no_mcp_resource_tools_without_mcp_servers(self, tmp_path):
+        entries = PiRunner(cwd=tmp_path, allowed_builtin_tools=["read"])._tool_entries()
+        assert entries == ["read"]
+
+    def test_all_builtins_include_powershell_on_windows(self, tmp_path, monkeypatch):
+        import airedale.harness.pi as pi_module
+
+        monkeypatch.setattr(pi_module, "_is_windows", lambda: True)
+        assert PiRunner(cwd=tmp_path)._effective_builtin_tools() == (*PI_BUILTIN_TOOLS, "powershell")
+        # An explicit list stays as it is.
+        assert PiRunner(cwd=tmp_path, allowed_builtin_tools=["Bash"])._effective_builtin_tools() == ("bash",)
+        monkeypatch.setattr(pi_module, "_is_windows", lambda: False)
+        assert PiRunner(cwd=tmp_path)._effective_builtin_tools() == PI_BUILTIN_TOOLS
 
 
 def _pid_alive(pid: int) -> bool:
@@ -1368,7 +1410,8 @@ class TestPiSpans:
         assert first["metrics"]["output_tokens"] == 8
         assert final_llm.annotations["metrics"]["output_tokens"] == 12
         names = [definition["name"] for definition in first["tool_definitions"]]
-        assert names == [*PI_BUILTIN_TOOLS, "mcp__apm__s"]
+        builtins = [*PI_BUILTIN_TOOLS, "powershell"] if os.name == "nt" else list(PI_BUILTIN_TOOLS)
+        assert names == [*builtins, "mcp__apm__s"]
         # The input of a call is the transcript before it.
         assert first["input_data"] == [{"role": "user", "content": "hi"}]
         assert first["output_data"][-1]["role"] == "assistant"

@@ -281,7 +281,7 @@ Notes:
     would replace a same-named scenario server, so such a collision raises.
     Two scenario servers whose names differ only in `-`/`_` also raise (pi
     would run only one). `allowed_builtin_tools` is the complete `--tools`
-    list for pi (plus `mcp__*`): a repo extension tool is declared only when
+    list for pi (plus `mcp__*` and pi's MCP resource tools when MCP servers are present; the resources of a server with a `tool_names` allow-list stay unavailable, as it is `hidden`; on Windows the all-tools default also has `powershell`): a repo extension tool is declared only when
     the scenario names it. Nested tool calls (`parentToolCallId`, for example
     from `codemode`) are in `tool_calls` after their parent, with
     `parent_tool_id`; `usage` session entries (`entry_appended`, for example
