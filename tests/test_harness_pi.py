@@ -1401,6 +1401,28 @@ class TestPiToolNames:
         # The order of the list does not change the names (as in pi).
         assert pi_mcp_tool_names("docs", ["get_doc", "get-doc", "search", "search"]) == expected
 
+    @pytest.mark.parametrize(
+        ("sdk", "expected"),
+        [("pi", ["mcp__docs__search", "mcp__docs__read"]), ("openai-codex", ["mcp.docs.search", "mcp.docs.read"])],
+    )
+    def test_tool_definitions_without_allow_list_declare_every_probed_tool(self, sdk, expected):
+        from airedale.harness.base import _llmobs_tool_definitions
+        from airedale.mcp import McpToolMetadata
+
+        server = McpServerSpec(name="docs", url="http://localhost/mcp")
+        catalog = {
+            ("docs", "search"): McpToolMetadata(description="S", input_schema={"type": "object"}),
+            ("docs", "read"): McpToolMetadata(),
+            ("other", "x"): McpToolMetadata(),
+        }
+        definitions = _llmobs_tool_definitions(
+            [server], sdk_name=sdk, allowed_builtin_tools=[], mcp_tool_metadata=catalog
+        )
+        assert [definition["name"] for definition in definitions] == expected
+        assert definitions[0]["description"] == "S"
+        # No catalog (LLMObs off or the probe failed): nothing is known.
+        assert _llmobs_tool_definitions([server], sdk_name=sdk, allowed_builtin_tools=[]) == []
+
     def test_tool_definitions_use_the_complete_tool_list_of_the_server(self):
         import hashlib
 

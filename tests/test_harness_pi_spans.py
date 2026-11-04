@@ -582,7 +582,7 @@ class TestModelCalls:
 # --------------------------------------------------------------------------- #
 def _tool_start(tool_id: str, name: str = "bash", parent: str | None = None) -> dict:
     event = {"type": "tool_execution_start", "toolCallId": tool_id, "toolName": name, "args": {"command": "ls"}}
-    if parent:
+    if parent is not None:
         event["parentToolCallId"] = parent
     return event
 
@@ -599,7 +599,7 @@ def _tool_end(
     }
     if duration_ms is not None:
         event["durationMs"] = duration_ms
-    if parent:
+    if parent is not None:
         event["parentToolCallId"] = parent
     return event
 
@@ -683,6 +683,60 @@ class TestTools:
         assert [child.error for child in parent.children] == [None, "tool did not finish"]
         assert parent.end_ns == _ns(T0_MS + 9)
         assert parent.children[1].end_ns == parent.end_ns
+
+    def test_nested_call_of_a_tool_with_an_empty_id(self):
+        # Pi can use "" as the id of a model call; its nested calls then have
+        # parentToolCallId "" and must stay children of that call.
+        recorder = _feed(
+            _recorder(),
+            [
+                (1, _tool_start("", name="codemode")),
+                (2, _tool_start("/1", parent="")),
+                (3, _tool_end("/1", parent="")),
+                (9, _tool_end("")),
+            ],
+        )
+        [parent] = recorder.records
+        assert parent.name == "codemode"
+        assert [child.metadata["tool_id"] for child in parent.children] == ["/1"]
+        assert parent.children[0].metadata["parent_tool_id"] == ""
+
+    def test_reused_empty_id_keeps_the_first_parent(self):
+        # A late child of the first "" call must not move to the next "" call.
+        recorder = _feed(
+            _recorder(),
+            [
+                (1, _tool_start("", name="first")),
+                (2, _tool_start("/1", parent="")),
+                (3, _tool_end("")),
+                (4, _tool_start("", name="second")),
+                (5, _tool_end("/1", parent="")),
+                (6, _tool_end("")),
+            ],
+        )
+        first, second = recorder.records
+        assert (first.name, second.name) == ("first", "second")
+        assert [child.metadata["tool_id"] for child in first.children] == ["/1"]
+        assert second.children == []
+        # The first call already ended: its child does not end after it.
+        assert first.children[0].end_ns == first.end_ns
+
+    @pytest.mark.parametrize("child_ends", [True, False])
+    def test_child_that_starts_before_its_parent_keeps_that_parent(self, child_ends):
+        events: list[tuple[float, dict[str, Any]]] = [
+            (1, _tool_start("/1", parent="")),
+            (2, _tool_start("", name="first")),
+            (3, _tool_end("")),
+            (4, _tool_start("", name="second")),
+        ]
+        if child_ends:
+            events.append((5, _tool_end("/1", parent="")))
+        events.append((6, _tool_end("")))
+        recorder = _feed(_recorder(), events)
+        recorder.close(received_ns=_ns(T0_MS + 7))
+        first, second = recorder.records
+        assert [child.metadata["tool_id"] for child in first.children] == ["/1"]
+        assert second.children == []
 
     def test_close_marks_unfinished_steps(self):
         recorder = _feed(

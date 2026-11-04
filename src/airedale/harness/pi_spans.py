@@ -343,6 +343,10 @@ class SpanRecord:
 class _OpenTool:
     record: SpanRecord
     parent_id: str | None
+    #: The record of the parent tool when the call started. An id can be used
+    #: again (for example "" for every model call without id), so the child
+    #: keeps the record it started under, not the latest one with the id.
+    parent_record: SpanRecord | None = None
     #: End of the model call that asked for the tool: the tool cannot start
     #: before it (``None`` when not known).
     earliest_start_ns: int | None = None
@@ -618,9 +622,9 @@ class PiSpanRecorder:
     def _on_tool_start(self, event: dict[str, Any], now: int) -> None:
         tool_id = str(event.get("toolCallId") or "")
         name = str(event.get("toolName") or "unknown")
-        parent_id = str(event["parentToolCallId"]) if event.get("parentToolCallId") else None
+        parent_id = _parent_tool_id(event)
         metadata: dict[str, Any] = {"source": SOURCE, "tool_id": tool_id or None, "turn": self._turn}
-        if parent_id:
+        if parent_id is not None:
             metadata["parent_tool_id"] = parent_id
         record = SpanRecord(
             kind="tool", name=name, start_ns=now, end_ns=now, input_data=json_safe(event.get("args")), metadata=metadata
@@ -629,10 +633,18 @@ class PiSpanRecorder:
             # A repeated id: close the earlier execution so that no data is lost.
             self.close_tool(tool_id, now, error="tool started again before it ended")
         self._open_tools[tool_id] = _OpenTool(
-            record=record, parent_id=parent_id, earliest_start_ns=self._last_call_end_ns
+            record=record,
+            parent_id=parent_id,
+            parent_record=self._tool_records.get(parent_id) if parent_id is not None else None,
+            earliest_start_ns=self._last_call_end_ns,
         )
-        if tool_id:
-            self._tool_records[tool_id] = record
+        # Also an empty id: pi can use "" as the id of a model call, and then
+        # sends ``parentToolCallId`` "" for the calls that it makes.
+        self._tool_records[tool_id] = record
+        # A child whose start record came first gets its parent now.
+        for other in self._open_tools.values():
+            if other.parent_record is None and other.parent_id == tool_id and other.record is not record:
+                other.parent_record = record
 
     def _on_tool_end(self, event: dict[str, Any], now: int) -> None:
         tool_id = str(event.get("toolCallId") or "")
@@ -640,7 +652,7 @@ class PiSpanRecorder:
         if open_tool is None:
             # No start record: make a span that ends now.
             name = str(event.get("toolName") or "unknown")
-            parent_id = str(event["parentToolCallId"]) if event.get("parentToolCallId") else None
+            parent_id = _parent_tool_id(event)
             record = SpanRecord(
                 kind="tool",
                 name=name,
@@ -648,7 +660,12 @@ class PiSpanRecorder:
                 end_ns=now,
                 metadata={"source": SOURCE, "tool_id": tool_id or None},
             )
-            open_tool = _OpenTool(record=record, parent_id=parent_id, earliest_start_ns=self._last_call_end_ns)
+            open_tool = _OpenTool(
+                record=record,
+                parent_id=parent_id,
+                parent_record=self._tool_records.get(parent_id) if parent_id is not None else None,
+                earliest_start_ns=self._last_call_end_ns,
+            )
             self._open_tools[tool_id] = open_tool
         record = open_tool.record
         record.output_data = tool_result_text(event.get("result"))
@@ -682,22 +699,17 @@ class PiSpanRecorder:
             record.error = error
             record.error_type = "PiToolError"
             record.metadata["error"] = error
-        if open_tool.parent_id is not None and self._attach_child(open_tool.parent_id, record):
-            parent_open = open_tool.parent_id in self._open_tools
-            parent = self._tool_records[open_tool.parent_id]
+        parent = open_tool.parent_record
+        if parent is None and open_tool.parent_id is not None:
+            parent = self._tool_records.get(open_tool.parent_id)
+        if parent is not None and parent is not record:
+            parent.children.append(record)
+            parent_open = any(other.record is parent for other in self._open_tools.values())
             if not parent_open:
                 # The parent already ended: a child span must not end after it.
                 record.end_ns = max(record.start_ns, min(record.end_ns, parent.end_ns))
             return
         self.records.append(record)
-
-    def _attach_child(self, parent_id: str, record: SpanRecord) -> bool:
-        """Add ``record`` to the tool ``parent_id``; ``False`` when that tool is not known."""
-        parent = self._tool_records.get(parent_id)
-        if parent is None or parent is record:
-            return False
-        parent.children.append(record)
-        return True
 
     # ------------------------------------------------------------------ #
     # Compaction
@@ -959,6 +971,12 @@ def _message_timestamp_ns(message: dict[str, Any], now: int) -> int | None:
     """Return the plausible ``timestamp`` (request start) of a message in ns, else ``None``."""
     timestamp_ns = _epoch_ms_to_ns(message.get("timestamp"))
     return timestamp_ns if timestamp_ns is not None and _plausible_start(timestamp_ns, now) else None
+
+
+def _parent_tool_id(event: dict[str, Any]) -> str | None:
+    """Return ``parentToolCallId`` (can be ""); ``None`` when the model made the call."""
+    parent = event.get("parentToolCallId")
+    return None if parent is None else str(parent)
 
 
 def _is_int(value: Any) -> TypeGuard[int]:

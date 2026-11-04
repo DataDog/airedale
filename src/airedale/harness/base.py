@@ -299,7 +299,11 @@ def _mcp_tool_definitions(
     sdk_name: str,
     mcp_tool_metadata: Mapping[tuple[str, str], McpToolMetadata] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return LLMObs tool definitions for the configured MCP tools."""
+    """Return LLMObs tool definitions for the MCP tools of the servers.
+
+    The tools of a server are its ``tool_names``, or, without that list, every
+    tool in ``mcp_tool_metadata`` (the probed catalog) for the server.
+    """
     definitions = []
     for server in mcp_servers:
         pi_names: dict[str, str] = {}
@@ -310,7 +314,12 @@ def _mcp_tool_definitions(
             if mcp_tool_metadata:
                 known.extend(tool for server_name, tool in mcp_tool_metadata if server_name == server.name)
             pi_names = pi_mcp_tool_names(server.name, known)
-        for tool_name in configured_tool_names(server):
+        # Without a ``tool_names`` allow-list, the server exposes every tool:
+        # declare every tool that the probe found (in the probe's order).
+        declared = configured_tool_names(server) or [
+            tool for server_name, tool in (mcp_tool_metadata or {}) if server_name == server.name
+        ]
+        for tool_name in declared:
             name = pi_names.get(tool_name) or provider_mcp_tool_name(server.name, tool_name, sdk_name=sdk_name)
             definition: dict[str, Any] = {"name": name}
             metadata = mcp_tool_metadata.get((server.name, tool_name)) if mcp_tool_metadata else None
