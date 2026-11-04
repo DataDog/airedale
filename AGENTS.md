@@ -290,6 +290,16 @@ Notes:
     from `codemode`) are in `tool_calls` after their parent, with
     `parent_tool_id`; `usage` session entries (`entry_appended`, for example
     cache warming) count in the run usage.
+    Project `.pi/mcp.json` servers (not `enabled: false`) are also listed in
+    the span metadata and the agent manifest (`PiRunner._reported_mcp_servers`),
+    but they are not probed for tools, and they get no distributed-trace
+    headers: pi reads the repo file as it is, and a project entry replaces a
+    user-level entry with the same name, so the runner cannot add headers
+    without changing the evaluated repo (Codex does not use project servers
+    at all). Pi names MCP tools with a hash suffix
+    when long or when names of one server collide after sanitizing;
+    `pi_mcp_tool_names` reproduces this from the server's complete tool list
+    (the metadata probe keeps every tool for this).
     Project `.pi/mcp.json` servers stay in the `--tools` selection
     (`mcp__*`); their `codemode`-exposed tools need `codemode` in
     `allowed_builtin_tools` (never added implicitly: it can call other models). `--approve` lets repo `.pi/extensions` run in-process with

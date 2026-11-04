@@ -139,7 +139,7 @@ from airedale.harness.pi_spans import (
     message_text,
     tool_result_text,
 )
-from airedale.mcp import pi_literal
+from airedale.mcp import discover_pi_project_mcp_servers, pi_literal
 from airedale.skills import pi_skill_dirs
 from airedale.types import ModelSpec, UsageMetrics
 
@@ -291,7 +291,7 @@ class PiRunner(DecoratorSpanAgentRunner):
                 harness=harness,
                 prompt_version=prompt_version,
                 tool_definitions=_llmobs_tool_definitions(
-                    self.mcp_servers,
+                    self._reported_mcp_servers(),
                     sdk_name=self.sdk_name,
                     allowed_builtin_tools=self._effective_builtin_tools(),
                     mcp_tool_metadata=mcp_tool_metadata,
@@ -442,6 +442,26 @@ class PiRunner(DecoratorSpanAgentRunner):
             "autoEnableCodemode": False,
             "mcpServers": {server.name: server.to_pi_config(trace_headers) for server in self.mcp_servers},
         }
+
+    def _reported_mcp_servers(self) -> list[McpServerSpec]:
+        """Return the scenario MCP servers, then the repo ``.pi/mcp.json`` servers.
+
+        Pi reads the repo servers itself, so the runner does not configure
+        them, but they are part of the runtime: the span metadata and the agent
+        manifest list them. A repo server with the name of a scenario server
+        makes the run fail (``_check_project_mcp_collisions``); here it is
+        left out. Repo servers are not probed for their tools. They get no
+        distributed-trace headers: pi reads the repo file as it is, and a
+        project entry replaces a user-level entry with the same name, so the
+        runner cannot add headers without changing the evaluated repo.
+        """
+        scenario_keys = {_pi_server_key(server.name) for server in self.mcp_servers}
+        project = [
+            server
+            for server in discover_pi_project_mcp_servers(self.cwd)
+            if _pi_server_key(server.name) not in scenario_keys
+        ]
+        return [*self.mcp_servers, *project]
 
     def _check_project_mcp_collisions(self) -> None:
         """Raise when pi would not run every scenario MCP server.

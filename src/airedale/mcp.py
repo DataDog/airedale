@@ -15,7 +15,8 @@ import os
 import re
 import signal
 import time
-from collections.abc import Mapping
+from collections import Counter
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -210,7 +211,59 @@ def discover_claude_project_mcp_servers(cwd: str | Path) -> list[McpServerSpec]:
     """
     from pathlib import Path
 
-    path = Path(cwd) / ".mcp.json"
+    return _parse_mcp_json(Path(cwd) / ".mcp.json")
+
+
+def discover_pi_project_mcp_servers(cwd: str | Path) -> list[McpServerSpec]:
+    """Parse ``<cwd>/.pi/mcp.json`` into MCP server specs, for reporting only.
+
+    Pi reads this file itself (the runner does not give these servers to pi).
+    The specs describe the project servers in the span metadata and the agent
+    manifest. Entries with ``"enabled": false`` are left out. The repo file can
+    hold credentials, and these specs go to telemetry, so ``env`` values,
+    ``args`` and everything in ``url`` after the host and port are redacted
+    (headers are redacted by :meth:`McpServerSpec.to_safe_dict`).
+    """
+    from pathlib import Path
+
+    return [
+        McpServerSpec(
+            name=spec.name,
+            type=spec.type,
+            url=_url_without_secrets(spec.url),
+            command=spec.command,
+            args=tuple(REDACTED for _ in spec.args),
+            env=dict.fromkeys(spec.env, REDACTED),
+            headers=dict.fromkeys(spec.headers, REDACTED),
+        )
+        for spec in _parse_mcp_json(Path(cwd) / ".pi" / "mcp.json", skip_disabled=True)
+    ]
+
+
+#: Replaces a value that is not reported.
+REDACTED = "<redacted>"
+
+
+def _url_without_secrets(url: str | None) -> str | None:
+    """Keep only the scheme, host and port of ``url``: the user info, path, query
+    and fragment can hold tokens (for example ``/s/<token>/mcp``)."""
+    if not url:
+        return url
+    from urllib.parse import urlsplit, urlunsplit
+
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname or ""
+        if ":" in host:
+            host = f"[{host}]"
+        netloc = f"{host}:{parts.port}" if parts.port else host
+    except ValueError:
+        return REDACTED
+    return urlunsplit((parts.scheme, netloc, "", "", ""))
+
+
+def _parse_mcp_json(path: Path, *, skip_disabled: bool = False) -> list[McpServerSpec]:
+    """Parse an ``{"mcpServers": {...}}`` file; a missing or bad file gives ``[]``."""
     if not path.is_file():
         return []
     try:
@@ -227,18 +280,35 @@ def discover_claude_project_mcp_servers(cwd: str | Path) -> list[McpServerSpec]:
     for name, cfg in servers_raw.items():
         if not isinstance(cfg, Mapping):
             continue
+        if skip_disabled and cfg.get("enabled") is False:
+            continue
+        args, env, headers = cfg.get("args") or [], cfg.get("env") or {}, cfg.get("headers") or {}
+        if not (
+            all(isinstance(cfg.get(key), str | None) for key in ("type", "url", "command"))
+            and isinstance(args, list)
+            and all(isinstance(arg, str) for arg in args)
+            and _is_str_mapping(env)
+            and _is_str_mapping(headers)
+        ):
+            # The value is not logged: it can hold a credential.
+            logger.warning("Ignoring MCP server %r in %s: a field has the wrong type", str(name), path)
+            continue
         specs.append(
             McpServerSpec(
                 name=str(name),
                 type=cfg.get("type"),
                 url=cfg.get("url"),
                 command=cfg.get("command"),
-                args=tuple(cfg.get("args", []) or []),
-                env=dict(cfg.get("env", {}) or {}),
-                headers=dict(cfg.get("headers", {}) or {}),
+                args=tuple(args),
+                env=dict(env),
+                headers=dict(headers),
             )
         )
     return specs
+
+
+def _is_str_mapping(value: Any) -> bool:
+    return isinstance(value, Mapping) and all(isinstance(k, str) and isinstance(v, str) for k, v in value.items())
 
 
 def configured_tool_names(spec: McpServerSpec) -> list[str]:
@@ -260,13 +330,46 @@ def pi_mcp_tool_name(server_name: str, tool_name: str) -> str:
 
     Same rule as pi's ``createMcpToolName``: every character other than letters,
     digits and ``_`` becomes ``_``; a name longer than 64 characters is cut and
-    gets ``_`` + the first 8 hex digits of ``sha256("<server>\0<tool>")``. (Pi
-    also adds that suffix when two tools of the configuration get the same name
-    after sanitizing; that rare case is not reproduced here.)
+    gets ``_`` + the first 8 hex digits of ``sha256("<server>\0<tool>")``. Pi
+    also adds that suffix when two tools of the server get the same name after
+    sanitizing: use :func:`pi_mcp_tool_names` with the tool list of the server
+    for that case.
     """
-    name = _PI_TOOL_NAME_UNSAFE_RE.sub("_", f"mcp__{server_name}__{tool_name}")
+    name = _pi_plain_tool_name(server_name, tool_name)
     if len(name) <= PI_MAX_TOOL_NAME_LENGTH:
         return name
+    return _pi_hashed_tool_name(server_name, tool_name)
+
+
+def pi_mcp_tool_names(server_name: str, tool_names: Iterable[str]) -> dict[str, str]:
+    """Return the pi name of each tool of one server (keys: MCP tool names).
+
+    Same as pi's MCP extension: when two or more tools of the server get the
+    same name after sanitizing (for example ``get-doc`` and ``get_doc``), all
+    of them get the hash suffix, whatever their order. ``tool_names`` must be
+    the complete tool list of the server for the result to match pi. As in
+    pi, the names compared are the names after shortening (a long name with
+    its hash suffix). Not reproduced: a collision with a tool of another
+    server (``mcp__a__b__c`` from server ``a`` and from server ``a__b``),
+    where pi's result depends on which server connects first.
+    """
+    unique = list(dict.fromkeys(tool_names))
+    plain = {tool: pi_mcp_tool_name(server_name, tool) for tool in unique}
+    counts = Counter(plain.values())
+    return {
+        tool: pi_mcp_tool_name(server_name, tool)
+        if counts[plain[tool]] == 1
+        else _pi_hashed_tool_name(server_name, tool)
+        for tool in unique
+    }
+
+
+def _pi_plain_tool_name(server_name: str, tool_name: str) -> str:
+    return _PI_TOOL_NAME_UNSAFE_RE.sub("_", f"mcp__{server_name}__{tool_name}")
+
+
+def _pi_hashed_tool_name(server_name: str, tool_name: str) -> str:
+    name = _pi_plain_tool_name(server_name, tool_name)
     digest = hashlib.sha256(f"{server_name}\0{tool_name}".encode()).hexdigest()[:8]
     return f"{name[: PI_MAX_TOOL_NAME_LENGTH - len(digest) - 1]}_{digest}"
 
@@ -303,12 +406,7 @@ async def _mcp_tool_metadata_catalog(
     if not servers:
         return {}
 
-    server_catalogs = await asyncio.gather(
-        *[
-            _mcp_server_tool_metadata(server, trace_headers, configured_tool_names=set(configured_tool_names(server)))
-            for server in servers
-        ]
-    )
+    server_catalogs = await asyncio.gather(*[_mcp_server_tool_metadata(server, trace_headers) for server in servers])
     catalog: dict[tuple[str, str], McpToolMetadata] = {}
     for server_catalog in server_catalogs:
         catalog.update(server_catalog)
@@ -316,12 +414,18 @@ async def _mcp_tool_metadata_catalog(
 
 
 async def _mcp_server_tool_metadata(
-    server: McpServerSpec, trace_headers: Mapping[str, str], *, configured_tool_names: set[str]
+    server: McpServerSpec, trace_headers: Mapping[str, str]
 ) -> dict[tuple[str, str], McpToolMetadata]:
-    """Fetch tool metadata from a single MCP server."""
+    """Fetch the metadata of every tool of a single MCP server.
+
+    All tools are kept, also the tools that ``tool_names`` does not list: pi
+    names a tool from the complete tool list of the server (collision
+    suffixes, see :func:`pi_mcp_tool_names`). The tool definitions use only
+    the configured tools.
+    """
     try:
         tools = await asyncio.wait_for(
-            _list_mcp_tools(server, trace_headers), timeout=MCP_TOOL_METADATA_TIMEOUT_SECONDS
+            _list_mcp_tools(server, trace_headers, all_pages=True), timeout=MCP_TOOL_METADATA_TIMEOUT_SECONDS
         )
     except Exception:
         logger.debug("Unable to fetch MCP tool metadata for server %s", server.name, exc_info=True)
@@ -332,15 +436,19 @@ async def _mcp_server_tool_metadata(
         tool_name = _mcp_tool_field(mcp_tool, "name")
         if not isinstance(tool_name, str):
             continue
-        # If configured_tool_names is empty, it means all tools are allowed
-        if configured_tool_names and tool_name not in configured_tool_names:
-            continue
         catalog[(server.name, tool_name)] = _mcp_tool_metadata(mcp_tool)
     return catalog
 
 
-async def _list_mcp_tools(server: McpServerSpec, trace_headers: Mapping[str, str]) -> list[Any]:
-    """List tools from an MCP server using the standard protocol."""
+async def _list_mcp_tools(
+    server: McpServerSpec, trace_headers: Mapping[str, str], *, all_pages: bool = False
+) -> list[Any]:
+    """List tools from an MCP server using the standard protocol.
+
+    With ``all_pages``, every ``tools/list`` page is read (the tool metadata
+    needs the complete list). Without it, only the first page (enough for a
+    health probe, which must stay fast).
+    """
     if server.type == "http":
         async with (
             streamablehttp_client(server._require_url(), headers=server.merged_headers(trace_headers)) as (
@@ -351,7 +459,7 @@ async def _list_mcp_tools(server: McpServerSpec, trace_headers: Mapping[str, str
             ClientSession(read_stream, write_stream) as session,
         ):
             await session.initialize()
-            return list((await session.list_tools()).tools)
+            return await _list_all_tools(session) if all_pages else list((await session.list_tools()).tools)
     if server.type == "stdio":
         stdio_server = StdioServerParameters(
             command=server._require_command(), args=list(server.args), env=dict(server.env) or None
@@ -361,8 +469,32 @@ async def _list_mcp_tools(server: McpServerSpec, trace_headers: Mapping[str, str
             ClientSession(read_stream, write_stream) as session,
         ):
             await session.initialize()
-            return list((await session.list_tools()).tools)
+            return await _list_all_tools(session) if all_pages else list((await session.list_tools()).tools)
     raise ValueError(f"MCP server {server.name!r} has unsupported type {server.type!r}")
+
+
+#: Most ``tools/list`` pages read from one server (a bad server cannot loop).
+MCP_TOOL_LIST_MAX_PAGES = 50
+
+
+async def _list_all_tools(session: ClientSession) -> list[Any]:
+    """Return the tools of every ``tools/list`` page (follows ``nextCursor``).
+
+    The complete list is necessary: pi names tools from all the tools of the
+    server. The caller's timeout also bounds this.
+    """
+    tools: list[Any] = []
+    cursor: str | None = None
+    seen: set[str] = set()
+    for _ in range(MCP_TOOL_LIST_MAX_PAGES):
+        result = await session.list_tools(cursor=cursor) if cursor is not None else await session.list_tools()
+        tools.extend(result.tools)
+        cursor = getattr(result, "nextCursor", None)
+        if not cursor or cursor in seen:
+            return tools
+        seen.add(cursor)
+    logger.debug("MCP server sent more than %d tools/list pages; using the first ones", MCP_TOOL_LIST_MAX_PAGES)
+    return tools
 
 
 def _mcp_tool_metadata(tool: Any) -> McpToolMetadata:

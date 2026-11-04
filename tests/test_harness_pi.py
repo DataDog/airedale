@@ -1254,6 +1254,114 @@ class TestCompletionRules:
 
 
 class TestPiToolNames:
+    def test_tools_whose_names_collide_all_get_the_hash_suffix(self):
+        import hashlib
+
+        from airedale.mcp import pi_mcp_tool_names
+
+        def digest(tool: str) -> str:
+            return hashlib.sha256(f"docs\0{tool}".encode()).hexdigest()[:8]
+
+        expected = {
+            "get-doc": f"mcp__docs__get_doc_{digest('get-doc')}",
+            "get_doc": f"mcp__docs__get_doc_{digest('get_doc')}",
+            "search": "mcp__docs__search",
+        }
+        assert pi_mcp_tool_names("docs", ["get-doc", "search", "get_doc"]) == expected
+        # The order of the list does not change the names (as in pi).
+        assert pi_mcp_tool_names("docs", ["get_doc", "get-doc", "search", "search"]) == expected
+
+    def test_tool_definitions_use_the_complete_tool_list_of_the_server(self):
+        import hashlib
+
+        from airedale.harness.base import _llmobs_tool_definitions
+        from airedale.mcp import McpToolMetadata
+
+        server = McpServerSpec(name="docs", url="http://localhost/mcp", tool_names=("get-doc",))
+        # `get_doc` is not in tool_names, but the server has it: pi hashes both.
+        catalog = {("docs", "get-doc"): McpToolMetadata(description="D"), ("docs", "get_doc"): McpToolMetadata()}
+        definitions = _llmobs_tool_definitions(
+            [server], sdk_name="pi", allowed_builtin_tools=[], mcp_tool_metadata=catalog
+        )
+        digest = hashlib.sha256(b"docs\0get-doc").hexdigest()[:8]
+        assert definitions == [{"name": f"mcp__docs__get_doc_{digest}", "description": "D"}]
+        # Without the catalog, only the configured names are known.
+        plain = _llmobs_tool_definitions([server], sdk_name="pi", allowed_builtin_tools=[])
+        assert plain == [{"name": "mcp__docs__get_doc"}]
+        # Other SDKs keep their own names.
+        claude = _llmobs_tool_definitions([server], sdk_name="claude-agent-sdk", mcp_tool_metadata=catalog)
+        assert claude == [{"name": "mcp__docs__get-doc", "description": "D"}]
+
+    def test_reported_mcp_servers_include_project_servers(self, tmp_path):
+        (tmp_path / ".pi").mkdir()
+        (tmp_path / ".pi" / "mcp.json").write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "repo-docs": {"command": "node", "args": ["docs.js"]},
+                        "repo-http": {"url": "https://example.test/mcp", "headers": {"Authorization": "x"}},
+                        "off": {"command": "x", "enabled": False},
+                    }
+                }
+            )
+        )
+        scenario = McpServerSpec(name="apm", url="http://localhost/mcp")
+        runner = PiRunner(cwd=tmp_path, mcp_servers=[scenario])
+        reported = runner._reported_mcp_servers()
+        assert [server.name for server in reported] == ["apm", "repo-docs", "repo-http"]
+        assert reported[1].type == "stdio"
+        assert reported[2].to_safe_dict()["headers"] == {"Authorization": "<redacted>"}
+        # Pi reads the project file itself: the generated mcp.json has only the scenario server.
+        assert list(runner._mcp_config({})["mcpServers"]) == ["apm"]
+
+    def test_reported_project_servers_have_no_secrets(self, tmp_path):
+        (tmp_path / ".pi").mkdir()
+        (tmp_path / ".pi" / "mcp.json").write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "repo-cli": {
+                            "command": "node",
+                            "args": ["--token", "arg-secret"],
+                            "env": {"TOKEN": "env-secret"},
+                        },
+                        "repo-http": {
+                            "url": "https://user:pw-secret@example.test:8443/s/path-secret/mcp?key=query-secret#frag"
+                        },
+                        # Wrong types: pi skips these entries, so does the report (no error).
+                        "bad-env": {"command": "x", "env": 1},
+                        "bad-args": {"command": "x", "args": [1]},
+                        "bad-url": {"url": 5},
+                    }
+                }
+            )
+        )
+        runner = PiRunner(cwd=tmp_path)
+        reported = [server.to_safe_dict() for server in runner._reported_mcp_servers()]
+        assert [server["name"] for server in reported] == ["repo-cli", "repo-http"]
+        text = json.dumps(reported)
+        for secret in ("arg-secret", "env-secret", "pw-secret", "path-secret", "query-secret", "frag"):
+            assert secret not in text
+        assert reported[0]["env"] == {"TOKEN": "<redacted>"}
+        assert reported[0]["args"] == ["<redacted>", "<redacted>"]
+        assert reported[1]["url"] == "https://example.test:8443"
+
+    def test_long_tool_names_collide_after_shortening(self):
+        from airedale.mcp import pi_mcp_tool_name, pi_mcp_tool_names
+
+        long_tool = "t" * 80
+        shortened = pi_mcp_tool_name("docs", long_tool)
+        other = shortened.removeprefix("mcp__docs__")
+        names = pi_mcp_tool_names("docs", [long_tool, other])
+        # Pi compares the shortened names: both tools get their own hash suffix.
+        assert len(set(names.values())) == 2
+        assert names[long_tool] == shortened
+        assert names[other] != shortened
+
+    def test_reported_mcp_servers_without_project_file(self, tmp_path):
+        scenario = McpServerSpec(name="apm", url="http://localhost/mcp")
+        assert PiRunner(cwd=tmp_path, mcp_servers=[scenario])._reported_mcp_servers() == [scenario]
+
     def test_long_name_gets_pi_hash_suffix(self):
         import hashlib
 
@@ -1420,6 +1528,9 @@ class TestPiSpans:
         monkeypatch.setattr(base, "current_trace_headers", lambda: {"traceparent": "00-t"})
 
         command, record = fake_pi(_events_tool_run())
+        # A repo server that pi reads itself: it is reported, not configured.
+        (tmp_path / ".pi").mkdir()
+        (tmp_path / ".pi" / "mcp.json").write_text(json.dumps({"mcpServers": {"repo-docs": {"command": "node"}}}))
         runner = PiRunner(
             cwd=tmp_path,
             pi_command=command,
@@ -1470,6 +1581,8 @@ class TestPiSpans:
         manifest = agent_annotation["metadata"]["_dd"]["agent_manifest"]
         assert manifest["framework"] == "pi"
         assert {"name": "mcp__apm__s"} in manifest["tools"]
+        assert [server["name"] for server in manifest["dependencies"]["mcp_servers"]] == ["apm", "repo-docs"]
+        assert [server["name"] for server in agent_annotation["metadata"]["mcp_servers"]] == ["apm", "repo-docs"]
         assert agent_annotation["metrics"]["output_tokens"] == 20
         # Trace headers reach the MCP server config pi receives, and pi loads
         # the collector extension.
@@ -1832,7 +1945,7 @@ def test_mcp_metadata_probe_gets_no_operator_credentials(tmp_path, monkeypatch, 
     script.write_text(PROBE_SERVER)
     record = tmp_path / "probe_env.json"
     server = McpServerSpec(name="probe", command=sys.executable, args=(str(script), str(record)), env=server_env)
-    catalog = _bounded(_mcp_server_tool_metadata(server, {}, configured_tool_names=set()))
+    catalog = _bounded(_mcp_server_tool_metadata(server, {}))
     assert catalog == {}  # the fake server does not speak MCP
     seen = json.loads(record.read_text())
     for name, value in server_env.items():
@@ -1840,3 +1953,77 @@ def test_mcp_metadata_probe_gets_no_operator_credentials(tmp_path, monkeypatch, 
     for name, value in secrets.items():
         assert name not in seen
         assert value not in seen.values()
+
+
+def test_tool_list_follows_every_page():
+    from types import SimpleNamespace
+
+    from airedale.mcp import _list_all_tools
+
+    pages = {
+        None: SimpleNamespace(tools=["a"], nextCursor="p2"),
+        "p2": SimpleNamespace(tools=["b"], nextCursor="p3"),
+        "p3": SimpleNamespace(tools=["c"], nextCursor=None),
+    }
+    calls: list[str | None] = []
+
+    class _Session:
+        async def list_tools(self, cursor: str | None = None):
+            calls.append(cursor)
+            return pages[cursor]
+
+    assert _bounded(_list_all_tools(_Session())) == ["a", "b", "c"]  # type: ignore[arg-type]
+    assert calls == [None, "p2", "p3"]
+
+
+def test_tool_list_stops_on_a_repeated_cursor():
+    from types import SimpleNamespace
+
+    from airedale.mcp import _list_all_tools
+
+    class _Session:
+        calls = 0
+
+        async def list_tools(self, cursor: str | None = None):
+            self.calls += 1
+            return SimpleNamespace(tools=[self.calls], nextCursor="same")
+
+    session = _Session()
+    assert _bounded(_list_all_tools(session)) == [1, 2]  # type: ignore[arg-type]
+
+
+def test_health_probe_reads_only_the_first_tools_page(monkeypatch):
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+
+    import airedale.mcp as mcp_module
+
+    calls: list[str | None] = []
+
+    class _Session:
+        def __init__(self, *args):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def initialize(self):
+            return None
+
+        async def list_tools(self, cursor: str | None = None):
+            calls.append(cursor)
+            return SimpleNamespace(tools=[cursor or "first"], nextCursor=None if cursor else "p2")
+
+    @asynccontextmanager
+    async def _client(*args, **kwargs):
+        yield (None, None, None)
+
+    monkeypatch.setattr(mcp_module, "ClientSession", _Session)
+    monkeypatch.setattr(mcp_module, "streamablehttp_client", _client)
+    server = McpServerSpec(name="s", url="http://localhost/mcp")
+    assert _bounded(mcp_module._list_mcp_tools(server, {})) == ["first"]
+    assert calls == [None]
+    assert _bounded(mcp_module._list_mcp_tools(server, {}, all_pages=True)) == ["first", "p2"]

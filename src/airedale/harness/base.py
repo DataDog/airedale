@@ -37,6 +37,7 @@ from airedale.mcp import (
     McpToolMetadata,
     _mcp_tool_metadata_catalog,
     configured_tool_names,
+    pi_mcp_tool_names,
     provider_mcp_tool_name,
 )
 from airedale.tracing import current_trace_headers
@@ -297,8 +298,17 @@ def _mcp_tool_definitions(
     """Return LLMObs tool definitions for the configured MCP tools."""
     definitions = []
     for server in mcp_servers:
+        pi_names: dict[str, str] = {}
+        if sdk_name == "pi":
+            # Pi adds a hash suffix to tools whose names collide after
+            # sanitizing, so name them against every known tool of the server.
+            known = [*configured_tool_names(server)]
+            if mcp_tool_metadata:
+                known.extend(tool for server_name, tool in mcp_tool_metadata if server_name == server.name)
+            pi_names = pi_mcp_tool_names(server.name, known)
         for tool_name in configured_tool_names(server):
-            definition: dict[str, Any] = {"name": provider_mcp_tool_name(server.name, tool_name, sdk_name=sdk_name)}
+            name = pi_names.get(tool_name) or provider_mcp_tool_name(server.name, tool_name, sdk_name=sdk_name)
+            definition: dict[str, Any] = {"name": name}
             metadata = mcp_tool_metadata.get((server.name, tool_name)) if mcp_tool_metadata else None
             if metadata is not None:
                 if metadata.description:
@@ -629,7 +639,7 @@ class DecoratorSpanAgentRunner(AgentRunner):
             user_prompt=user_prompt,
             answer=run_result.answer,
             usage=run_result.usage,
-            mcp_servers=self.mcp_servers,
+            mcp_servers=self._reported_mcp_servers(),
             segments=run_result.segments,
             allowed_builtin_tools=self._effective_builtin_tools(),
             max_turns=self.max_turns,
@@ -677,6 +687,14 @@ class DecoratorSpanAgentRunner(AgentRunner):
         # `agent -> llm + tool...` topology.
         _emit_tool_spans(run_result.tool_calls)
         return run_result, missing_usage_error
+
+    def _reported_mcp_servers(self) -> list[McpServerSpec]:
+        """Return the MCP servers to report in the span metadata and the agent manifest.
+
+        Default: the servers given to the engine. A runner whose engine also
+        loads servers itself (pi reads a repo ``.pi/mcp.json``) adds them.
+        """
+        return self.mcp_servers
 
     async def _span_context(self) -> tuple[dict[str, str], Mapping[tuple[str, str], McpToolMetadata]]:
         """Return the trace headers for MCP servers and the MCP tool catalog."""
