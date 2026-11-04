@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from airedale.config.gateway import GatewayConfig
 
 DECISIONS_MODEL = "gpt-6-luna"
-MAX_QUESTIONS = 200
+MAX_QUESTIONS = 400
 
 
 class DecisionsRubricEvaluator(BaseAsyncEvaluator):

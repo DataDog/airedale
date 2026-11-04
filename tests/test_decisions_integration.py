@@ -111,12 +111,12 @@ async def test_concurrent_calls_keep_results_separate():
         await fake.close()
 
 
-async def test_201_criteria_never_reaches_sdk():
+async def test_401_criteria_never_reaches_sdk():
     fake = sdk_client(lambda request: pytest.fail("Unexpected request"))
     try:
-        result = await DecisionsRubricEvaluator(openai_client=fake).evaluate(context(201))
+        result = await DecisionsRubricEvaluator(openai_client=fake).evaluate(context(401))
         assert result.metadata is not None
-        assert result.metadata["invalid_answer_count"] == 201
+        assert result.metadata["invalid_answer_count"] == 401
         assert result.assessment == "fail"
     finally:
         await fake.close()

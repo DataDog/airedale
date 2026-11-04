@@ -155,7 +155,7 @@ See `examples/` for fully-worked configs and a sample skill directory.
 | `mcp_servers` | table | no | MCP server registry: each `<name>` maps to a server block (referenced by name from scenarios; see below) |
 | `defaults` | table | no | Defaults applied to every scenario (see below) |
 
-When `judge_type = "decisions"`, each criterion is a predicate. A probability at or above `decisions_threshold` scores `1`; otherwise it scores `0`. The threshold must be a number in `[0, 1]`. The evaluator score is the mean of the binary scores and passes at `0.8`. The request supports at most 200 criteria. Refusals and invalid or missing answers fail the evaluation. Metadata records `refusal_count`, `invalid_answer_count`, criterion status, and valid probabilities. Provider request failures raise a safe evaluator error. Decisions does not provide per-criterion free-text explanations.
+When `judge_type = "decisions"`, each criterion is a predicate. A probability at or above `decisions_threshold` scores `1`; otherwise it scores `0`. The threshold must be a number in `[0, 1]`. The evaluator score is the mean of the binary scores and passes at `0.8`. The request supports at most 400 criteria. Refusals and invalid or missing answers fail the evaluation. Metadata records `refusal_count`, `invalid_answer_count`, criterion status, and valid probabilities. Provider request failures raise a safe evaluator error. Decisions does not provide per-criterion free-text explanations.
 
 #### Shared registries (`skills` / `mcp_servers`)
 
