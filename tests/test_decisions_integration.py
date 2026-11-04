@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from typing import TYPE_CHECKING, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx2
@@ -22,6 +23,9 @@ from airedale.experiment import _run_cell
 from airedale.scoring.decisions import DecisionsRubricEvaluator
 from airedale.scoring.rubric import RubricEvaluator
 from airedale.types import ModelSpec
+
+if TYPE_CHECKING:
+    from ddtrace.llmobs._experiment import DatasetRecord, TaskResult
 
 
 def context(n=1):
@@ -61,7 +65,8 @@ async def test_real_sdk_rejects_raw_bad_answers(answers):
     try:
         result = await DecisionsRubricEvaluator(openai_client=fake).evaluate(context())
         assert result.assessment == "fail"
-        assert result.metadata["invalid_answer_count"] > 0
+        assert result.metadata is not None
+        assert cast("int", result.metadata["invalid_answer_count"]) > 0
     finally:
         await fake.close()
 
@@ -75,6 +80,7 @@ async def test_refusal_at_high_mean():
         result = await DecisionsRubricEvaluator(openai_client=fake).evaluate(context(5))
         assert result.value == 0.8
         assert result.assessment == "fail"
+        assert result.metadata is not None
         assert result.metadata["refusal_count"] == 1
     finally:
         await fake.close()
@@ -109,6 +115,7 @@ async def test_201_criteria_never_reaches_sdk():
     fake = sdk_client(lambda request: pytest.fail("Unexpected request"))
     try:
         result = await DecisionsRubricEvaluator(openai_client=fake).evaluate(context(201))
+        assert result.metadata is not None
         assert result.metadata["invalid_answer_count"] == 201
         assert result.assessment == "fail"
     finally:
@@ -183,8 +190,8 @@ async def test_ddtrace_provider_error_is_safe_and_failfast():
     fake = sdk_client(lambda request: httpx2.Response(401, json={"error": {"message": "synthetic-secret"}}))
     evaluator = DecisionsRubricEvaluator(openai_client=fake)
     experiment = Experiment(name="test", project_name="test", evaluators=[evaluator])
-    record = {"input_data": {"prompt": "q"}, "expected_output": {"criteria": ["c"]}}
-    task = {"idx": 0, "output": {"answer": "a"}}
+    record = cast("DatasetRecord", {"input_data": {"prompt": "q"}, "expected_output": {"criteria": ["c"]}})
+    task = cast("TaskResult", {"idx": 0, "output": {"answer": "a"}})
     try:
         stored = await experiment._evaluate_record(record, task, asyncio.Semaphore(1), raise_errors=False)
         assert experiment._has_errors

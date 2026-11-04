@@ -62,21 +62,7 @@ class DecisionsRubricEvaluator(BaseAsyncEvaluator):
             return EvaluatorResult(value=0.0, assessment="fail", reasoning="No rubric criteria were provided.")
         if len(criteria) > MAX_QUESTIONS:
             return self._failed(criteria, "question_limit")
-        request_failed = False
-        try:
-            response = await self.client.decisions.with_raw_response.create(
-                model=DECISIONS_MODEL,
-                input=f"Question:\n{_extract_question(context.input_data)}\n\nAnswer:\n{_extract_answer(context.output_data)}",
-                questions=[
-                    {"name": str(index), "type": "predicate", "instructions": criterion}
-                    for index, criterion in enumerate(criteria)
-                ],
-            )
-        except Exception:
-            # Raise outside the handler so the provider exception is not chained.
-            request_failed = True
-        if request_failed:
-            raise RuntimeError("Decisions provider request failed")
+        response = await self._request(context, criteria)
         try:
             payload = response.http_response.json()
         except (ValueError, TypeError):
@@ -110,6 +96,21 @@ class DecisionsRubricEvaluator(BaseAsyncEvaluator):
                     }
                 )
         return self._result(results)
+
+    async def _request(self, context: EvaluatorContext, criteria: list[str]):
+        try:
+            return await self.client.decisions.with_raw_response.create(
+                model=DECISIONS_MODEL,
+                input=f"Question:\n{_extract_question(context.input_data)}\n\nAnswer:\n{_extract_answer(context.output_data)}",
+                questions=[
+                    {"name": str(index), "type": "predicate", "instructions": criterion}
+                    for index, criterion in enumerate(criteria)
+                ],
+            )
+        except Exception:
+            pass
+        # Raise outside the handler so the provider exception is not chained.
+        raise RuntimeError("Decisions provider request failed")
 
     def _failed(self, criteria: list[str], status: str) -> EvaluatorResult:
         return self._result(

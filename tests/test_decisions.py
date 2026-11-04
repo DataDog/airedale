@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -55,13 +56,15 @@ class TestDecisions:
     async def test_malformed_responses_fail_and_count(self, answers):
         result = await DecisionsRubricEvaluator(openai_client=client(answers)).evaluate(ctx())
         assert result.assessment == "fail"
-        assert result.metadata["invalid_answer_count"] > 0
+        assert result.metadata is not None
+        assert cast("int", result.metadata["invalid_answer_count"]) > 0
 
     async def test_refusal_is_counted_and_fails(self):
         result = await DecisionsRubricEvaluator(
             openai_client=client([answer("0", 1), answer("1", kind="refusal")])
         ).evaluate(ctx())
         assert result.assessment == "fail"
+        assert result.metadata is not None
         assert result.metadata["refusal_count"] == 1
 
     async def test_error_is_safe(self):
@@ -86,6 +89,6 @@ def test_config_threshold_validation():
     assert ExperimentConfig(**base, judge_type="decisions", decisions_threshold=0.0).decisions_threshold == 0.0
     for value in (True, "x", 1.1):
         with pytest.raises(ConfigError):
-            ExperimentConfig(**base, judge_type="decisions", decisions_threshold=value)
+            ExperimentConfig(**base, judge_type="decisions", decisions_threshold=cast("float", value))
     with pytest.raises(ConfigError):
         ExperimentConfig(**base, decisions_threshold=0.5)
