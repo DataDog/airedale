@@ -113,16 +113,13 @@ class TestToClaudeConfig:
         )
         result = spec.to_claude_config({})
         # McpHttpServerConfig returns a dict
-        assert result["type"] == "http"
-        assert result["url"] == "http://localhost:8000/mcp"
-        assert result["headers"]["source"] == "evals"
+        assert result == {"type": "http", "url": "http://localhost:8000/mcp", "headers": {"source": "evals"}}
 
     def test_managed_http_renders_as_http(self):
         spec = McpServerSpec(name="apm", url="http://localhost:8000/mcp", command="my-server", args=("--port", "8000"))
         result = spec.to_claude_config({})
         # The launch command is internal; Claude only sees the http transport.
-        assert result["type"] == "http"
-        assert result["url"] == "http://localhost:8000/mcp"
+        assert result == {"type": "http", "url": "http://localhost:8000/mcp", "headers": {}}
 
     def test_stdio_config_type_and_fields(self):
         spec = McpServerSpec(
@@ -132,10 +129,17 @@ class TestToClaudeConfig:
             env={"FOO": "bar"},
         )
         result = spec.to_claude_config({})
-        assert result["type"] == "stdio"
-        assert result["command"] == "python"
-        assert result["args"] == ["-m", "my_server"]
-        assert result["env"] == {"FOO": "bar"}
+        assert result == {"type": "stdio", "command": "python", "args": ["-m", "my_server"], "env": {"FOO": "bar"}}
+
+    def test_http_without_url_rejected(self):
+        spec = McpServerSpec(name="apm", type="http")
+        with pytest.raises(ValueError, match="MCP server 'apm' of type 'http' has no 'url'"):
+            spec.to_claude_config({})
+
+    def test_stdio_without_command_rejected(self):
+        spec = McpServerSpec(name="tools", type="stdio")
+        with pytest.raises(ValueError, match="MCP server 'tools' of type 'stdio' has no 'command'"):
+            spec.to_claude_config({})
 
     def test_unsupported_type_raises(self):
         # Force an unsupported transport type to exercise the guard.

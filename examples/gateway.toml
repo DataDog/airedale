@@ -11,7 +11,7 @@ base_url = "https://ai-gateway.example.com"
 # Run on first use and cached for 30 minutes.
 credentials_helper = "mytool auth token --datacenter us1"
 # Static extra headers merged into every request for this provider.
-headers = { source = "evals", "org-id" = "42", provider = "anthropic" }
+headers = { source = "evals", "org-id" = "42", provider = "anthropic", "x-target-account" = "eval" }
 
 [providers.openai]
 base_url = "https://ai-gateway.example.com/v1"
@@ -19,4 +19,4 @@ base_url = "https://ai-gateway.example.com/v1"
 # Uncomment to use instead of credentials_helper.
 # api_key_env = "MY_OPENAI_GATEWAY_KEY"
 credentials_helper = "mytool auth token --datacenter us1"
-headers = { source = "evals", provider = "openai" }
+headers = { source = "evals", provider = "openai", "x-target-account" = "eval" }

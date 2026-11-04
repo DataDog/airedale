@@ -81,7 +81,7 @@ class McpServerConfig:
             if has_url:
                 raise ConfigError(f"MCP server '{self.name}' of type 'stdio' must not define 'url'")
         else:  # http
-            if not has_url:
+            if self.url is None:
                 raise ConfigError(f"MCP server '{self.name}' of type 'http' must define 'url'")
             if has_command and not _is_localhost_url(self.url):
                 raise ConfigError(

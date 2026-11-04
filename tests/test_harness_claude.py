@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from airedale.config.experiment import ScenarioConfig
 from airedale.harness import create_runner
 from airedale.harness.claude import CLAUDE_BUILTIN_TOOLS, ClaudeRunner
@@ -71,7 +73,19 @@ class TestClaudeBuildOptions:
         (repo_skill / "SKILL.md").write_text("# repo\n")
         runner = ClaudeRunner(cwd=tmp_path / "cwd", skills=[str(source)])
         options = runner._build_options(model=ANTHROPIC_MODEL, system_prompt="", trace_headers={})
+        assert isinstance(options.skills, list)
         assert set(options.skills) == {"scenario-skill", "repo-skill"}
+
+    @pytest.mark.parametrize("effort", [None, "low", "medium", "high", "xhigh", "max"])
+    def test_supported_effort_passed_through(self, tmp_path, effort):
+        runner = ClaudeRunner(cwd=tmp_path, effort=effort)
+        options = runner._build_options(model=ANTHROPIC_MODEL, system_prompt="", trace_headers={})
+        assert options.effort == effort
+
+    def test_unsupported_effort_rejected(self, tmp_path):
+        runner = ClaudeRunner(cwd=tmp_path, effort="minimal")
+        with pytest.raises(ValueError, match="unsupported Claude effort 'minimal'"):
+            runner._build_options(model=ANTHROPIC_MODEL, system_prompt="", trace_headers={})
 
 
 class TestCreateRunnerProjectMcpMerge:
@@ -86,6 +100,7 @@ class TestCreateRunnerProjectMcpMerge:
         names = {s.name for s in runner.mcp_servers}
         assert "repo-http" in names
         # Discovered http server's mcp__ allow-list entry is emitted.
+        assert isinstance(runner, ClaudeRunner)
         assert "mcp__repo-http" in runner._claude_available_tools()
 
     def test_scenario_wins_on_name_collision(self, tmp_path):
@@ -110,7 +125,7 @@ class TestCreateRunnerProjectMcpMerge:
         runner = create_runner(ANTHROPIC_MODEL, scenario=self._scenario(), gateway=None, cwd=str(tmp_path))
         spec = next(s for s in runner.mcp_servers if s.name == "repo-http")
         config = spec.to_claude_config({"x-dd-trace-id": "123"})
-        assert config["headers"]["x-dd-trace-id"] == "123"
+        assert config == {"type": "http", "url": "http://localhost:9000/mcp", "headers": {"x-dd-trace-id": "123"}}
 
     def test_codex_does_not_read_mcp_json(self, tmp_path):
         (tmp_path / ".mcp.json").write_text(
