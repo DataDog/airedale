@@ -174,6 +174,8 @@ The [CI workflow](./.github/workflows/ci.yml) runs two jobs:
 1. **checks (format, lint):**
    - `uv run ruff format --check .` — formatting.
    - `uv run ruff check --no-fix .` — lint.
+   - `uv run pyright` — type check of `src` and `tests` against the pinned
+     dependency types.
 2. **test (py3.11 – py3.14):** `uv run pytest` on every supported Python version.
 
 A separate [LICENSE-3rdparty workflow](./.github/workflows/license-3rdparty.yml)
@@ -210,6 +212,9 @@ uv run ruff check . --fix
 # Reproduce CI exactly (no autofix)
 uv run ruff format --check .
 uv run ruff check --no-fix .
+
+# Type check
+uv run pyright
 
 # Tests
 uv run pytest

@@ -6,8 +6,14 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
+from airedale import dataset as dataset_module
 from airedale.config.experiment import TaskConfig
-from airedale.dataset import task_to_record
+from airedale.dataset import get_or_create_dataset, task_to_record
+
+if TYPE_CHECKING:
+    import pytest
 
 
 class TestTaskToRecord:
@@ -63,3 +69,29 @@ class TestTaskToRecord:
         record = task_to_record(task)
         assert record["input_data"]["description"] == ""
         assert record["metadata"]["description"] == ""
+
+
+class TestGetOrCreateDataset:
+    def test_new_dataset_gets_every_task_record_field(self, monkeypatch: pytest.MonkeyPatch):
+        # `get_or_create_dataset` copies each record into the SDK record type.
+        # This test fails if that copy drops a field that `task_to_record` sets.
+        tasks = [
+            TaskConfig(id="t1", prompt="Q1", criteria=("c1",), description="d1", latency_threshold_ms=10),
+            TaskConfig(id="t2", prompt="Q2", criteria=("c2", "c3"), context="ctx"),
+        ]
+        created: dict[str, Any] = {}
+
+        def pull_dataset(*_args: Any, **_kwargs: Any) -> Any:
+            raise LookupError("dataset not found")
+
+        def create_dataset(**kwargs: Any) -> str:
+            created.update(kwargs)
+            return "created"
+
+        monkeypatch.setattr(dataset_module.LLMObs, "pull_dataset", pull_dataset)
+        monkeypatch.setattr(dataset_module.LLMObs, "create_dataset", create_dataset)
+
+        result = get_or_create_dataset(tasks, dataset_name="ds", project="proj")
+
+        assert result == "created"
+        assert created["records"] == [task_to_record(task) for task in tasks]
