@@ -100,8 +100,11 @@ class TestLoadGatewayValid:
         example = Path(__file__).parent.parent / "examples" / "gateway.toml"
         config = load_gateway(example)
 
+        assert config is not None
         assert config.providers
-        assert all(provider.headers["x-target-account"] == "eval" for provider in config.providers.values())
+        for provider in config.providers.values():
+            assert provider.headers is not None
+            assert provider.headers["x-target-account"] == "eval"
 
 
 class TestLoadGatewayErrors:
