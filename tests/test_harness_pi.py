@@ -2157,3 +2157,67 @@ def test_health_probe_reads_only_the_first_tools_page(monkeypatch):
     assert _bounded(mcp_module._list_mcp_tools(server, {})) == ["first"]
     assert calls == [None]
     assert _bounded(mcp_module._list_mcp_tools(server, {}, all_pages=True)) == ["first", "p2"]
+
+
+# --------------------------------------------------------------------------- #
+# AIREDALE_PI_COMMAND parsing
+# --------------------------------------------------------------------------- #
+class TestPiCommandEnv:
+    @pytest.fixture
+    def pi_module(self, monkeypatch):
+        import airedale.harness.pi as pi_module
+
+        monkeypatch.delenv("AIREDALE_PI_COMMAND", raising=False)
+        return pi_module
+
+    def test_default(self, pi_module):
+        assert pi_module._default_pi_command() == ["pi"]
+
+    def test_posix_rules(self, pi_module, monkeypatch):
+        monkeypatch.setattr(pi_module, "_is_windows", lambda: False)
+        monkeypatch.setenv("AIREDALE_PI_COMMAND", "npx -y '@earendil-works/pi-coding-agent'")
+        assert pi_module._default_pi_command() == ["npx", "-y", "@earendil-works/pi-coding-agent"]
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            (r"C:\tools\pi.exe", [r"C:\tools\pi.exe"]),
+            (r'"C:\Program Files\pi\pi.exe" --flag', [r"C:\Program Files\pi\pi.exe", "--flag"]),
+            (r'node C:\pi\cli.js "a b" c', ["node", r"C:\pi\cli.js", "a b", "c"]),
+            (r'x \\"quoted\\" y', ["x", "\\quoted\\", "y"]),
+            (r"x \"literal\" y", ["x", '"literal"', "y"]),
+            (r'x "" y', ["x", "", "y"]),
+            ("  x\t y  ", ["x", "y"]),
+            # The program name: up to the next quote, backslashes literal.
+            (r'"C:\Program Files\pi\pi.exe"--flag', [r"C:\Program Files\pi\pi.exe", "--flag"]),
+            # In a quoted part, "" is a literal quote.
+            ('x "a"""', ["x", 'a"']),
+            ('node -e "console.log("""hello""")"', ["node", "-e", 'console.log("hello")']),
+        ],
+    )
+    def test_windows_rules(self, pi_module, monkeypatch, raw, expected):
+        monkeypatch.setattr(pi_module, "_is_windows", lambda: True)
+        monkeypatch.setenv("AIREDALE_PI_COMMAND", raw)
+        assert pi_module._default_pi_command() == expected
+
+    @pytest.mark.parametrize("windows", [False, True])
+    def test_json_array(self, pi_module, monkeypatch, windows):
+        monkeypatch.setattr(pi_module, "_is_windows", lambda: windows)
+        monkeypatch.setenv("AIREDALE_PI_COMMAND", json.dumps([r"C:\tools\pi.exe", "--x", "a b"]))
+        assert pi_module._default_pi_command() == [r"C:\tools\pi.exe", "--x", "a b"]
+
+    @pytest.mark.parametrize("raw", ["[1]", "[]", '[""]', '["", "x"]'])
+    def test_bad_json_array(self, pi_module, monkeypatch, raw):
+        monkeypatch.setenv("AIREDALE_PI_COMMAND", raw)
+        with pytest.raises(ValueError, match="AIREDALE_PI_COMMAND"):
+            pi_module._default_pi_command()
+
+    def test_empty_arguments_after_the_program_are_kept(self, pi_module, monkeypatch):
+        monkeypatch.setenv("AIREDALE_PI_COMMAND", json.dumps(["sh", "-c", 'exec pi "$@"', ""]))
+        assert pi_module._default_pi_command() == ["sh", "-c", 'exec pi "$@"', ""]
+
+    def test_value_starting_with_a_bracket_that_is_not_json(self, pi_module, monkeypatch):
+        # A path such as "[tools]/pi" stays a command line, as before.
+        monkeypatch.setattr(pi_module, "_is_windows", lambda: False)
+        monkeypatch.setenv("AIREDALE_PI_COMMAND", "[tools]/pi --x")
+        assert pi_module._default_pi_command() == ["[tools]/pi", "--x"]

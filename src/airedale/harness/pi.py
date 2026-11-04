@@ -152,8 +152,9 @@ logger = logging.getLogger(__name__)
 
 SDK_NAME = "pi"
 PI_FRAMEWORK = "pi"
-#: Environment variable that overrides the pi command (split with ``shlex``),
-#: for example ``npx -y @earendil-works/pi-coding-agent``. Default: ``pi``.
+#: Environment variable that overrides the pi command, for example
+#: ``npx -y @earendil-works/pi-coding-agent`` or a JSON array of arguments
+#: (see ``_default_pi_command``). Default: ``pi``.
 PI_COMMAND_ENV = "AIREDALE_PI_COMMAND"
 DEFAULT_PI_COMMAND = "pi"
 #: Every built-in pi tool. Used when a scenario allows all built-in tools
@@ -901,8 +902,93 @@ def _make_private_agent_dir(workspace: Path) -> Path:
 
 
 def _default_pi_command() -> list[str]:
+    """Return the pi command from ``AIREDALE_PI_COMMAND`` (default ``pi``).
+
+    A JSON array of strings gives the exact arguments, on every platform (the
+    first one must not be empty). Any other value is split as a command
+    line: with POSIX shell rules, or on Windows with Windows rules, where a
+    backslash is a path separator (``C:\\tools\\pi.exe``), not an escape.
+    """
     raw = os.environ.get(PI_COMMAND_ENV, "").strip()
-    return shlex.split(raw) if raw else [DEFAULT_PI_COMMAND]
+    if not raw:
+        return [DEFAULT_PI_COMMAND]
+    if raw.startswith("["):
+        try:
+            command = json.loads(raw)
+        except ValueError:
+            command = None  # Not JSON (for example a path "[tools]/pi"): a command line.
+        if command is not None:
+            if not (
+                isinstance(command, list) and command and all(isinstance(arg, str) for arg in command) and command[0]
+            ):
+                raise ValueError(
+                    f"{PI_COMMAND_ENV} is a JSON value but not an array of strings with a non-empty first string"
+                )
+            return command
+    return _split_windows_command(raw) if _is_windows() else shlex.split(raw)
+
+
+def _split_windows_command(raw: str) -> list[str]:
+    """Split a command line as Windows ``CommandLineToArgvW`` does.
+
+    The program name (first argument) ends at the next ``"`` when it starts
+    with one, else at the first space; its backslashes are literal. For the
+    other arguments: spaces separate them outside double quotes; ``2n``
+    backslashes before a ``"`` give ``n`` backslashes and the quote opens or
+    closes a quoted part; ``2n+1`` give ``n`` and a literal ``"``; in a quoted
+    part, ``""`` gives a literal ``"``; other backslashes are literal.
+    """
+    raw = raw.lstrip(" \t")
+    if not raw:
+        return []
+    if raw[0] == '"':
+        end = raw.find('"', 1)
+        program, rest = (raw[1:], "") if end == -1 else (raw[1:end], raw[end + 1 :])
+    else:
+        cut = len(raw)
+        for separator in (" ", "\t"):
+            position = raw.find(separator)
+            if position != -1:
+                cut = min(cut, position)
+        program, rest = raw[:cut], raw[cut:]
+    args = [program]
+    current: list[str] = []
+    in_arg = in_quotes = False
+    index = 0
+    while index < len(rest):
+        char = rest[index]
+        if char == "\\":
+            count = 0
+            while index < len(rest) and rest[index] == "\\":
+                count += 1
+                index += 1
+            if index < len(rest) and rest[index] == '"':
+                current.append("\\" * (count // 2))
+                if count % 2:
+                    current.append('"')
+                    index += 1
+            else:
+                current.append("\\" * count)
+            in_arg = True
+            continue
+        if char == '"':
+            in_arg = True
+            if in_quotes and rest[index + 1 : index + 2] == '"':
+                current.append('"')
+                index += 2
+                continue
+            in_quotes = not in_quotes
+        elif char in " \t" and not in_quotes:
+            if in_arg:
+                args.append("".join(current))
+                current, in_arg = [], False
+        else:
+            current.append(char)
+            in_arg = True
+        index += 1
+    if in_arg:
+        args.append("".join(current))
+    return args
 
 
 def _operator_agent_dir() -> Path:

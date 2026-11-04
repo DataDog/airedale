@@ -82,7 +82,7 @@ dependencies and are installed automatically.
 | `DD_SITE`       | Datadog site (default `datadoghq.com`)          | Only for a non-default site |
 | `ANTHROPIC_API_KEY` | Anthropic API key                          | Anthropic models, without a gateway |
 | `OPENAI_API_KEY`    | OpenAI API key                             | OpenAI models, without a gateway    |
-| `AIREDALE_PI_COMMAND` | Command that starts pi (split like a shell command; default `pi`) | Optional, `harness = "pi"` only |
+| `AIREDALE_PI_COMMAND` | Command that starts pi: a command line (split with shell rules, or Windows rules on Windows) or a JSON array of arguments; default `pi` | Optional, `harness = "pi"` only |
 
 ---
 
