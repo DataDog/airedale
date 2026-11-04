@@ -273,8 +273,14 @@ Notes:
     temp dirs or the home dir, else the run fails) that holds only the generated `settings.json`,
     `models.json`, `mcp.json`, the appended system prompt and — only without
     gateway/env auth — a **copy** of the operator's pi `auth.json`. Pi runs with
-    `--no-session`, `--no-skills` (blocks `~/.agents/skills`; scenario skills and
-    `<cwd>/.pi/skills` / `<cwd>/.agents/skills` are passed with `--skill`),
+    `--no-session`, `--no-skills` (blocks `~/.agents/skills` and `.agents/skills` above
+    `cwd`; passed with `--skill`, in pi's precedence order: scenario skills,
+    the `skills` paths of `<cwd>/.pi/settings.json`, the `<cwd>/.pi/skills`
+    root (pi's directory loader has the rules of its discovery), then the
+    skill files that pi's discovery finds in `<cwd>/.agents/skills`
+    (`airedale.skills._pi_skill_entries`); collisions use the frontmatter
+    `name`, as pi does. Not reproduced: ignore files in `.agents/skills`, and
+    the `!`/`+`/`-` filters of the settings `skills` list),
     `--approve` (project `.pi/` files are honored), `--no-context-files` (pi
     would read `AGENTS.md`/`CLAUDE.md` of every parent dir of `cwd`; the
     `cwd` file, chosen in pi's order with `AGENTS.override.md` first, is

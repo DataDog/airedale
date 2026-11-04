@@ -6,7 +6,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 import shutil
 from pathlib import Path
 
@@ -134,50 +136,272 @@ def discover_claude_skill_names(cwd: str) -> list[str]:
     return _discover_skill_names(Path(cwd) / ".claude" / "skills")
 
 
-#: Project skill locations pi discovers under the working directory.
-PI_PROJECT_SKILL_SUBDIRS: tuple[str, ...] = (".pi/skills", ".agents/skills")
+#: Project skill roots that pi discovers in the working directory, with the
+#: discovery mode of each (see ``_pi_skill_entries``).
+PI_PROJECT_SKILL_ROOTS: tuple[tuple[str, str], ...] = ((".pi/skills", "pi"), (".agents/skills", "agents"))
+#: Directory names that pi does not enter when it looks for skills.
+_PI_SKIPPED_SKILL_DIRS = frozenset({"node_modules"})
+#: YAML plain scalars that are not strings (pi then ignores the ``name``).
+_YAML_NON_STRING_RE = re.compile(
+    r"^(?:[-+]?(?:\d[\d_]*(?:\.\d*)?(?:[eE][-+]?\d+)?|\.inf|\.Inf|\.INF)|\.nan|\.NaN|\.NAN|"
+    r"true|True|TRUE|false|False|FALSE|null|Null|NULL|~)$"
+)
 
 
 def pi_skill_dirs(skill_dirs: list[str], cwd: str) -> list[str]:
-    """Return the skill directories to pass to pi with ``--skill``.
+    """Return the skill paths to pass to pi with ``--skill``, in pi's precedence order.
 
     The pi harness runs pi with ``--no-skills`` so that user-global skills
-    (for example ``~/.agents/skills``) never load. This function returns the
-    scenario skills plus the project skills that pi would discover in the run
-    ``cwd`` (``.pi/skills/<name>`` and ``.agents/skills/<name>``). Nothing is
-    copied: pi loads each directory where it is. A scenario skill whose name
-    is the same as a project skill raises ``ValueError``, as for the other
-    harnesses.
+    (for example ``~/.agents/skills``) and ``.agents/skills`` above the
+    workspace never load. This function returns:
+
+    1. The scenario skill directories.
+    2. The paths in the ``skills`` list of the project ``.pi/settings.json``
+       (relative to ``.pi``). Override entries (``!``, ``+``, ``-``) are not
+       paths and are left out. Pi gives these entries precedence over the
+       automatic discovery.
+    3. The project root ``.pi/skills``: pi's directory loader then applies
+       the same rules as its discovery (recursive, ignore files).
+    4. The skill files that pi's discovery finds in ``.agents/skills``. Its
+       rules differ from the directory loader (standalone ``.md`` files count
+       below the root, not at the root), so the files are passed. Ignore
+       files are not applied there.
+
+    Pi keeps the first skill of a name. It names a skill from the ``name`` of
+    its frontmatter (else the directory name). Limit: ignore files are not
+    applied in the collision check, so a skill that an ignore file excludes
+    can still make the run fail (with a clear message; never a silent change). A scenario skill with the name
+    of a project skill raises ``ValueError``, as for the other harnesses (pi
+    would hide the project skill). Nothing is copied.
     """
-    resolved: list[str] = []
+    scenario: list[str] = []
     names: dict[str, str] = {}
-
-    def _add(path: Path, *, origin: str) -> None:
-        name = _derive_skill_name(path.name)
-        if name in names and origin == "project skill" and names[name].startswith("project skill"):
-            # Two project locations ship the same skill: pi keeps the first one.
-            logger.warning("Project skill %s shadowed by %s", path, names[name])
-            return
-        if name in names:
-            raise ValueError(
-                f"Skill '{name}' ({origin} {path}) collides with {names[name]}; skill names must be unique"
-            )
-        names[name] = f"{origin} {path}"
-        resolved.append(str(path))
-
     for skill_dir in skill_dirs:
         source_path = Path(skill_dir).resolve()
         if not source_path.exists():
             raise ValueError(f"Skill directory does not exist: {skill_dir}")
         if not source_path.is_dir():
             raise ValueError(f"Skill path is not a directory: {skill_dir}")
-        _add(source_path, origin="scenario skill")
+        for name, skill_file in _pi_skills(source_path):
+            if name in names:
+                raise ValueError(f"Skill '{name}' (scenario skill {skill_file}) collides with {names[name]}")
+            names[name] = f"scenario skill {skill_file}"
+        scenario.append(str(source_path))
 
-    for subdir in PI_PROJECT_SKILL_SUBDIRS:
-        base = Path(cwd) / subdir
-        for name in _discover_skill_names(base):
-            _add(base / name, origin="project skill")
-    return resolved
+    workspace = Path(cwd)
+    candidates = [path for path in _pi_settings_skill_paths(workspace) if path.exists()]
+    for subdir, mode in PI_PROJECT_SKILL_ROOTS:
+        root = workspace / subdir
+        if mode == "pi":
+            if root.is_dir():
+                candidates.append(root)
+        else:
+            candidates.extend(_pi_skill_entries(root, mode))
+    project: list[str] = []
+    seen_project: dict[str, str] = {}
+    for path in candidates:
+        if str(path) in project:
+            continue
+        for name, skill_file in _pi_skills(path):
+            if name in names:
+                raise ValueError(
+                    f"Skill '{name}' (project skill {skill_file}) collides with {names[name]}; "
+                    "skill names must be unique"
+                )
+            if name in seen_project:
+                # Pi keeps the first skill of a name.
+                logger.warning("Project skill %s shadowed by %s", skill_file, seen_project[name])
+                continue
+            seen_project[name] = str(skill_file)
+        project.append(str(path))
+    return [*scenario, *project]
+
+
+def _pi_settings_skill_paths(workspace: Path) -> list[Path]:
+    """Return the skill paths of the project ``.pi/settings.json`` (``skills`` list)."""
+    settings_file = workspace / ".pi" / "settings.json"
+    if not settings_file.is_file():
+        return []
+    try:
+        data = json.loads(settings_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        logger.warning("Unable to parse project pi settings %s", settings_file, exc_info=True)
+        return []
+    entries = data.get("skills") if isinstance(data, dict) else None
+    if not isinstance(entries, list):
+        return []
+    paths: list[Path] = []
+    for entry in entries:
+        if not isinstance(entry, str) or not entry.strip() or entry.startswith(("!", "+", "-")):
+            continue
+        path = Path(entry.strip()).expanduser()
+        paths.append(path if path.is_absolute() else (workspace / ".pi" / path))
+    return paths
+
+
+def _pi_skill_entries(directory: Path, mode: str, root: Path | None = None) -> list[Path]:
+    """Return the skill files that pi's automatic discovery finds in ``directory``.
+
+    Same walk as pi's ``collectSkillEntries``: a directory with ``SKILL.md``
+    gives that file and pi does not go deeper; else pi goes into the
+    subdirectories (not ``.*``, not ``node_modules``). Standalone ``.md``
+    files count only at the root in ``pi`` mode (``.pi/skills``) and only
+    below the root in ``agents`` mode (``.agents/skills``). Not reproduced:
+    ``.gitignore``-style ignore files.
+    """
+    root = root or directory
+    if not directory.is_dir():
+        return []
+    if (directory / "SKILL.md").is_file():
+        return [directory / "SKILL.md"]
+    entries: list[Path] = []
+    try:
+        children = sorted(directory.iterdir())
+    except OSError:
+        return entries
+    for child in children:
+        if child.name.startswith(".") or child.name in _PI_SKIPPED_SKILL_DIRS:
+            continue
+        at_root = directory == root
+        if (
+            child.is_file()
+            and child.suffix == ".md"
+            and ((mode == "pi" and at_root) or (mode == "agents" and not at_root))
+        ):
+            entries.append(child)
+        elif child.is_dir():
+            entries.extend(_pi_skill_entries(child, mode, root))
+    return entries
+
+
+def _pi_skills(path: Path) -> list[tuple[str, Path]]:
+    """Return ``(name, file)`` for each skill that pi loads from ``path`` (a ``--skill`` value).
+
+    A file is one skill. For a directory, the same walk as pi's
+    ``loadSkillsFromDir``: a directory with ``SKILL.md`` is one skill; else pi
+    goes into the subdirectories (not ``.*``, not ``node_modules``) and, at the
+    top level only, loads the ``.md`` files. Not reproduced: ignore files and
+    the validation that makes pi skip a malformed skill.
+    """
+    if path.is_file():
+        name = _pi_skill_name(path)
+        return [(name, path)] if name else []
+    return _pi_skills_in_dir(path, top_level=True)
+
+
+def _pi_skills_in_dir(directory: Path, *, top_level: bool) -> list[tuple[str, Path]]:
+    skill_file = directory / "SKILL.md"
+    if skill_file.is_file():
+        name = _pi_skill_name(skill_file)
+        return [(name, skill_file)] if name else []
+    found: list[tuple[str, Path]] = []
+    try:
+        entries = sorted(directory.iterdir())
+    except OSError:
+        return found
+    for entry in entries:
+        if entry.name.startswith(".") or entry.name in _PI_SKIPPED_SKILL_DIRS:
+            continue
+        if entry.is_dir():
+            found.extend(_pi_skills_in_dir(entry, top_level=False))
+        elif top_level and entry.is_file() and entry.suffix == ".md":
+            name = _pi_skill_name(entry)
+            if name:
+                found.append((name, entry))
+    return found
+
+
+def _pi_skill_name(skill_file: Path) -> str | None:
+    """Return the name pi gives the skill in ``skill_file`` (``None``: pi does not load it).
+
+    The frontmatter ``name`` when it is a string, else the name of the parent
+    directory. As in pi, a file without a non-blank ``description`` is not a
+    skill (also ``SKILL.md``).
+    """
+    frontmatter = _frontmatter(skill_file)
+    if frontmatter is None or not frontmatter.get("description", "").strip():
+        return None
+    return frontmatter.get("name") or skill_file.parent.name
+
+
+def _frontmatter(path: Path) -> dict[str, str] | None:
+    """Return the top-level string values of the YAML frontmatter of ``path``.
+
+    A small YAML subset, enough for ``name`` and ``description``: plain,
+    single-quoted and double-quoted scalars, with ``#`` comments. Values that
+    YAML reads as numbers, booleans or null are left out (pi ignores a name
+    that is not a string). ``None`` when the file has no frontmatter.
+    """
+    try:
+        text = path.read_text(encoding="utf-8-sig", errors="replace")
+    except OSError:
+        return None
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None
+    values: dict[str, str] = {}
+    body = lines[1:]
+    index = 0
+    while index < len(body):
+        line = body[index]
+        index += 1
+        if line.strip() in ("---", "..."):
+            return values
+        if not line or line[0] in " \t#" or ":" not in line:
+            continue
+        key, _, raw = line.partition(":")
+        raw = raw.strip()
+        if raw[:1] in ("|", ">"):
+            # Block scalar: the indented lines that follow.
+            block: list[str] = []
+            while index < len(body) and (not body[index].strip() or body[index][:1] in " \t"):
+                block.append(body[index])
+                index += 1
+            values[key.strip()] = _yaml_block(raw, block)
+            continue
+        value = _yaml_scalar(raw)
+        if value is not None:
+            values[key.strip()] = value
+    return None
+
+
+def _yaml_block(header: str, block: list[str]) -> str:
+    """Return the text of a YAML block scalar (``|`` keeps lines, ``>`` folds them)."""
+    indents = [len(line) - len(line.lstrip()) for line in block if line.strip()]
+    indent = min(indents) if indents else 0
+    text_lines = [line[indent:] for line in block]
+    trailing = 0
+    while text_lines and not text_lines[-1].strip():
+        text_lines.pop()
+        trailing += 1
+    if header.startswith(">"):
+        text = " ".join(line.strip() for line in text_lines if line.strip())
+    else:
+        text = "\n".join(text_lines)
+    # Chomping as in YAML: "-" strips the final line break, "+" keeps all of
+    # them, the default keeps one.
+    if "-" in header or not text:
+        return text
+    return text + "\n" * (1 + trailing if "+" in header else 1)
+
+
+def _yaml_scalar(raw: str) -> str | None:
+    """Return the string value of a one-line YAML scalar (``None`` if not a string)."""
+    if raw.startswith("'"):
+        end = raw.find("'", 1)
+        while end != -1 and raw[end + 1 : end + 2] == "'":
+            end = raw.find("'", end + 2)
+        return raw[1:end].replace("''", "'") if end != -1 else None
+    if raw.startswith('"'):
+        try:
+            value, _ = json.JSONDecoder().raw_decode(raw)
+        except ValueError:
+            return None
+        return value if isinstance(value, str) else None
+    value = re.split(r"\s#", raw, maxsplit=1)[0].strip()
+    if not value or _YAML_NON_STRING_RE.match(value) or value[0] in "|>[{&*!":
+        return None
+    return value
 
 
 def _discover_skill_names(skills_base: Path) -> list[str]:

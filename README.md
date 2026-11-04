@@ -328,7 +328,9 @@ Notes:
   `mcp.json` (scenario MCP servers) and, when no gateway credential or provider
   API-key env var is set, a **copy** of the operator's pi `auth.json`. Pi also
   runs with `--no-session`, `--no-skills` (so `~/.agents/skills` does not load;
-  scenario and project skills are passed with `--skill`), `--approve` (a cloned
+  scenario skills, the `skills` paths of `.pi/settings.json`, and the skills
+  that pi finds in `.pi/skills` and `.agents/skills` (also in subdirectories)
+  are passed with `--skill`), `--approve` (a cloned
   repo's `.pi/` files load, like `.claude/` for Claude), `--no-context-files`
   (an `AGENTS.md`/`CLAUDE.md` in a parent directory of the workspace does not
   load; the workspace's own file is added to the system prompt) and

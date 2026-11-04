@@ -909,18 +909,43 @@ class TestRunnerConfig:
 
 
 class TestPiSkillDirs:
-    def _skill(self, base: Path, name: str) -> Path:
+    def _skill(self, base: Path, name: str, *, declared: str | None = None) -> Path:
         path = base / name
         path.mkdir(parents=True)
-        (path / "SKILL.md").write_text(f"---\nname: {name}\ndescription: d\n---\n")
+        (path / "SKILL.md").write_text(f"---\nname: {declared or name}\ndescription: d\n---\n")
         return path
 
     def test_scenario_and_project_skills(self, tmp_path):
         scenario = self._skill(tmp_path / "src", "alpha")
         cwd = tmp_path / "cwd"
-        project = self._skill(cwd / ".pi" / "skills", "beta")
-        agents = self._skill(cwd / ".agents" / "skills", "gamma")
-        assert pi_skill_dirs([str(scenario)], str(cwd)) == [str(scenario.resolve()), str(project), str(agents)]
+        self._skill(cwd / ".pi" / "skills", "beta")
+        self._skill(cwd / ".agents" / "skills", "gamma")
+        # Project skill roots are passed whole: pi discovers their skills.
+        # .pi/skills goes whole (pi's directory loader has the same rules as its
+        # discovery); .agents/skills goes as the files pi's discovery finds.
+        assert pi_skill_dirs([str(scenario)], str(cwd)) == [
+            str(scenario.resolve()),
+            str(cwd / ".pi" / "skills"),
+            str(cwd / ".agents" / "skills" / "gamma" / "SKILL.md"),
+        ]
+
+    def test_nested_project_skill_is_checked_for_collisions(self, tmp_path):
+        scenario = self._skill(tmp_path / "src", "alpha")
+        cwd = tmp_path / "cwd"
+        self._skill(cwd / ".pi" / "skills" / "team", "alpha")
+        with pytest.raises(ValueError, match="collides"):
+            pi_skill_dirs([str(scenario)], str(cwd))
+
+    def test_collisions_use_the_frontmatter_name(self, tmp_path):
+        cwd = tmp_path / "cwd"
+        # Same directory name, different declared names: no collision.
+        scenario = self._skill(tmp_path / "src", "tool", declared="scenario-tool")
+        self._skill(cwd / ".pi" / "skills", "tool", declared="repo-tool")
+        assert pi_skill_dirs([str(scenario)], str(cwd))[0] == str(scenario.resolve())
+        # Different directory names, same declared name: collision.
+        other = self._skill(tmp_path / "src2", "other", declared="repo-tool")
+        with pytest.raises(ValueError, match="'repo-tool'"):
+            pi_skill_dirs([str(other)], str(cwd))
 
     def test_scenario_project_collision_raises(self, tmp_path):
         scenario = self._skill(tmp_path / "src", "alpha")
@@ -929,11 +954,116 @@ class TestPiSkillDirs:
         with pytest.raises(ValueError, match="collides"):
             pi_skill_dirs([str(scenario)], str(cwd))
 
-    def test_project_duplicates_keep_first(self, tmp_path):
+    def test_project_duplicates_are_left_to_pi(self, tmp_path, caplog):
         cwd = tmp_path / "cwd"
-        first = self._skill(cwd / ".pi" / "skills", "alpha")
+        self._skill(cwd / ".pi" / "skills", "alpha")
         self._skill(cwd / ".agents" / "skills", "alpha")
-        assert pi_skill_dirs([], str(cwd)) == [str(first)]
+        # Pi keeps the first skill of a name (.pi/skills comes first).
+        assert pi_skill_dirs([], str(cwd)) == [
+            str(cwd / ".pi" / "skills"),
+            str(cwd / ".agents" / "skills" / "alpha" / "SKILL.md"),
+        ]
+        assert "shadowed" in caplog.text
+
+    def test_settings_skill_paths(self, tmp_path):
+        cwd = tmp_path / "cwd"
+        extra = self._skill(cwd / "tools", "delta")
+        absolute = self._skill(tmp_path / "shared", "epsilon")
+        (cwd / ".pi").mkdir(parents=True)
+        (cwd / ".pi" / "settings.json").write_text(
+            json.dumps({"skills": ["../tools/delta", str(absolute), "!skills/old", "+x", "-y", "../missing", 3]})
+        )
+        assert pi_skill_dirs([], str(cwd)) == [str(cwd / ".pi" / "../tools/delta"), str(absolute)]
+        assert extra.exists()
+
+    def test_settings_skills_come_before_discovered_skills(self, tmp_path, caplog):
+        # Pi gives a settings entry precedence over automatic discovery.
+        cwd = tmp_path / "cwd"
+        discovered = self._skill(cwd / ".pi" / "skills", "alpha")
+        configured = self._skill(cwd / "tools", "alpha-v2", declared="alpha")
+        (cwd / ".pi" / "settings.json").write_text(json.dumps({"skills": [str(configured)]}))
+        assert pi_skill_dirs([], str(cwd)) == [str(configured), str(discovered.parent)]
+        assert "shadowed" in caplog.text
+
+    def test_standalone_markdown_rules_per_root(self, tmp_path):
+        cwd = tmp_path / "cwd"
+        pi_root = cwd / ".pi" / "skills"
+        agents_root = cwd / ".agents" / "skills"
+        (pi_root / "team").mkdir(parents=True)
+        (agents_root / "team").mkdir(parents=True)
+        skill = "---\nname: {}\ndescription: d\n---\n"
+        (pi_root / "root.md").write_text(skill.format("pi-root"))
+        (pi_root / "team" / "nested.md").write_text(skill.format("pi-nested"))
+        (agents_root / "root.md").write_text(skill.format("agents-root"))
+        (agents_root / "team" / "nested.md").write_text(skill.format("agents-nested"))
+        # As pi: root .md files in .pi/skills, nested .md files in .agents/skills.
+        assert pi_skill_dirs([], str(cwd)) == [str(pi_root), str(agents_root / "team" / "nested.md")]
+        from airedale.skills import _pi_skills
+
+        assert [name for name, _ in _pi_skills(pi_root)] == ["pi-root"]
+
+    @pytest.mark.parametrize(
+        "line", ["name: alpha # project copy", "name: 'alpha' # quoted", 'name: "alpha"', "name:   alpha   "]
+    )
+    def test_yaml_name_forms_are_compared(self, tmp_path, line):
+        scenario = self._skill(tmp_path / "src", "alpha")
+        cwd = tmp_path / "cwd"
+        other = cwd / ".pi" / "skills" / "other"
+        other.mkdir(parents=True)
+        (other / "SKILL.md").write_text(f"---\n{line}\ndescription: d\n---\n")
+        with pytest.raises(ValueError, match="'alpha'"):
+            pi_skill_dirs([str(scenario)], str(cwd))
+
+    @pytest.mark.parametrize(
+        ("header", "expected"), [(">-", "alpha"), ("|-", "alpha"), ("|", "alpha\n"), (">", "alpha\n")]
+    )
+    def test_block_scalar_name(self, tmp_path, header, expected):
+        from airedale.skills import _pi_skills
+
+        skill = tmp_path / "dir-name"
+        skill.mkdir()
+        (skill / "SKILL.md").write_text(f"---\nname: {header}\n  alpha\ndescription: d\n---\n")
+        assert [name for name, _ in _pi_skills(skill)] == [expected]
+
+    @pytest.mark.parametrize("description", ["", "description:", "description: ''", "description:    "])
+    def test_skill_without_description_is_not_loaded(self, tmp_path, description):
+        # As pi: no non-blank description, no skill (also for SKILL.md), so no collision.
+        scenario = self._skill(tmp_path / "src", "alpha")
+        cwd = tmp_path / "cwd"
+        other = cwd / ".agents" / "skills" / "other"
+        other.mkdir(parents=True)
+        (other / "SKILL.md").write_text(f"---\nname: alpha\n{description}\n---\n")
+        assert pi_skill_dirs([str(scenario)], str(cwd))[0] == str(scenario.resolve())
+
+    def test_non_string_name_uses_the_directory_name(self, tmp_path):
+        from airedale.skills import _pi_skills
+
+        skill = tmp_path / "dir-name"
+        skill.mkdir()
+        (skill / "SKILL.md").write_text("---\nname: 123\ndescription: |\n  text\n---\n")
+        assert [name for name, _ in _pi_skills(skill)] == ["dir-name"]
+
+    def test_agents_skills_above_the_workspace_are_not_loaded(self, tmp_path):
+        self._skill(tmp_path / ".agents" / "skills", "ambient")
+        cwd = tmp_path / "cwd"
+        cwd.mkdir()
+        assert pi_skill_dirs([], str(cwd)) == []
+
+    def test_standalone_markdown_skill_names(self, tmp_path):
+        from airedale.skills import _pi_skills
+
+        root = tmp_path / "skills"
+        root.mkdir()
+        (root / "quick.md").write_text("---\nname: quick\ndescription: 'd'\n---\n")
+        (root / "notes.md").write_text("# not a skill\n")
+        (root / ".hidden").mkdir()
+        (root / ".hidden" / "SKILL.md").write_text("---\nname: hidden\n---\n")
+        (root / "node_modules" / "dep").mkdir(parents=True)
+        (root / "node_modules" / "dep" / "SKILL.md").write_text("---\nname: dep\n---\n")
+        nested = root / "a" / "b"
+        nested.mkdir(parents=True)
+        (nested / "SKILL.md").write_text("---\ndescription: d\n---\n")
+        assert [name for name, _ in _pi_skills(root)] == ["b", "quick"]
 
     def test_missing_scenario_skill_raises(self, tmp_path):
         with pytest.raises(ValueError, match="does not exist"):
