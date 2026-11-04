@@ -296,7 +296,20 @@ Notes:
     fails it. The pi process group is always stopped and reaped (also on
     cancellation — also a second one during cleanup — and when pi exits while a
     child keeps stdout open; exit is detected from `returncode`, not
-    `process.wait()`, which can wait for the pipes).
+    `process.wait()`, which can wait for the pipes). On Windows (no process
+    groups, no `os.killpg`) the runner stops the pi process tree with
+    `taskkill /PID <pid> /T /F`, then `TerminateProcess` if pi still runs.
+    Limit on Windows: when pi already exited, its children are not found and
+    keep running (a Job Object would be necessary).
+    The private agent dir is outside `cwd`, but pi's tools (`bash`, `read`
+    with an absolute path) run as the same OS user, and the pi env has
+    `PI_CODING_AGENT_DIR`, so a model command can read `models.json` /
+    `auth.json`. The other harnesses are at the same level: Claude's `Bash`
+    gets `ANTHROPIC_API_KEY` (airedale does not set
+    `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`) or can run the `apiKeyHelper`
+    command; Codex copies `auth.json` into `cwd` and its read-only sandbox
+    allows reads. Only an OS sandbox around tool execution blocks this. So
+    trust covers the model's commands too, not only the repo code.
     Pi has no turn limit: the runner counts `turn_start` events and stops the
     pi process group above `max_turns`. `effort` becomes `--thinking` when it
     is a pi thinking level.

@@ -1531,3 +1531,133 @@ def test_finish_cleanup_completes_and_keeps_cancellation():
 
     _bounded(scenario())
     assert done == [True]
+
+
+# --------------------------------------------------------------------------- #
+# Process stop on Windows (no process groups, no os.killpg)
+# --------------------------------------------------------------------------- #
+class _FakeWindowsProcess:
+    def __init__(self, *, returncode: int | None = None) -> None:
+        self.pid = 4242
+        self.returncode = returncode
+        self.killed = False
+
+    def kill(self) -> None:
+        self.killed = True
+        self.returncode = 1
+
+
+class TestWindowsStop:
+    @pytest.fixture
+    def windows(self, monkeypatch):
+        import airedale.harness.pi as pi_module
+
+        def no_killpg(*args):
+            raise AssertionError("os.killpg must not be used on Windows")
+
+        monkeypatch.setattr(pi_module, "_is_windows", lambda: True)
+        monkeypatch.setattr(pi_module.os, "killpg", no_killpg, raising=False)
+        monkeypatch.setattr(pi_module, "PI_TERMINATE_GRACE_SECONDS", 1.0)
+        calls: list[tuple[str, ...]] = []
+        return pi_module, calls
+
+    def _fake_exec(
+        self,
+        calls,
+        process,
+        *,
+        stops_pi: bool = True,
+        error: type[Exception] | None = None,
+        hangs: bool = False,
+        helpers: list | None = None,
+    ):
+        async def fake_exec(*argv, **kwargs):
+            calls.append(argv)
+            if error is not None:
+                raise error("taskkill")
+
+            class _Taskkill:
+                returncode: int | None = None
+                killed = False
+
+                async def wait(self) -> int:
+                    if hangs:
+                        await asyncio.sleep(600)
+                    if stops_pi:
+                        process.returncode = 1
+                    self.returncode = 0
+                    return 0
+
+                def kill(self) -> None:
+                    self.killed = True
+                    self.returncode = 1
+
+            helper = _Taskkill()
+            if helpers is not None:
+                helpers.append(helper)
+            return helper
+
+        return fake_exec
+
+    def test_taskkill_that_does_not_end_is_stopped(self, windows, monkeypatch):
+        pi_module, calls = windows
+        process = _FakeWindowsProcess()
+        helpers: list = []
+        monkeypatch.setattr(
+            pi_module.asyncio,
+            "create_subprocess_exec",
+            self._fake_exec(calls, process, hangs=True, helpers=helpers),
+        )
+        _bounded(pi_module._stop_process_group(process))
+        (helper,) = helpers
+        assert helper.killed
+        assert helper.returncode is not None
+        assert process.killed
+
+    def test_taskkill_stops_the_process_tree(self, windows, monkeypatch):
+        pi_module, calls = windows
+        process = _FakeWindowsProcess()
+        monkeypatch.setattr(pi_module.asyncio, "create_subprocess_exec", self._fake_exec(calls, process))
+        _bounded(pi_module._stop_process_group(process))
+        assert calls == [("taskkill", "/PID", "4242", "/T", "/F")]
+        assert process.returncode == 1
+        assert not process.killed
+
+    @pytest.mark.parametrize("error", [FileNotFoundError, PermissionError])
+    def test_pi_is_killed_when_taskkill_cannot_run(self, windows, monkeypatch, error):
+        pi_module, calls = windows
+        process = _FakeWindowsProcess()
+        monkeypatch.setattr(pi_module.asyncio, "create_subprocess_exec", self._fake_exec(calls, process, error=error))
+        _bounded(pi_module._stop_process_group(process))
+        assert len(calls) == 1
+        assert process.killed
+
+    def test_pi_is_killed_when_taskkill_does_not_stop_it(self, windows, monkeypatch):
+        pi_module, calls = windows
+        process = _FakeWindowsProcess()
+        monkeypatch.setattr(
+            pi_module.asyncio, "create_subprocess_exec", self._fake_exec(calls, process, stops_pi=False)
+        )
+        _bounded(pi_module._stop_process_group(process))
+        assert process.killed
+
+    def test_nothing_to_do_when_pi_already_exited(self, windows, monkeypatch):
+        pi_module, calls = windows
+        process = _FakeWindowsProcess(returncode=0)
+        monkeypatch.setattr(pi_module.asyncio, "create_subprocess_exec", self._fake_exec(calls, process))
+        _bounded(pi_module._stop_process_group(process))
+        assert calls == []
+        assert not process.killed
+
+    def test_pi_starts_without_a_new_session_on_windows(self, windows, monkeypatch, tmp_path):
+        pi_module, _ = windows
+        seen: dict[str, Any] = {}
+
+        async def fake_exec(*argv, **kwargs):
+            seen.update(kwargs)
+            raise FileNotFoundError(argv[0])
+
+        monkeypatch.setattr(pi_module.asyncio, "create_subprocess_exec", fake_exec)
+        with pytest.raises(RuntimeError, match="pi executable not found"):
+            _run(PiRunner(cwd=tmp_path, pi_command=["pi"]))
+        assert seen["start_new_session"] is False

@@ -593,8 +593,9 @@ class PiRunner(DecoratorSpanAgentRunner):
                 stderr=asyncio.subprocess.PIPE,
                 limit=PI_STREAM_LIMIT_BYTES,
                 # Own process group, so that stopping pi also stops its children
-                # (stdio MCP servers, bash tool commands).
-                start_new_session=True,
+                # (stdio MCP servers, bash tool commands). POSIX only: on
+                # Windows, the process tree of pi is stopped instead.
+                start_new_session=not _is_windows(),
             )
         except FileNotFoundError as exc:
             raise RuntimeError(f"pi executable not found ({command[0]!r}); install pi or set {PI_COMMAND_ENV}") from exc
@@ -863,13 +864,68 @@ async def _stop_process_group(process: asyncio.subprocess.Process) -> None:
     SIGTERM goes to the whole group (also when pi itself already exited, as its
     children can still run). If pi does not exit within the grace period, or a
     child is still in the group, SIGKILL follows. Pi is then reaped.
+
+    Windows has no process groups and no ``os.killpg``: see
+    ``_stop_process_tree_windows``.
     """
+    if _is_windows():
+        await _stop_process_tree_windows(process)
+        return
     _signal_group(process, signal.SIGTERM)
     if process.returncode is None:
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(_wait_for_exit(process), timeout=PI_TERMINATE_GRACE_SECONDS)
     _signal_group(process, signal.SIGKILL)
     if process.returncode is None:
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(_wait_for_exit(process), timeout=PI_TERMINATE_GRACE_SECONDS)
+
+
+def _is_windows() -> bool:
+    return os.name == "nt"
+
+
+#: Windows command that stops a process and all its child processes.
+WINDOWS_TASKKILL = "taskkill"
+
+
+async def _stop_process_tree_windows(process: asyncio.subprocess.Process) -> None:
+    """Stop pi and its child processes on Windows, then reap pi.
+
+    ``taskkill /T /F`` stops the process tree of pi (stdio MCP servers, bash
+    tool commands). Then pi itself is stopped (``TerminateProcess``) if it
+    still runs, and reaped. A ``taskkill`` that does not end in time is
+    stopped too.
+
+    Limit: Windows finds the children through pi. When pi already exited
+    (for example a child keeps stdout open), its children are not found and
+    are not stopped. A Windows Job Object would be necessary for that.
+    """
+    if process.returncode is None:
+        taskkill: asyncio.subprocess.Process | None = None
+        try:
+            taskkill = await asyncio.create_subprocess_exec(
+                WINDOWS_TASKKILL,
+                "/PID",
+                str(process.pid),
+                "/T",
+                "/F",
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await asyncio.wait_for(taskkill.wait(), timeout=PI_TERMINATE_GRACE_SECONDS)
+        except (TimeoutError, OSError):
+            pass
+        finally:
+            if taskkill is not None and taskkill.returncode is None:
+                with contextlib.suppress(ProcessLookupError, OSError):
+                    taskkill.kill()
+                with contextlib.suppress(asyncio.TimeoutError):
+                    await asyncio.wait_for(_wait_for_exit(taskkill), timeout=PI_TERMINATE_GRACE_SECONDS)
+    if process.returncode is None:
+        with contextlib.suppress(ProcessLookupError, OSError):
+            process.kill()
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(_wait_for_exit(process), timeout=PI_TERMINATE_GRACE_SECONDS)
 
