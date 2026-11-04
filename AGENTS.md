@@ -279,6 +279,13 @@ Notes:
     `PI_*` session variables are removed from the env. Pi does not read
     `.mcp.json`; it reads `<cwd>/.pi/mcp.json` itself, where a project server
     would replace a same-named scenario server, so such a collision raises.
+    Two scenario servers whose names differ only in `-`/`_` also raise (pi
+    would run only one). `allowed_builtin_tools` is the complete `--tools`
+    list for pi (plus `mcp__*`): a repo extension tool is declared only when
+    the scenario names it. Nested tool calls (`parentToolCallId`, for example
+    from `codemode`) are in `tool_calls` after their parent, with
+    `parent_tool_id`; `usage` session entries (`entry_appended`, for example
+    cache warming) count in the run usage.
     Project `.pi/mcp.json` servers stay in the `--tools` selection
     (`mcp__*`); their `codemode`-exposed tools need `codemode` in
     `allowed_builtin_tools` (never added implicitly: it can call other models). `--approve` lets repo `.pi/extensions` run in-process with

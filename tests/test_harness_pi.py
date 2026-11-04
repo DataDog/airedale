@@ -251,6 +251,158 @@ class TestEventCollector:
         result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
         assert result.usage.output_tokens == 30
 
+    def test_usage_entries_are_counted(self):
+        # Prompt-cache warming: model work outside the messages.
+        warm = {"type": "usage", "id": "u1", "kind": "cache_warm", "usage": _usage(0, 0, cache_read=500, cost=0.002)}
+        events = [
+            *_events_tool_run()[:-1],
+            {"type": "entry_appended", "entry": warm},
+            # Other entries (for example extension "custom" entries) are not usage.
+            {"type": "entry_appended", "entry": {"type": "custom", "usage": _usage(1000, 1000)}},
+            {"type": "entry_appended", "entry": {"type": "usage"}},
+            _events_tool_run()[-1],
+        ]
+        result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
+        assert result.error is None
+        assert result.usage.cache_read_input_tokens == 1447 + 500
+        assert result.usage.output_tokens == 20
+        assert result.usage.estimated_cost_usd == pytest.approx(0.008)
+
+    def test_nested_tool_calls_follow_their_parent(self):
+        events = _events_tool_run()
+        nested = [
+            {
+                "type": "tool_execution_start",
+                "toolCallId": "call_1/1",
+                "toolName": "mcp__apm__search",
+                "args": {"q": "x"},
+                "parentToolCallId": "call_1",
+            },
+            {
+                "type": "tool_execution_start",
+                "toolCallId": "call_1/1/1",
+                "toolName": "read",
+                "args": {"path": "a"},
+                "parentToolCallId": "call_1/1",
+            },
+            {
+                "type": "tool_execution_end",
+                "toolCallId": "call_1/1/1",
+                "toolName": "read",
+                "result": {"content": [{"type": "text", "text": "A"}]},
+                "isError": False,
+                "parentToolCallId": "call_1/1",
+            },
+            {
+                "type": "tool_execution_end",
+                "toolCallId": "call_1/1",
+                "toolName": "mcp__apm__search",
+                "result": {"content": [{"type": "text", "text": "boom"}]},
+                "isError": True,
+                "durationMs": 7,
+                "parentToolCallId": "call_1",
+            },
+            # Started but never ended; and a call whose parent is not known.
+            {"type": "tool_execution_start", "toolCallId": "call_1/2", "toolName": "ls", "parentToolCallId": "call_1"},
+            {"type": "tool_execution_start", "toolCallId": "zz/1", "toolName": "grep", "parentToolCallId": "zz"},
+        ]
+        events[6:6] = nested
+        result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
+        assert result.error is None
+        assert [call.name for call in result.tool_calls] == ["ls", "mcp__apm__search", "read", "ls", "grep"]
+        model_call, search, read, unfinished, orphan = result.tool_calls
+        assert model_call.metadata == {"source": "pi", "tool_id": "call_1", "duration_ms": 2}
+        assert search.arguments == {"q": "x"}
+        assert search.error == "boom"
+        assert search.metadata == {
+            "source": "pi",
+            "tool_id": "call_1/1",
+            "duration_ms": 7,
+            "parent_tool_id": "call_1",
+        }
+        assert read.result == "A"
+        assert read.error is None
+        assert read.metadata["parent_tool_id"] == "call_1/1"
+        assert unfinished.error == "tool did not finish"
+        assert unfinished.arguments == {}
+        assert orphan.metadata["parent_tool_id"] == "zz"
+        # The segments show what the model asked for: the nested calls are not in them.
+        assert [s for s in result.segments if isinstance(s, AgentToolCall)] == [model_call]
+
+    def test_deep_nested_tool_calls(self):
+        # Pi has no nesting limit; a chain deeper than the recursion limit works.
+        depth = sys.getrecursionlimit() + 500
+        events = _events_tool_run()
+        chain = []
+        parent = "call_1"
+        for level in range(depth):
+            tool_id = f"{parent}/1"
+            chain.append(
+                {
+                    "type": "tool_execution_start",
+                    "toolCallId": tool_id,
+                    "toolName": f"t{level}",
+                    "parentToolCallId": parent,
+                }
+            )
+            parent = tool_id
+        # An orphan chain too.
+        chain.append({"type": "tool_execution_start", "toolCallId": "o/1", "toolName": "o0", "parentToolCallId": "o"})
+        chain.append(
+            {"type": "tool_execution_start", "toolCallId": "o/1/1", "toolName": "o1", "parentToolCallId": "o/1"}
+        )
+        events[6:6] = chain
+        result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
+        names = [call.name for call in result.tool_calls]
+        assert names == ["ls", *(f"t{level}" for level in range(depth)), "o0", "o1"]
+
+    def test_nested_calls_of_a_model_call_with_an_empty_id(self):
+        events = _events_tool_run()
+        events[4]["message"]["content"][-1]["id"] = ""
+        events[5]["toolCallId"] = ""
+        events[6]["toolCallId"] = ""
+        events[6:6] = [
+            {"type": "tool_execution_start", "toolCallId": "/1", "toolName": "read", "parentToolCallId": ""},
+            {
+                "type": "tool_execution_end",
+                "toolCallId": "/1",
+                "toolName": "read",
+                "parentToolCallId": "",
+                "result": {},
+            },
+        ]
+        result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
+        assert [call.name for call in result.tool_calls] == ["ls", "read"]
+        assert result.tool_calls[1].metadata["parent_tool_id"] == ""
+        assert result.tool_calls[1].error is None
+
+    def test_model_call_is_never_also_a_nested_call(self):
+        # A damaged stream: call_2 is a model call and also says call_1 made it.
+        events = _events_tool_run()
+        events[4]["message"]["content"].append({"type": "toolCall", "id": "call_2", "name": "bash", "arguments": {}})
+        events[6:6] = [
+            {"type": "tool_execution_start", "toolCallId": "call_2", "toolName": "bash", "parentToolCallId": "call_1"},
+            {
+                "type": "tool_execution_start",
+                "toolCallId": "call_2/1",
+                "toolName": "read",
+                "parentToolCallId": "call_2",
+            },
+        ]
+        result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
+        assert [call.name for call in result.tool_calls] == ["ls", "bash", "read"]
+        assert "parent_tool_id" not in result.tool_calls[1].metadata
+        assert result.tool_calls[2].metadata["parent_tool_id"] == "call_2"
+
+    def test_nested_tool_call_id_cycle_does_not_loop(self):
+        events = _events_tool_run()
+        events[6:6] = [
+            {"type": "tool_execution_start", "toolCallId": "a", "toolName": "x", "parentToolCallId": "b"},
+            {"type": "tool_execution_start", "toolCallId": "b", "toolName": "y", "parentToolCallId": "a"},
+        ]
+        result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
+        assert sorted(call.name for call in result.tool_calls) == ["ls", "x", "y"]
+
     def test_non_json_lines_are_counted(self):
         collector = _PiEventCollector()
         assert collector.feed_line(b"not json\n") is None
@@ -637,6 +789,29 @@ class TestRunnerConfig:
         agent2.mkdir()
         PiRunner(cwd=tmp_path)._write_agent_dir(agent2, model=MODEL, system_prompt="S", trace_headers={})
         assert not (agent2 / "auth.json").exists()
+
+    @pytest.mark.parametrize("names", [("docs-api", "docs_api"), ("a_b-c", "a-b_c")])
+    def test_scenario_mcp_servers_with_the_same_pi_name_raise(self, tmp_path, names):
+        servers = [McpServerSpec(name=name, url="http://localhost/mcp") for name in names]
+        servers.append(McpServerSpec(name="other", url="http://localhost/mcp"))
+        runner = PiRunner(cwd=tmp_path, mcp_servers=servers)
+        with pytest.raises(ValueError, match="same name for pi") as error:
+            runner._check_project_mcp_collisions()
+        assert ", ".join(names) in str(error.value)
+        assert "other" not in str(error.value)
+
+    def test_scenario_mcp_name_collision_fails_before_pi_starts(self, tmp_path, fake_pi):
+        command, record = fake_pi(_events_tool_run())
+        servers = [McpServerSpec(name=name, url="http://localhost/mcp") for name in ("docs-api", "docs_api")]
+        with pytest.raises(ValueError, match="same name for pi"):
+            _run(PiRunner(cwd=tmp_path, pi_command=command, mcp_servers=servers))
+        assert not record.exists()
+
+    def test_extension_tool_names_go_to_pi_unchanged(self, tmp_path):
+        # Repo extension tools are declared only when the scenario names them.
+        runner = PiRunner(cwd=tmp_path, allowed_builtin_tools=["Read", "my_extension_tool"])
+        command = runner._command(model=MODEL, system_prompt_path=Path("/p"), skill_dirs=[])
+        assert command[command.index("--tools") + 1] == "read,my_extension_tool"
 
     def test_project_mcp_collision_raises(self, tmp_path):
         (tmp_path / ".pi").mkdir()

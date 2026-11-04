@@ -205,7 +205,7 @@ list).
 | `harness` | string | `"native"` (default: engine selected from the model provider) or `"pi"` (pi coding agent for every model) |
 | `system_prompt` | string | Optional; appended to the base system prompt |
 | `skills` | list of strings | Skill names referencing the `skills` registry |
-| `allowed_builtin_tools` | list of strings | Built-in tool allow-list. **Omitted = all built-in tools allowed**; an explicit empty list `[]` = no built-in tools; a list = exactly those (e.g. `["Read", "Grep"]`). For pi, Claude names (`Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write`, `LS`) map to the pi tools (`read`, `grep`, `find`, ...) |
+| `allowed_builtin_tools` | list of strings | Built-in tool allow-list. **Omitted = all built-in tools allowed**; an explicit empty list `[]` = no built-in tools; a list = exactly those (e.g. `["Read", "Grep"]`). For pi, Claude names (`Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write`, `LS`) map to the pi tools (`read`, `grep`, `find`, ...); other names go to pi unchanged. For pi, this list is the complete set of tools declared to the model (plus the MCP tools): a tool of a repo `.pi/extensions` extension is declared only when the list names it |
 | `max_turns` | int | Per-scenario override for `defaults.max_turns` |
 | `effort` | string | Per-scenario override for `defaults.effort` |
 | `mcp_servers` | list of strings | MCP server names referencing the `mcp_servers` registry |

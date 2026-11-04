@@ -406,15 +406,26 @@ class PiRunner(DecoratorSpanAgentRunner):
         }
 
     def _check_project_mcp_collisions(self) -> None:
-        """Raise when a repo ``.pi/mcp.json`` server would replace a scenario server.
+        """Raise when pi would not run every scenario MCP server.
 
-        In pi a project ``mcp.json`` entry replaces the user-level entry with the
-        same name (names that differ only in ``-``/``_`` are the same). The
-        scenario server must win, as for the other harnesses, and pi cannot do
-        that, so the run fails with a clear message.
+        For pi, names that differ only in ``-``/``_`` are the same server. Two
+        scenario servers with such names (for example ``docs-api`` and
+        ``docs_api``): pi rejects the second one and runs without it. A repo
+        ``.pi/mcp.json`` entry replaces the user-level entry with the same
+        name. The scenario server must win, as for the other harnesses, and pi
+        cannot do that. In both cases the run fails with a clear message.
         """
         if not self.mcp_servers:
             return
+        by_key: dict[str, list[str]] = {}
+        for server in self.mcp_servers:
+            by_key.setdefault(_pi_server_key(server.name), []).append(server.name)
+        duplicates = sorted(", ".join(names) for names in by_key.values() if len(names) > 1)
+        if duplicates:
+            raise ValueError(
+                f"Scenario MCP servers {'; '.join(duplicates)} have the same name for pi (pi ignores the "
+                "difference between '-' and '_') and pi would run only one of them. Rename the server(s)."
+            )
         project_file = Path(self.cwd) / ".pi" / "mcp.json"
         project_names = {_pi_server_key(name) for name in self._project_mcp_server_names()}
         collisions = sorted(server.name for server in self.mcp_servers if _pi_server_key(server.name) in project_names)
@@ -886,6 +897,9 @@ class _ToolExecution:
     is_error: bool = False
     duration_ms: Any = None
     finished: bool = False
+    #: ``toolCallId`` of the tool that made this call (``codemode`` or an
+    #: extension calling ``ctx.executeTool()``); ``None`` for a call of the model.
+    parent_id: str | None = None
 
 
 @dataclass
@@ -967,12 +981,15 @@ class _PiEventCollector:
         if event_type == "tool_execution_start":
             tool_id = str(event.get("toolCallId") or "")
             name = str(event.get("toolName") or "unknown")
-            self.tool_executions[tool_id] = _ToolExecution(tool_name=name, args=event.get("args"))
+            self.tool_executions[tool_id] = _ToolExecution(
+                tool_name=name, args=event.get("args"), parent_id=_parent_tool_id(event)
+            )
             return f"tool {name}"
         if event_type == "tool_execution_end":
             tool_id = str(event.get("toolCallId") or "")
             execution = self.tool_executions.setdefault(
-                tool_id, _ToolExecution(tool_name=str(event.get("toolName") or "unknown"))
+                tool_id,
+                _ToolExecution(tool_name=str(event.get("toolName") or "unknown"), parent_id=_parent_tool_id(event)),
             )
             execution.result = event.get("result")
             execution.is_error = bool(event.get("isError"))
@@ -985,6 +1002,16 @@ class _PiEventCollector:
             if isinstance(result, dict) and isinstance(result.get("usage"), dict):
                 self.usage.add(UsageMetrics.from_pi(result["usage"]))
             return "compaction"
+        if event_type == "entry_appended":
+            # Model work outside the messages, for example prompt-cache warming
+            # (``kind`` "cache_warm"). Pi counts it in its session totals.
+            # ``pi.appendEntry()`` makes "custom" entries only, which are not
+            # counted. (Repo code in pi can write any record to stdout: only
+            # evaluate trusted repositories.)
+            entry = event.get("entry")
+            if isinstance(entry, dict) and entry.get("type") == "usage" and isinstance(entry.get("usage"), dict):
+                self.usage.add(UsageMetrics.from_pi(entry["usage"]))
+            return None
         if event_type == "auto_retry_end":
             if event.get("success") is False:
                 self.retry_error = str(event.get("finalError") or "pi retries failed")
@@ -999,7 +1026,7 @@ class _PiEventCollector:
 
     def result(self, *, model: ModelSpec, returncode: int | None, stderr_tail: str) -> AgentRunResult:
         segments = self._segments()
-        tool_calls = [segment for segment in segments if isinstance(segment, AgentToolCall)]
+        tool_calls = self._with_nested_calls([segment for segment in segments if isinstance(segment, AgentToolCall)])
         final = self.assistant_messages[-1] if self.assistant_messages else None
         answer = _message_text(final) if final is not None else ""
         error = self._error(model=model, final=final, returncode=returncode, stderr_tail=stderr_tail)
@@ -1076,6 +1103,75 @@ class _PiEventCollector:
                     segments.append(self._tool_call(block))
         return segments
 
+    def _with_nested_calls(self, model_calls: list[AgentToolCall]) -> list[AgentToolCall]:
+        """Add the nested tool calls after the model call that made them.
+
+        A tool such as ``codemode`` can call other tools. Pi reports these
+        calls only as ``tool_execution_*`` events (with ``parentToolCallId``),
+        not in the transcript, so they are not in ``segments`` (which shows
+        what the model asked for). Each nested call comes after its parent, in
+        start order, with ``parent_tool_id`` in its metadata. A nested call
+        whose parent is not known comes at the end.
+        """
+        children: dict[str, list[str]] = {}
+        for tool_id, execution in self.tool_executions.items():
+            if execution.parent_id is not None:
+                children.setdefault(execution.parent_id, []).append(tool_id)
+        if not children:
+            return model_calls
+        added: set[str] = set()
+        result: list[AgentToolCall] = []
+
+        def add_descendants(root_id: str) -> None:
+            # Depth first, with a stack instead of recursion: the nesting depth
+            # has no limit in pi.
+            stack = [iter(children.get(root_id, ()))]
+            while stack:
+                child_id = next(stack[-1], None)
+                if child_id is None:
+                    stack.pop()
+                    continue
+                if child_id in added:  # damaged ids: never loop
+                    continue
+                added.add(child_id)
+                result.append(self._nested_call(child_id))
+                stack.append(iter(children.get(child_id, ())))
+
+        # ``tool_id`` is None for an empty id; pi can use "" as an id and then
+        # sends ``parentToolCallId`` "" for the nested calls. A model call is
+        # never added again as a nested call (its record has priority).
+        model_ids = [call.metadata.get("tool_id") or "" for call in model_calls]
+        added.update(model_ids)
+        for call, tool_id in zip(model_calls, model_ids, strict=True):
+            result.append(call)
+            add_descendants(tool_id)
+        for tool_id, execution in self.tool_executions.items():
+            if execution.parent_id is not None and tool_id not in added:
+                added.add(tool_id)
+                result.append(self._nested_call(tool_id))
+                add_descendants(tool_id)
+        return result
+
+    def _nested_call(self, tool_id: str) -> AgentToolCall:
+        execution = self.tool_executions[tool_id]
+        if execution.finished:
+            result: Any = _tool_result_text(execution.result)
+            error = (result or "tool error") if execution.is_error else None
+        else:
+            result, error = None, "tool did not finish"
+        return AgentToolCall(
+            name=execution.tool_name,
+            arguments=execution.args if execution.args is not None else {},
+            result=result,
+            error=error,
+            metadata={
+                "source": SDK_NAME,
+                "tool_id": tool_id or None,
+                "duration_ms": execution.duration_ms,
+                "parent_tool_id": execution.parent_id,
+            },
+        )
+
     def _tool_call(self, block: dict[str, Any]) -> AgentToolCall:
         tool_id = str(block.get("id") or "")
         name = str(block.get("name") or "unknown")
@@ -1097,6 +1193,12 @@ class _PiEventCollector:
                 "duration_ms": execution.duration_ms if execution is not None else None,
             },
         )
+
+
+def _parent_tool_id(event: dict[str, Any]) -> str | None:
+    """Return ``parentToolCallId`` (can be ""); ``None`` for a call of the model."""
+    parent = event.get("parentToolCallId")
+    return None if parent is None else str(parent)
 
 
 _message_text = message_text
