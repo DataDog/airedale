@@ -145,6 +145,10 @@ class AgentRunResult:
     tool_calls: list[AgentToolCall]
     segments: list[AgentOutputSegment] = field(default_factory=list)
     error: RuntimeError | None = None
+    #: The MCP tool catalog of the run (LLMObs only), so that the agent
+    #: manifest names the tools as the per-call definitions do (pi adds a
+    #: hash suffix to names that collide with a tool not in ``tool_names``).
+    mcp_tool_metadata: Mapping[tuple[str, str], McpToolMetadata] = field(default_factory=dict)
 
 
 def _decorate_when_llmobs_enabled(
@@ -386,6 +390,7 @@ def _agent_manifest(
     mcp_servers: list[McpServerSpec],
     allowed_builtin_tools: Iterable[str] | None,
     max_turns: int | None,
+    mcp_tool_metadata: Mapping[tuple[str, str], McpToolMetadata] | None = None,
 ) -> dict[str, Any]:
     """Build the LLMObs ``agent_manifest`` mirroring the native Claude manifest.
 
@@ -401,7 +406,10 @@ def _agent_manifest(
     tool_names = [
         definition["name"]
         for definition in _llmobs_tool_definitions(
-            mcp_servers, sdk_name=sdk_name, allowed_builtin_tools=allowed_builtin_tools
+            mcp_servers,
+            sdk_name=sdk_name,
+            allowed_builtin_tools=allowed_builtin_tools,
+            mcp_tool_metadata=mcp_tool_metadata,
         )
         if definition.get("name")
     ]
@@ -429,6 +437,7 @@ def _annotate_agent_loop_span(
     segments: list[AgentOutputSegment],
     allowed_builtin_tools: Iterable[str] | None = None,
     max_turns: int | None = None,
+    mcp_tool_metadata: Mapping[tuple[str, str], McpToolMetadata] | None = None,
 ) -> None:
     """Annotate the outer ``agent`` span to match the native Claude agent span.
 
@@ -454,6 +463,7 @@ def _annotate_agent_loop_span(
         mcp_servers=mcp_servers,
         allowed_builtin_tools=allowed_builtin_tools,
         max_turns=max_turns,
+        mcp_tool_metadata=mcp_tool_metadata,
     )
     # `_dd.agent_manifest` is the location the native integration writes the
     # manifest; the public `annotate(metadata=...)` merges into the same dict.
@@ -643,6 +653,7 @@ class DecoratorSpanAgentRunner(AgentRunner):
             segments=run_result.segments,
             allowed_builtin_tools=self._effective_builtin_tools(),
             max_turns=self.max_turns,
+            mcp_tool_metadata=run_result.mcp_tool_metadata,
         )
         if run_result.error is not None:
             raise run_result.error
@@ -730,6 +741,7 @@ class DecoratorSpanAgentRunner(AgentRunner):
             trace_headers=trace_headers,
             progress=progress,
         )
+        run_result.mcp_tool_metadata = mcp_tool_metadata
         missing_usage_error = self._missing_usage_error(run_result, model)
         _annotate_llm_span(
             model=model,

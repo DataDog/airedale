@@ -1720,6 +1720,52 @@ class TestPiSpans:
         assert json.loads(seen["files"]["mcp.json"])["mcpServers"]["apm"]["headers"] == {"traceparent": "00-t"}
         assert "--extension" in seen["argv"]
 
+    def test_manifest_names_tools_with_the_full_catalog(self, tmp_path, fake_pi, monkeypatch, fake_span_llmobs):
+        # `get-doc` is in tool_names, but the server also has `get_doc`: pi adds a
+        # hash suffix to both. The manifest must use the same name as the
+        # per-call tool definitions.
+        import hashlib
+
+        import airedale.harness.base as base
+        from airedale.mcp import McpToolMetadata
+
+        fake = fake_span_llmobs
+
+        def _agent(**kwargs):
+            def wrap(func):
+                async def inner(*args, **kw):
+                    span = fake._start("agent", kwargs.get("name"))
+                    try:
+                        return await func(*args, **kw)
+                    finally:
+                        span.finish()
+
+                return inner
+
+            return wrap
+
+        async def _catalog(servers, headers):
+            return {("docs", "get-doc"): McpToolMetadata(), ("docs", "get_doc"): McpToolMetadata()}
+
+        monkeypatch.setattr(base, "LLMObs", fake)
+        monkeypatch.setattr(base, "agent", _agent)
+        monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _catalog)
+        command, _ = fake_pi(_events_tool_run())
+        runner = PiRunner(
+            cwd=tmp_path,
+            pi_command=command,
+            mcp_servers=[McpServerSpec(name="docs", url="http://x/mcp", tool_names=("get-doc",))],
+        )
+        _bounded(runner.run(model=MODEL, system_prompt="SYS", user_prompt="Q", prompt_version="v", harness="pi-s"))
+        digest = hashlib.sha256(b"docs\0get-doc").hexdigest()[:8]
+        hashed = f"mcp__docs__get_doc_{digest}"
+        first_llm = next(span for span in fake.spans if span.kind == "llm")
+        assert hashed in [definition["name"] for definition in first_llm.annotations["tool_definitions"]]
+        agent_annotation = next(a for a in fake.annotations if "_dd" in a.get("metadata", {}))
+        manifest_names = [tool["name"] for tool in agent_annotation["metadata"]["_dd"]["agent_manifest"]["tools"]]
+        assert hashed in manifest_names
+        assert "mcp__docs__get_doc" not in manifest_names
+
     def test_no_spans_when_llmobs_is_disabled(self, tmp_path, fake_pi, monkeypatch, fake_span_llmobs):
         import airedale.harness.base as base
 

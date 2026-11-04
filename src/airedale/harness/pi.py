@@ -313,6 +313,7 @@ class PiRunner(DecoratorSpanAgentRunner):
             if spans is not None:
                 spans.close()
                 spans.emit(llmobs)
+        run_result.mcp_tool_metadata = mcp_tool_metadata
         return run_result, self._missing_usage_error(run_result, model)
 
     async def _run_agent(
