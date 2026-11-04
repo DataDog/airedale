@@ -460,7 +460,7 @@ class TestRunnerConfig:
         )
         command = runner._command(model=MODEL, system_prompt_path=Path("/p.md"), skill_dirs=["/s/a"])
         assert command[:3] == ["pi", "--mode", "json"]
-        for flag in ("--no-session", "--approve", "--no-skills"):
+        for flag in ("--no-session", "--approve", "--no-skills", "--no-context-files"):
             assert flag in command
         assert command[command.index("--provider") + 1] == "anthropic"
         assert command[command.index("--model") + 1] == "claude-sonnet-4-6"
@@ -833,6 +833,28 @@ class TestRunnerConfig:
             pi_module._make_private_agent_dir(workspace)
         assert list(workspace.iterdir()) == []
 
+    def test_workspace_context_file_order(self, tmp_path):
+        runner = PiRunner(cwd=tmp_path)
+        assert runner._workspace_context_section() == ""
+        (tmp_path / "CLAUDE.md").write_text("claude")
+        assert "claude" in runner._workspace_context_section()
+        (tmp_path / "AGENTS.md").write_text("agents")
+        assert "agents" in runner._workspace_context_section()
+        assert "claude" not in runner._workspace_context_section()
+        # As in pi, AGENTS.override.md replaces the other files of the directory.
+        (tmp_path / "AGENTS.override.md").write_text("override")
+        section = runner._workspace_context_section()
+        assert "override" in section
+        assert "agents" not in section
+        # As in pi, invalid UTF-8 is replaced and a BOM is removed.
+        (tmp_path / "AGENTS.override.md").write_bytes(b"\xef\xbb\xbfDon\x92t")
+        section = runner._workspace_context_section()
+        assert "\nDon\ufffdt\n" in section
+        # A directory with a context file name is not a context file.
+        (tmp_path / "AGENTS.override.md").unlink()
+        (tmp_path / "AGENTS.override.md").mkdir()
+        assert "agents" in runner._workspace_context_section()
+
     def test_auth_json_copied_only_without_env_auth(self, tmp_path, monkeypatch):
         operator = tmp_path / "operator"
         operator.mkdir()
@@ -1114,6 +1136,25 @@ class TestSubprocess:
         assert "models.json" in seen["files"]
         assert not Path(seen["agent_dir"]).exists()
         assert list((cwd / "tmp").iterdir()) == []
+
+    def test_only_the_workspace_context_file_reaches_pi(self, tmp_path, fake_pi):
+        command, record = fake_pi(_events_tool_run())
+        # A context file above the workspace (for example /tmp/AGENTS.md) is
+        # not part of the evaluated repo.
+        (tmp_path / "AGENTS.md").write_text("PARENT INSTRUCTIONS")
+        cwd = tmp_path / "ws"
+        cwd.mkdir()
+        (cwd / "CLAUDE.md").write_text("REPO INSTRUCTIONS")
+        result = _run(PiRunner(cwd=cwd, pi_command=command))
+        assert result.error is None
+        seen = json.loads(record.read_text())
+        assert "--no-context-files" in seen["argv"]
+        prompt = seen["files"]["airedale-system-prompt.md"]
+        assert prompt.startswith("SYS\n\n<project_context>")
+        assert (
+            f'<project_instructions path="{cwd / "CLAUDE.md"}">\nREPO INSTRUCTIONS\n</project_instructions>' in prompt
+        )
+        assert "PARENT INSTRUCTIONS" not in prompt
 
     def test_datadog_variables_do_not_reach_pi(self, tmp_path, fake_pi):
         command, record = fake_pi(

@@ -275,7 +275,11 @@ Notes:
     gateway/env auth — a **copy** of the operator's pi `auth.json`. Pi runs with
     `--no-session`, `--no-skills` (blocks `~/.agents/skills`; scenario skills and
     `<cwd>/.pi/skills` / `<cwd>/.agents/skills` are passed with `--skill`),
-    `--approve` (project `.pi/` files are honored) and `PI_OFFLINE=1`. Parent
+    `--approve` (project `.pi/` files are honored), `--no-context-files` (pi
+    would read `AGENTS.md`/`CLAUDE.md` of every parent dir of `cwd`; the
+    `cwd` file, chosen in pi's order with `AGENTS.override.md` first, is
+    appended to the system prompt in pi's `project_context` format) and
+    `PI_OFFLINE=1`. Parent
     `PI_*` session variables are removed from the env. Pi does not read
     `.mcp.json`; it reads `<cwd>/.pi/mcp.json` itself, where a project server
     would replace a same-named scenario server, so such a collision raises.

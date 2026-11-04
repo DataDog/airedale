@@ -181,6 +181,9 @@ PI_MCP_RESOURCE_TOOLS: tuple[str, ...] = ("list_mcp_resources", "list_mcp_resour
 #: ``--tools`` pattern that matches every MCP tool.
 PI_MCP_TOOLS_PATTERN = "mcp__*"
 PI_THINKING_LEVELS: tuple[str, ...] = ("off", "minimal", "low", "medium", "high", "xhigh", "max")
+#: Context file names that pi reads in a directory, in pi's order: the first
+#: one that is a file is used.
+PI_CONTEXT_FILE_NAMES: tuple[str, ...] = ("AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD")
 #: Provider API-key env vars that pi reads natively for the supported providers.
 PI_PROVIDER_API_KEY_ENVS: dict[str, str] = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY"}
 #: Variables of a parent pi process (session state, config location) that must
@@ -380,8 +383,34 @@ class PiRunner(DecoratorSpanAgentRunner):
         # existing path, so always pass a file: the text is then never mistaken
         # for a path.
         system_prompt_path = agent_dir / "airedale-system-prompt.md"
-        system_prompt_path.write_text(system_prompt, encoding="utf-8")
+        system_prompt_path.write_text(system_prompt + self._workspace_context_section(), encoding="utf-8")
         return system_prompt_path
+
+    def _workspace_context_section(self) -> str:
+        """Return the workspace's own context file as a pi ``project_context`` section.
+
+        Pi runs with ``--no-context-files``, so it reads no ``AGENTS.md`` /
+        ``CLAUDE.md`` from the parent directories of the workspace (they are
+        not part of the evaluated repo). The context file in the workspace
+        root belongs to the repo: it is added here, chosen as pi does (the
+        first of ``PI_CONTEXT_FILE_NAMES`` that is a file) and in the format
+        pi uses. Returns "" when there is none.
+        """
+        for name in PI_CONTEXT_FILE_NAMES:
+            path = Path(self.cwd) / name
+            try:
+                if not path.is_file():
+                    continue
+                # As pi: invalid UTF-8 bytes become U+FFFD, a BOM is removed.
+                content = path.read_text(encoding="utf-8-sig", errors="replace")
+            except OSError:
+                logger.warning("Unable to read the workspace context file %s", path, exc_info=True)
+                continue
+            return (
+                "\n\n<project_context>\nProject-specific instructions and guidelines:\n\n"
+                f'<project_instructions path="{path}">\n{content}\n</project_instructions>\n</project_context>'
+            )
+        return ""
 
     def _models_config(self, model: ModelSpec) -> dict[str, Any]:
         """Build ``models.json``: change the built-in provider of ``model``.
@@ -543,6 +572,11 @@ class PiRunner(DecoratorSpanAgentRunner):
             "--no-skills",
             "--no-prompt-templates",
             "--no-themes",
+            # Pi loads AGENTS.md / CLAUDE.md from the working directory and
+            # every parent directory: a file above the workspace (for example
+            # /tmp/AGENTS.md) must not change the run. The workspace's own
+            # file is added to the appended system prompt instead.
+            "--no-context-files",
             "--provider",
             model.provider,
             "--model",

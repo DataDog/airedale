@@ -329,8 +329,10 @@ Notes:
   API-key env var is set, a **copy** of the operator's pi `auth.json`. Pi also
   runs with `--no-session`, `--no-skills` (so `~/.agents/skills` does not load;
   scenario and project skills are passed with `--skill`), `--approve` (a cloned
-  repo's `.pi/` files load, like `.claude/` for Claude) and `PI_OFFLINE=1` (no
-  model-catalog refresh). Pi does not read `.mcp.json`; it reads a repo's
+  repo's `.pi/` files load, like `.claude/` for Claude), `--no-context-files`
+  (an `AGENTS.md`/`CLAUDE.md` in a parent directory of the workspace does not
+  load; the workspace's own file is added to the system prompt) and
+  `PI_OFFLINE=1` (no model-catalog refresh). Pi does not read `.mcp.json`; it reads a repo's
   `.pi/mcp.json` (its `direct` tools stay available; for its `codemode`
   tools, add `codemode` to `allowed_builtin_tools`). Because
   pi lets a project server replace a same-named scenario server, such a name
