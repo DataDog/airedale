@@ -155,14 +155,18 @@ class TestPiModels:
                 """,
             )
         )
-        (model,) = config.get("anthropic").pi_models
+        anthropic = config.get("anthropic")
+        assert anthropic is not None
+        (model,) = anthropic.pi_models
         assert model["id"] == "claude-next"
         assert model["contextWindow"] == 200000
-        assert config.get("anthropic").pi_models
+        assert anthropic.pi_models
 
     def test_default_is_empty(self, tmp_path):
         config = load_gateway(write_toml(tmp_path, '[providers.openai]\nbase_url = "https://gw"\n'))
-        assert config.get("openai").pi_models == ()
+        openai = config.get("openai")
+        assert openai is not None
+        assert openai.pi_models == ()
 
     @pytest.mark.parametrize(
         ("body", "message"),

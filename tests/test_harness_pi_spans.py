@@ -202,6 +202,7 @@ class TestModelCalls:
         assert record.metadata["input_source"] == "transcript"
         assert record.metadata["turn"] == 1
         assert record.metadata["model_name"] == "claude-sonnet-4-6"
+        assert record.metrics is not None
         assert record.metrics["input_tokens"] == 10
         assert record.metrics["output_tokens"] == 5
         assert record.error is None

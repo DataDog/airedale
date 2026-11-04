@@ -75,7 +75,7 @@ import math
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeGuard
 
 from ddtrace.constants import ERROR_MSG, ERROR_TYPE
 
@@ -219,8 +219,12 @@ def _pop_answer(segments: list[AgentOutputSegment]) -> str:
     order of the blocks (for example a text before a tool call).
     """
     parts: list[str] = []
-    while segments and isinstance(segments[-1], AgentThought) and segments[-1].kind == "text":
-        parts.append(segments.pop().text)
+    while segments:
+        last = segments[-1]
+        if not (isinstance(last, AgentThought) and last.kind == "text"):
+            break
+        segments.pop()
+        parts.append(last.text)
     return "\n\n".join(reversed(parts))
 
 
@@ -926,7 +930,7 @@ def _emit_record(llmobs: Any, record: SpanRecord) -> None:
         span.finish(finish_time=record.end_ns / 1e9)
 
 
-def _is_number(value: Any) -> bool:
+def _is_number(value: Any) -> TypeGuard[int | float]:
     """Return ``True`` for an int or a finite float (JSON can carry ``Infinity`` / ``NaN``)."""
     if isinstance(value, bool):
         return False
@@ -957,5 +961,5 @@ def _message_timestamp_ns(message: dict[str, Any], now: int) -> int | None:
     return timestamp_ns if timestamp_ns is not None and _plausible_start(timestamp_ns, now) else None
 
 
-def _is_int(value: Any) -> bool:
+def _is_int(value: Any) -> TypeGuard[int]:
     return isinstance(value, int) and not isinstance(value, bool)

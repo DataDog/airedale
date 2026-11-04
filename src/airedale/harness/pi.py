@@ -589,7 +589,7 @@ class PiRunner(DecoratorSpanAgentRunner):
             raise RuntimeError(f"pi executable not found ({command[0]!r}); install pi or set {PI_COMMAND_ENV}") from exc
 
         stderr_tail = _TailBuffer(PI_STDERR_TAIL_BYTES)
-        tasks = [
+        tasks: list[asyncio.Task[Any]] = [
             asyncio.create_task(_write_stdin(process, user_prompt)),
             asyncio.create_task(_drain(process.stderr, stderr_tail)),
         ]
