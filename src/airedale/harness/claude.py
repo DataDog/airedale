@@ -61,6 +61,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from claude_agent_sdk.types import EffortLevel
+
 logger = logging.getLogger(__name__)
 
 SDK_NAME = "claude-agent-sdk"
@@ -275,7 +277,7 @@ class ClaudeRunner(AgentRunner):
             env=self._gateway_env(),
             max_turns=self.max_turns,
             model=model.name,
-            effort=self.effort,
+            effort=_claude_effort(self.effort),
             cwd=self.cwd,
             include_partial_messages=True,
         )
@@ -850,3 +852,11 @@ def _normalize_tool_name(name: str) -> str:
         if len(parts) == 3:
             return f"mcp.{parts[1]}.{parts[2]}"
     return name
+
+
+def _claude_effort(effort: str | None) -> EffortLevel | None:
+    """Return ``effort`` as a Claude effort level, or raise for a value Claude does not accept."""
+    match effort:
+        case None | "low" | "medium" | "high" | "xhigh" | "max":
+            return effort
+    raise ValueError(f"unsupported Claude effort {effort!r} (expected one of: low, medium, high, xhigh, max)")

@@ -171,6 +171,7 @@ class TestWorkspaceManager:
             mgr = WorkspaceManager(config_dir=tmp_path)
             await mgr.__aenter__()
             cache_root = mgr._cache_root
+            assert cache_root is not None
             async with mgr.workspace(WorkdirConfig(repo=str(repo))):
                 pass
             assert cache_root.exists()

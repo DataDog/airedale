@@ -248,7 +248,7 @@ async def _run_cell(
         model=model.label,
         scenario=scenario.name,
         task=task.id,
-        rows=list(result.get("rows", [])) if isinstance(result, dict) else [],
+        rows=[dict(row) for row in result.get("rows", [])] if isinstance(result, dict) else [],
     )
 
 

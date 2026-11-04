@@ -82,6 +82,7 @@ class TestCodexOutputSegments:
             status=SimpleNamespace(value="failed"),
         )
         (call,) = _codex_output_segments([item])
+        assert isinstance(call, AgentToolCall)
         assert call.error == "failed"
 
     def test_file_change_becomes_apply_patch_tool_call(self):
@@ -93,6 +94,7 @@ class TestCodexOutputSegments:
             changes=[SimpleNamespace(path="a.py", kind=SimpleNamespace(root=SimpleNamespace(type="add")), diff="+x")],
         )
         (call,) = _codex_output_segments([item])
+        assert isinstance(call, AgentToolCall)
         assert call.name == "apply_patch"
         assert call.arguments == {"changes": [{"path": "a.py", "kind": "add"}]}
         assert call.result[0]["kind"] == "add"
@@ -109,11 +111,13 @@ class TestCodexOutputSegments:
             status=SimpleNamespace(value="declined"),
         )
         (call,) = _codex_output_segments([item])
+        assert isinstance(call, AgentToolCall)
         assert call.error == "declined"
 
     def test_web_search_becomes_tool_call(self):
         item = _item(type="webSearch", id="ws_1", query="what is ssi", action=None)
         (call,) = _codex_output_segments([item])
+        assert isinstance(call, AgentToolCall)
         assert call.name == "web_search"
         assert call.arguments == {"query": "what is ssi"}
 
