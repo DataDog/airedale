@@ -366,7 +366,7 @@ airedale CONFIG [options]
   --scenario S               run only these scenarios (repeatable / comma-separated)
   --task T                   run only these task ids (repeatable / comma-separated)
   --runs N                   override runs per cell
-  --judge-model M            override judge model
+  --judge-model M            override rubric judge model; rejected for Decisions
   --jobs N                   total cells run concurrently across the matrix (default 1 = sequential)
   --dry-run                  print the matrix and exit without running
   --no-progress              disable the live progress display

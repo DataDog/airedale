@@ -26,12 +26,13 @@ from typing import TYPE_CHECKING, Any
 from ddtrace.llmobs import LLMObs
 
 from airedale import dataset as dataset_module
+from airedale.config import ConfigError
 from airedale.harness import create_runner, mcp_system_prompt
 from airedale.mcp import McpServerSpec, managed_servers
 from airedale.observability import enable_llmobs
 from airedale.progress import ProgressReporter
 from airedale.scoring import RubricEvaluator
-from airedale.scoring.decisions import DecisionsRubricEvaluator
+from airedale.scoring.decisions import DECISIONS_MODEL, DecisionsRubricEvaluator
 from airedale.summary import ExperimentSummary, print_summary
 from airedale.types import ModelSpec, slugify
 from airedale.workdir import WorkspaceManager
@@ -69,6 +70,11 @@ async def run_experiments(
     agentless: bool = True,
 ) -> list[ExperimentRunSummary]:
     """Run the filtered evaluation matrix and return per-cell summaries."""
+    if config.judge_type == "decisions" and judge_model is not None:
+        raise ConfigError(
+            f'--judge-model cannot be used with judge_type = "decisions"; Decisions uses {DECISIONS_MODEL}'
+        )
+
     selected_models = _select_models(config, models)
     selected_scenarios = _select_scenarios(config, scenarios)
     selected_tasks = _select_tasks(config, tasks)

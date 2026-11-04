@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import textwrap
 from typing import TYPE_CHECKING
+from unittest.mock import Mock
 
 import pytest
 
@@ -150,6 +151,35 @@ class TestMainDryRun:
         config = write_experiment_toml(tmp_path)
         exit_code = main([str(config), "--dry-run"])
         assert exit_code == 0
+
+    @pytest.mark.parametrize("dry_run", [False, True])
+    def test_decisions_rejects_judge_model_override(self, tmp_path, capsys, monkeypatch, dry_run):
+        config = write_experiment_toml(tmp_path)
+        config.write_text('judge_type = "decisions"\n' + config.read_text())
+        enable_llmobs = Mock()
+        monkeypatch.setattr("airedale.experiment.enable_llmobs", enable_llmobs)
+        dataset = Mock(side_effect=AssertionError("dataset creation must not run"))
+        monkeypatch.setattr("airedale.experiment.dataset_module.get_or_create_dataset", dataset)
+        args = [str(config), "--judge-model", "openai/gpt-4o"]
+        if dry_run:
+            args.append("--dry-run")
+
+        assert main(args) == 2
+        captured = capsys.readouterr()
+        assert "--judge-model" in captured.err
+        assert "decisions" in captured.err.lower()
+        assert "Matrix:" not in captured.out
+        enable_llmobs.assert_not_called()
+        dataset.assert_not_called()
+
+    @pytest.mark.parametrize("extra", ['judge_type = "decisions"\njudge_model = "openai/gpt-4o"\n', ""])
+    def test_dry_run_accepts_compatible_judge_settings(self, tmp_path, extra):
+        config = write_experiment_toml(tmp_path)
+        config.write_text(extra + config.read_text())
+        args = [str(config), "--dry-run"]
+        if not extra:
+            args.extend(["--judge-model", "openai/gpt-4o"])
+        assert main(args) == 0
 
     def test_bad_config_returns_exit_2(self, tmp_path):
         bad_config = tmp_path / "bad.toml"
