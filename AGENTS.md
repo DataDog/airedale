@@ -365,7 +365,9 @@ Resolution rules (`gateway.py`):
   `api_key_env` variables of all gateway providers are removed from the pi env
   (the native key variable of the evaluated provider, `ANTHROPIC_API_KEY` or
   `OPENAI_API_KEY`, stays when there is no `base_url`: pi reads it to
-  authenticate). The runner fails
+  authenticate). The key variable of the other provider is always removed,
+  and the one of the evaluated provider too when `models.json` has the
+  token (`PiRunner._dropped_provider_key_envs`). The runner fails
   the run when pi reports a provider/model other than the requested one.
 
 ---

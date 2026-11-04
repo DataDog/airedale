@@ -552,11 +552,10 @@ class TestRunnerConfig:
         assert frozenset() == PI_DATADOG_ENV_ALLOWLIST
 
     def test_env_keeps_other_variables(self, tmp_path, monkeypatch):
-        # Provider API keys (pi reads ANTHROPIC_API_KEY / OPENAI_API_KEY itself)
-        # and variables that only contain "DD_" stay.
+        # The key of the evaluated provider (pi reads ANTHROPIC_API_KEY itself
+        # for MODEL) and variables that only contain "DD_" stay.
         keep = {
             "ANTHROPIC_API_KEY": "anthropic-key",
-            "OPENAI_API_KEY": "openai-key",
             "MY_DD_API_KEY_NOTE": "not a datadog variable",
             "ADD_ONE": "1",
             "HTTPS_PROXY": "http://user:pass@proxy:3128",
@@ -566,6 +565,60 @@ class TestRunnerConfig:
         env = PiRunner(cwd=tmp_path)._env(tmp_path / "agent", model=MODEL)
         for name, value in keep.items():
             assert env[name] == value
+
+    @pytest.mark.parametrize(
+        ("model", "kept", "dropped"),
+        [
+            (MODEL, "ANTHROPIC_API_KEY", "OPENAI_API_KEY"),
+            (ModelSpec.parse("openai/gpt-5.5"), "OPENAI_API_KEY", "ANTHROPIC_API_KEY"),
+        ],
+    )
+    def test_env_keeps_only_the_key_of_the_evaluated_provider(self, tmp_path, monkeypatch, model, kept, dropped):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
+        env = PiRunner(cwd=tmp_path)._env(tmp_path / "agent", model=model)
+        assert kept in env
+        assert dropped not in env
+
+    def test_env_drops_every_provider_key_when_models_json_has_the_token(self, tmp_path, monkeypatch):
+        # Pi authenticates with the token in models.json: it needs no key variable.
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
+        runner = PiRunner(cwd=tmp_path, gateway_base_url="https://gw", gateway_bearer_token="helper-token")
+        env = runner._env(tmp_path / "agent", model=MODEL)
+        assert "ANTHROPIC_API_KEY" not in env
+        assert "OPENAI_API_KEY" not in env
+
+    @pytest.mark.parametrize(("provider", "native"), [("anthropic", "ANTHROPIC_API_KEY"), ("openai", "OPENAI_API_KEY")])
+    def test_empty_gateway_key_keeps_the_native_key(self, tmp_path, monkeypatch, provider, native):
+        # The api_key_env variable is empty: models.json has no token, so pi
+        # needs the native key of the evaluated provider.
+        monkeypatch.setenv("MY_GATEWAY_TOKEN", "")
+        monkeypatch.setenv(native, "native-key")
+        gateway = GatewayConfig(
+            providers={
+                provider: ProviderGatewayConfig(
+                    provider=provider, base_url="https://gw", api_key_env="MY_GATEWAY_TOKEN"
+                )
+            }
+        )
+        model = MODEL if provider == "anthropic" else ModelSpec.parse("openai/gpt-5.5")
+        runner = create_runner(
+            model, scenario=ScenarioConfig(name="s", harness=HARNESS_PI), gateway=gateway, cwd=str(tmp_path)
+        )
+        assert isinstance(runner, PiRunner)
+        assert runner._models_json_token() is None
+        assert "apiKey" not in runner._models_config(model).get("providers", {}).get(provider, {})
+        assert runner._env(tmp_path / "agent", model=model)[native] == "native-key"
+
+    def test_unrelated_provider_key_does_not_reach_pi(self, tmp_path, fake_pi, monkeypatch):
+        command, record = fake_pi(_events_tool_run())
+        monkeypatch.setenv("OPENAI_API_KEY", "gateway-secret-openai")
+        result = _run(PiRunner(cwd=tmp_path, pi_command=command))
+        assert result.error is None
+        seen = json.loads(record.read_text())
+        assert "OPENAI_API_KEY" not in seen["env_names"]
+        assert seen["secret_in_env"] is False
 
     @pytest.mark.parametrize("token_kind", ["api_key", "bearer"])
     def test_env_drops_gateway_api_key_env(self, tmp_path, monkeypatch, token_kind):
@@ -1661,3 +1714,45 @@ class TestWindowsStop:
         with pytest.raises(RuntimeError, match="pi executable not found"):
             _run(PiRunner(cwd=tmp_path, pi_command=["pi"]))
         assert seen["start_new_session"] is False
+
+
+# --------------------------------------------------------------------------- #
+# MCP metadata probe (LLMObs tool definitions) environment
+# --------------------------------------------------------------------------- #
+PROBE_SERVER = textwrap.dedent(
+    """
+    import json, os, sys
+    with open(sys.argv[1], "w") as handle:
+        json.dump(dict(os.environ), handle)
+    """
+)
+
+
+@pytest.mark.parametrize("server_env", [{}, {"SERVER_SETTING": "1"}])
+def test_mcp_metadata_probe_gets_no_operator_credentials(tmp_path, monkeypatch, server_env):
+    # The probe starts a stdio server before pi runs. The MCP SDK gives it only
+    # its default variables (HOME, PATH, ...) and the server's own ``env``, not
+    # the airedale environment. This test fails if that changes.
+    from airedale.mcp import _mcp_server_tool_metadata
+
+    secrets = {
+        "DD_API_KEY": "dd-secret",
+        "DD_APP_KEY": "dd-app-secret",
+        "ANTHROPIC_API_KEY": "anthropic-secret",
+        "OPENAI_API_KEY": "openai-secret",
+        "MY_GATEWAY_TOKEN": "gateway-secret",
+    }
+    for name, value in secrets.items():
+        monkeypatch.setenv(name, value)
+    script = tmp_path / "probe_server.py"
+    script.write_text(PROBE_SERVER)
+    record = tmp_path / "probe_env.json"
+    server = McpServerSpec(name="probe", command=sys.executable, args=(str(script), str(record)), env=server_env)
+    catalog = _bounded(_mcp_server_tool_metadata(server, {}, configured_tool_names=set()))
+    assert catalog == {}  # the fake server does not speak MCP
+    seen = json.loads(record.read_text())
+    for name, value in server_env.items():
+        assert seen[name] == value
+    for name, value in secrets.items():
+        assert name not in seen
+        assert value not in seen.values()

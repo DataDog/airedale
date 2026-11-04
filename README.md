@@ -350,8 +350,15 @@ Notes:
   credential goes to pi only in its private `models.json`: the `api_key_env`
   variables of all gateway providers are removed from the pi environment (except the native key variable of the
   evaluated provider, `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`, without a gateway
-  `base_url`: pi reads it to authenticate).
-  **Compatibility:** a pi stdio MCP server that used an inherited Datadog
+  `base_url`: pi reads it to authenticate). The provider key variables
+  (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) are also removed, except the one of
+  the evaluated provider when pi needs it (no gateway token in `models.json`).
+  With LLMObs, airedale first starts each scenario stdio MCP server once to
+  read its tool list; the MCP SDK gives that probe only `HOME`, `LOGNAME`,
+  `PATH`, `SHELL`, `TERM`, `USER` and the server's own `env`.
+  **Compatibility:** a pi stdio MCP server or repo code that used
+  `OPENAI_API_KEY` in an Anthropic run (or the reverse) does not get it any
+  more. Also, a pi stdio MCP server that used an inherited Datadog
   variable (for example `DD_API_KEY`) does not get it any more. There is no
   safe way to give it one at this time: `$NAME` in an MCP `env` value is not
   expanded, and a literal key in `env` goes to the LLMObs experiment metadata.

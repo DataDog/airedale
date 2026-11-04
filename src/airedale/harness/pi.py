@@ -70,7 +70,10 @@ the variables above are removed: a Datadog key stored under another name
 gateway credential that ``gateway.toml`` names explicitly (``api_key_env``)
 goes to pi in ``models.json`` only: the variable with that name, and the
 ``api_key_env`` variables of the other gateway providers, are removed from the
-pi environment (see ``PiRunner._dropped_gateway_envs``). A stdio MCP server that
+pi environment (see ``PiRunner._dropped_gateway_envs``). Of the provider key
+variables (``ANTHROPIC_API_KEY``, ``OPENAI_API_KEY``), pi gets only the one of
+the evaluated provider, and only when ``models.json`` holds no token (see
+``PiRunner._dropped_provider_key_envs``). A stdio MCP server that
 used an inherited Datadog variable (for example ``DD_API_KEY``) does not get it any more.
 
 Gateway and model details
@@ -454,7 +457,8 @@ class PiRunner(DecoratorSpanAgentRunner):
         """Return the gateway token that ``models.json`` holds (``None`` when it holds no token)."""
         if not self.gateway_base_url:
             return None
-        return self.gateway_bearer_token or self.gateway_api_key
+        # An empty value (for example an empty ``api_key_env`` variable) is no token.
+        return self.gateway_bearer_token or self.gateway_api_key or None
 
     def _dropped_gateway_envs(self, provider: str) -> list[str]:
         """Return the ``api_key_env`` variable names that must not reach pi.
@@ -474,6 +478,18 @@ class PiRunner(DecoratorSpanAgentRunner):
             names = [name for name in names if not _same_env_name(name, native)]
         return names
 
+    def _dropped_provider_key_envs(self, provider: str) -> list[str]:
+        """Return the provider key variables (``PI_PROVIDER_API_KEY_ENVS``) that must not reach pi.
+
+        Pi needs at most the key variable of the evaluated provider, and only
+        when ``models.json`` holds no token. The key variables of the other
+        providers are always removed: pi, its tools, stdio MCP servers and
+        repo extensions do not get a credential that the run does not use.
+        """
+        native = PI_PROVIDER_API_KEY_ENVS.get(provider)
+        keep = native if native and self._models_json_token() is None else None
+        return [name for name in PI_PROVIDER_API_KEY_ENVS.values() if keep is None or not _same_env_name(name, keep)]
+
     def _has_env_auth(self, model: ModelSpec) -> bool:
         if self._models_json_token():
             return True
@@ -481,13 +497,13 @@ class PiRunner(DecoratorSpanAgentRunner):
         return bool(env_name and os.environ.get(env_name))
 
     def _env(self, agent_dir: Path, *, model: ModelSpec) -> dict[str, str]:
-        dropped_gateway_envs = self._dropped_gateway_envs(model.provider)
+        dropped_envs = [*self._dropped_gateway_envs(model.provider), *self._dropped_provider_key_envs(model.provider)]
         env = {
             name: value
             for name, value in os.environ.items()
             if name not in PI_INHERITED_ENV_TO_DROP
             and not _is_blocked_datadog_env(name)
-            and not any(_same_env_name(name, dropped) for dropped in dropped_gateway_envs)
+            and not any(_same_env_name(name, dropped) for dropped in dropped_envs)
         }
         env["PI_CODING_AGENT_DIR"] = str(agent_dir)
         env["PI_OFFLINE"] = "1"
