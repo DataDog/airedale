@@ -297,7 +297,7 @@ Notes:
     `parent_tool_id`; `usage` session entries (`entry_appended`, for example
     cache warming) count in the run usage. Pi can reuse a `toolCallId` (even
     ""): the collector keeps each execution, binds the n-th transcript call
-    with an id to the n-th execution with that id, and gives a nested call to
+    with an id to the n-th top-level execution (no `parentToolCallId`) with that id, and gives a nested call to
     the latest execution with the parent id at its start.
     Project `.pi/mcp.json` servers (not `enabled: false`) are also listed in
     the span metadata and the agent manifest (`PiRunner._reported_mcp_servers`),
