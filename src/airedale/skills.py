@@ -347,9 +347,12 @@ def _frontmatter(path: Path) -> dict[str, str] | None:
         index += 1
         if line.strip() in ("---", "..."):
             return values
-        if not line or line[0] in " \t#" or ":" not in line:
+        if not line or line[0] in " \t#":
             continue
-        key, _, raw = line.partition(":")
+        split = _yaml_key(line)
+        if split is None:
+            continue
+        key, raw = split
         raw = raw.strip()
         if raw[:1] in ("|", ">"):
             # Block scalar: the indented lines that follow.
@@ -357,12 +360,52 @@ def _frontmatter(path: Path) -> dict[str, str] | None:
             while index < len(body) and (not body[index].strip() or body[index][:1] in " \t"):
                 block.append(body[index])
                 index += 1
-            values[key.strip()] = _yaml_block(raw, block)
+            values[key] = _yaml_block(raw, block)
             continue
         value = _yaml_scalar(raw)
         if value is not None:
-            values[key.strip()] = value
+            values[key] = value
     return None
+
+
+def _yaml_key(line: str) -> tuple[str, str] | None:
+    """Split a top-level ``key: value`` line into the decoded key and the rest.
+
+    The key can be quoted (``"name": foo``): YAML reads it as ``name``.
+    ``None`` when the line is not a mapping entry.
+    """
+    if line[0] in "'\"":
+        # Same quoting rules as the scalars; the closing quote is followed by ":".
+        quote = line[0]
+        end = 1
+        while True:
+            end = line.find(quote, end)
+            if end == -1:
+                return None
+            if quote == "'" and line[end + 1 : end + 2] == "'":
+                end += 2
+                continue
+            if quote == '"' and _is_escaped(line, end):
+                end += 1
+                continue
+            break
+        rest = line[end + 1 :].lstrip(" \t")
+        if not rest.startswith(":"):
+            return None
+        key = _yaml_scalar(line[: end + 1])
+        return (key.strip(), rest[1:]) if key is not None else None
+    if ":" not in line:
+        return None
+    key, _, raw = line.partition(":")
+    return key.strip(), raw
+
+
+def _is_escaped(text: str, index: int) -> bool:
+    """Return True when the character at ``index`` follows an odd number of backslashes."""
+    count = 0
+    while index - 1 - count >= 0 and text[index - 1 - count] == "\\":
+        count += 1
+    return count % 2 == 1
 
 
 def _yaml_block(header: str, block: list[str]) -> str:

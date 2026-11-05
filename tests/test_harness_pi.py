@@ -1172,6 +1172,32 @@ class TestPiSkillDirs:
             pi_skill_dirs([str(scenario)], str(cwd))
 
     @pytest.mark.parametrize(
+        "lines",
+        [
+            ['"name": alpha', "description: d"],
+            ["'name': alpha", "description: d"],
+            ['"name" : "alpha"', "'description': d"],
+            ['"na\\u006de": alpha', '"description": d'],  # an escape in the key
+        ],
+    )
+    def test_quoted_yaml_keys_are_compared(self, tmp_path, lines):
+        # YAML reads a quoted key as its text, so pi sees the name "alpha".
+        scenario = self._skill(tmp_path / "src", "alpha")
+        cwd = tmp_path / "cwd"
+        other = cwd / ".pi" / "skills" / "other"
+        other.mkdir(parents=True)
+        (other / "SKILL.md").write_text("---\n" + "\n".join(lines) + "\n---\n")
+        with pytest.raises(ValueError, match="'alpha'"):
+            pi_skill_dirs([str(scenario)], str(cwd))
+
+    def test_quoted_yaml_key_with_a_colon_or_a_quote(self, tmp_path):
+        from airedale.skills import _frontmatter
+
+        path = tmp_path / "SKILL.md"
+        path.write_text('---\n"a: b": 1x\n\'it\'\'s\': two\n"q\\"k": three\n"open: x\n---\n')
+        assert _frontmatter(path) == {"a: b": "1x", "it's": "two", 'q"k': "three"}
+
+    @pytest.mark.parametrize(
         ("header", "expected"), [(">-", "alpha"), ("|-", "alpha"), ("|", "alpha\n"), (">", "alpha\n")]
     )
     def test_block_scalar_name(self, tmp_path, header, expected):
