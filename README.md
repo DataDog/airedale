@@ -130,11 +130,12 @@ criteria = [
 [providers.anthropic]
 base_url           = "https://ai-gateway.example.com"
 credentials_helper = "mytool auth token --datacenter us1"
-headers            = { source = "evals", provider = "anthropic" }
+headers            = { source = "evals", provider = "anthropic", "x-target-account" = "eval" }
 
 [providers.openai]
 base_url           = "https://ai-gateway.example.com/v1"
 credentials_helper = "mytool auth token --datacenter us1"
+headers            = { source = "evals", provider = "openai", "x-target-account" = "eval" }
 ```
 
 ### 3. Run

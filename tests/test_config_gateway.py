@@ -7,12 +7,9 @@
 from __future__ import annotations
 
 import textwrap
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 from airedale.config import ConfigError
 from airedale.config.gateway import GatewayConfig, ProviderGatewayConfig, load_gateway
@@ -98,6 +95,16 @@ class TestLoadGatewayValid:
         config = load_gateway(p)
         assert isinstance(config, GatewayConfig)
         assert config.providers == {}
+
+    def test_example_sets_eval_target_account_header_for_every_provider(self):
+        example = Path(__file__).parent.parent / "examples" / "gateway.toml"
+        config = load_gateway(example)
+
+        assert config is not None
+        assert config.providers
+        for provider in config.providers.values():
+            assert provider.headers is not None
+            assert provider.headers["x-target-account"] == "eval"
 
 
 class TestLoadGatewayErrors:
