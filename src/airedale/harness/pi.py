@@ -1118,9 +1118,11 @@ def _signal_group(process: asyncio.subprocess.Process, sig: int) -> None:
 # --------------------------------------------------------------------------- #
 # Event stream
 # --------------------------------------------------------------------------- #
-@dataclass
+@dataclass(eq=False)  # Compared by identity: pi can reuse a ``toolCallId``.
 class _ToolExecution:
     tool_name: str
+    #: ``toolCallId`` as pi sent it (can be "": pi can use it as an id).
+    tool_id: str = ""
     args: Any = None
     result: Any = None
     is_error: bool = False
@@ -1129,6 +1131,9 @@ class _ToolExecution:
     #: ``toolCallId`` of the tool that made this call (``codemode`` or an
     #: extension calling ``ctx.executeTool()``); ``None`` for a call of the model.
     parent_id: str | None = None
+    #: The execution that ``parent_id`` named when this one started (the latest
+    #: one with that id), once it is known. ``None``: not known (yet).
+    parent: _ToolExecution | None = None
 
 
 @dataclass
@@ -1139,7 +1144,15 @@ class _PiEventCollector:
     session_id: str | None = None
     turns: int = 0
     assistant_messages: list[dict[str, Any]] = field(default_factory=list)
-    tool_executions: dict[str, _ToolExecution] = field(default_factory=dict)
+    #: Every tool execution, in start order. Pi can reuse a ``toolCallId``
+    #: (even ""), so each occurrence is kept and the id is not a key.
+    tool_executions: list[_ToolExecution] = field(default_factory=list)
+    #: The execution of each id that started but did not end.
+    _open_executions: dict[str, _ToolExecution] = field(default_factory=dict, repr=False)
+    #: The latest execution of each id: the parent of the calls that name it.
+    _latest_executions: dict[str, _ToolExecution] = field(default_factory=dict, repr=False)
+    #: Executions that named a parent that has not started yet, by parent id.
+    _waiting_for_parent: dict[str, list[_ToolExecution]] = field(default_factory=dict, repr=False)
     usage: UsageMetrics = field(default_factory=UsageMetrics)
     settled: bool = False
     aborted: bool = False
@@ -1208,18 +1221,16 @@ class _PiEventCollector:
                 self.usage.add(UsageMetrics.from_pi(message["usage"]))
             return None
         if event_type == "tool_execution_start":
-            tool_id = str(event.get("toolCallId") or "")
             name = str(event.get("toolName") or "unknown")
-            self.tool_executions[tool_id] = _ToolExecution(
-                tool_name=name, args=event.get("args"), parent_id=_parent_tool_id(event)
-            )
+            # A start record for an id that is still open begins a new
+            # execution: the earlier one stays, unfinished.
+            self._begin_execution(event, args=event.get("args"))
             return f"tool {name}"
         if event_type == "tool_execution_end":
             tool_id = str(event.get("toolCallId") or "")
-            execution = self.tool_executions.setdefault(
-                tool_id,
-                _ToolExecution(tool_name=str(event.get("toolName") or "unknown"), parent_id=_parent_tool_id(event)),
-            )
+            # The end record belongs to the open execution of this id. With no
+            # start record, it makes an execution that is already over.
+            execution = self._open_executions.pop(tool_id, None) or self._begin_execution(event, track_open=False)
             execution.result = event.get("result")
             execution.is_error = bool(event.get("isError"))
             execution.duration_ms = event.get("durationMs")
@@ -1253,9 +1264,36 @@ class _PiEventCollector:
             return None
         return None
 
+    def _begin_execution(self, event: dict[str, Any], *, args: Any = None, track_open: bool = True) -> _ToolExecution:
+        tool_id = str(event.get("toolCallId") or "")
+        execution = _ToolExecution(
+            tool_name=str(event.get("toolName") or "unknown"),
+            tool_id=tool_id,
+            args=args,
+            parent_id=_parent_tool_id(event),
+        )
+        parent_id = execution.parent_id
+        if parent_id is not None:
+            execution.parent = self._latest_executions.get(parent_id)
+            if execution.parent is None:
+                self._waiting_for_parent.setdefault(parent_id, []).append(execution)
+        self.tool_executions.append(execution)
+        if track_open:
+            self._open_executions[tool_id] = execution
+        self._latest_executions[tool_id] = execution
+        # Calls that came before their parent get it now.
+        for waiting in self._waiting_for_parent.pop(tool_id, ()):
+            if waiting is not execution:
+                waiting.parent = execution
+            else:  # A call that names its own id: wait for the next one.
+                self._waiting_for_parent.setdefault(tool_id, []).append(waiting)
+        return execution
+
     def result(self, *, model: ModelSpec, returncode: int | None, stderr_tail: str) -> AgentRunResult:
-        segments = self._segments()
-        tool_calls = self._with_nested_calls([segment for segment in segments if isinstance(segment, AgentToolCall)])
+        segments, model_executions = self._segments()
+        tool_calls = self._with_nested_calls(
+            [segment for segment in segments if isinstance(segment, AgentToolCall)], model_executions
+        )
         final = self.assistant_messages[-1] if self.assistant_messages else None
         answer = _message_text(final) if final is not None else ""
         error = self._error(model=model, final=final, returncode=returncode, stderr_tail=stderr_tail)
@@ -1304,13 +1342,21 @@ class _PiEventCollector:
             )
         return None
 
-    def _segments(self) -> list[AgentOutputSegment]:
+    def _segments(self) -> tuple[list[AgentOutputSegment], list[_ToolExecution | None]]:
         """Return reasoning, intermediate text and tool calls in message order.
 
         The text of the last assistant message is the answer, so it is not a
-        segment.
+        segment. The second value has the execution of each tool call, in the
+        same order (``None``: pi did not run it). The n-th call of the model
+        with an id gets the n-th execution with that id, so a reused id does
+        not mix the results.
         """
         segments: list[AgentOutputSegment] = []
+        executions: list[_ToolExecution | None] = []
+        by_id: dict[str, list[_ToolExecution]] = {}
+        for execution in self.tool_executions:
+            by_id.setdefault(execution.tool_id, []).append(execution)
+        next_index: dict[str, int] = {}
         last_index = len(self.assistant_messages) - 1
         for index, message in enumerate(self.assistant_messages):
             content = message.get("content")
@@ -1329,10 +1375,18 @@ class _PiEventCollector:
                     if text:
                         segments.append(AgentThought(text=text, kind="text"))
                 elif block_type == "toolCall":
-                    segments.append(self._tool_call(block))
-        return segments
+                    tool_id = str(block.get("id") or "")
+                    position = next_index.get(tool_id, 0)
+                    next_index[tool_id] = position + 1
+                    candidates = by_id.get(tool_id, [])
+                    execution = candidates[position] if position < len(candidates) else None
+                    executions.append(execution)
+                    segments.append(self._tool_call(block, execution))
+        return segments, executions
 
-    def _with_nested_calls(self, model_calls: list[AgentToolCall]) -> list[AgentToolCall]:
+    def _with_nested_calls(
+        self, model_calls: list[AgentToolCall], model_executions: list[_ToolExecution | None]
+    ) -> list[AgentToolCall]:
         """Add the nested tool calls after the model call that made them.
 
         A tool such as ``codemode`` can call other tools. Pi reports these
@@ -1341,48 +1395,49 @@ class _PiEventCollector:
         what the model asked for). Each nested call comes after its parent, in
         start order, with ``parent_tool_id`` in its metadata. A nested call
         whose parent is not known comes at the end.
+
+        A parent is an execution, not an id: pi can reuse an id (even ""), and
+        a call belongs to the latest execution with the id that it names when
+        it starts.
         """
-        children: dict[str, list[str]] = {}
-        for tool_id, execution in self.tool_executions.items():
-            if execution.parent_id is not None:
-                children.setdefault(execution.parent_id, []).append(tool_id)
-        if not children:
+        children: dict[_ToolExecution, list[_ToolExecution]] = {}
+        for execution in self.tool_executions:
+            if execution.parent is not None:
+                children.setdefault(execution.parent, []).append(execution)
+        if not any(execution.parent_id is not None for execution in self.tool_executions):
             return model_calls
-        added: set[str] = set()
+        # A model call is never added again as a nested call (its execution has
+        # priority).
+        added: set[_ToolExecution] = {execution for execution in model_executions if execution is not None}
         result: list[AgentToolCall] = []
 
-        def add_descendants(root_id: str) -> None:
+        def add_descendants(root: _ToolExecution) -> None:
             # Depth first, with a stack instead of recursion: the nesting depth
             # has no limit in pi.
-            stack = [iter(children.get(root_id, ()))]
+            stack = [iter(children.get(root, ()))]
             while stack:
-                child_id = next(stack[-1], None)
-                if child_id is None:
+                child = next(stack[-1], None)
+                if child is None:
                     stack.pop()
                     continue
-                if child_id in added:  # damaged ids: never loop
+                if child in added:  # damaged ids: never loop
                     continue
-                added.add(child_id)
-                result.append(self._nested_call(child_id))
-                stack.append(iter(children.get(child_id, ())))
+                added.add(child)
+                result.append(self._nested_call(child))
+                stack.append(iter(children.get(child, ())))
 
-        # ``tool_id`` is None for an empty id; pi can use "" as an id and then
-        # sends ``parentToolCallId`` "" for the nested calls. A model call is
-        # never added again as a nested call (its record has priority).
-        model_ids = [call.metadata.get("tool_id") or "" for call in model_calls]
-        added.update(model_ids)
-        for call, tool_id in zip(model_calls, model_ids, strict=True):
+        for call, execution in zip(model_calls, model_executions, strict=True):
             result.append(call)
-            add_descendants(tool_id)
-        for tool_id, execution in self.tool_executions.items():
-            if execution.parent_id is not None and tool_id not in added:
-                added.add(tool_id)
-                result.append(self._nested_call(tool_id))
-                add_descendants(tool_id)
+            if execution is not None:
+                add_descendants(execution)
+        for execution in self.tool_executions:
+            if execution.parent_id is not None and execution not in added:
+                added.add(execution)
+                result.append(self._nested_call(execution))
+                add_descendants(execution)
         return result
 
-    def _nested_call(self, tool_id: str) -> AgentToolCall:
-        execution = self.tool_executions[tool_id]
+    def _nested_call(self, execution: _ToolExecution) -> AgentToolCall:
         if execution.finished:
             result: Any = _tool_result_text(execution.result)
             error = (result or "tool error") if execution.is_error else None
@@ -1395,16 +1450,15 @@ class _PiEventCollector:
             error=error,
             metadata={
                 "source": SDK_NAME,
-                "tool_id": tool_id or None,
+                "tool_id": execution.tool_id or None,
                 "duration_ms": execution.duration_ms,
                 "parent_tool_id": execution.parent_id,
             },
         )
 
-    def _tool_call(self, block: dict[str, Any]) -> AgentToolCall:
+    def _tool_call(self, block: dict[str, Any], execution: _ToolExecution | None) -> AgentToolCall:
         tool_id = str(block.get("id") or "")
         name = str(block.get("name") or "unknown")
-        execution = self.tool_executions.get(tool_id)
         if execution is None or not execution.finished:
             error: str | None = "tool did not run"
             result: Any = None

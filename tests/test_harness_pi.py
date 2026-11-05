@@ -376,6 +376,78 @@ class TestEventCollector:
         assert result.tool_calls[1].metadata["parent_tool_id"] == ""
         assert result.tool_calls[1].error is None
 
+    def test_reused_empty_id_keeps_each_execution(self):
+        # Two sequential calls use the id "": each call gets its own result.
+        events = _events_tool_run()
+        events[4]["message"]["content"].append({"type": "toolCall", "id": "", "name": "read", "arguments": {"p": 2}})
+        events[4]["message"]["content"][2]["id"] = ""
+
+        def end(name: str, text: str, ms: int, **extra: Any) -> dict[str, Any]:
+            return {
+                "type": "tool_execution_end",
+                "toolCallId": "",
+                "toolName": name,
+                "result": {"content": [{"type": "text", "text": text}]},
+                "isError": False,
+                "durationMs": ms,
+                **extra,
+            }
+
+        events[5:7] = [
+            {"type": "tool_execution_start", "toolCallId": "", "toolName": "ls", "args": {"path": "."}},
+            end("ls", "first", 1),
+            {"type": "tool_execution_start", "toolCallId": "", "toolName": "read", "args": {"p": 2}},
+            # A nested call of the second "" call, and one of the first.
+            {"type": "tool_execution_start", "toolCallId": "/1", "toolName": "grep", "parentToolCallId": ""},
+            end("grep", "nested", 3, toolCallId="/1", parentToolCallId=""),
+            end("read", "second", 2),
+        ]
+        result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
+        assert result.error is None
+        assert [call.name for call in result.tool_calls] == ["ls", "read", "grep"]
+        first, second, nested = result.tool_calls
+        assert (first.result, first.metadata["duration_ms"]) == ("first", 1)
+        assert (second.result, second.metadata["duration_ms"]) == ("second", 2)
+        assert (nested.result, nested.metadata["parent_tool_id"]) == ("nested", "")
+
+    def test_reused_empty_id_keeps_the_nested_calls_of_the_first_execution(self):
+        # A nested call that came while the first "" call ran stays with it,
+        # even when a second "" call starts later.
+        events = _events_tool_run()
+        events[4]["message"]["content"].append({"type": "toolCall", "id": "", "name": "read", "arguments": {}})
+        events[4]["message"]["content"][2]["id"] = ""
+        events[5:7] = [
+            {"type": "tool_execution_start", "toolCallId": "", "toolName": "first"},
+            {"type": "tool_execution_start", "toolCallId": "/1", "toolName": "child1", "parentToolCallId": ""},
+            {"type": "tool_execution_end", "toolCallId": "", "toolName": "first", "result": {}},
+            {"type": "tool_execution_start", "toolCallId": "", "toolName": "second"},
+            {"type": "tool_execution_start", "toolCallId": "/1", "toolName": "child2", "parentToolCallId": ""},
+            {"type": "tool_execution_end", "toolCallId": "", "toolName": "second", "result": {}},
+        ]
+        result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
+        # Each nested call follows the execution that it started under.
+        assert [call.name for call in result.tool_calls] == ["ls", "child1", "read", "child2"]
+
+    def test_start_again_before_the_end_keeps_the_earlier_execution(self):
+        # The first "" call never ends: it does not take the result of the second.
+        events = _events_tool_run()
+        events[4]["message"]["content"].append({"type": "toolCall", "id": "", "name": "read", "arguments": {}})
+        events[4]["message"]["content"][2]["id"] = ""
+        events[5:7] = [
+            {"type": "tool_execution_start", "toolCallId": "", "toolName": "ls"},
+            {"type": "tool_execution_start", "toolCallId": "", "toolName": "read"},
+            {
+                "type": "tool_execution_end",
+                "toolCallId": "",
+                "toolName": "read",
+                "result": {"content": [{"type": "text", "text": "second"}]},
+            },
+        ]
+        result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
+        first, second = result.tool_calls
+        assert (first.result, first.error) == (None, "tool did not run")
+        assert (second.result, second.error) == ("second", None)
+
     def test_model_call_is_never_also_a_nested_call(self):
         # A damaged stream: call_2 is a model call and also says call_1 made it.
         events = _events_tool_run()

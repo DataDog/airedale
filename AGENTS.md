@@ -295,7 +295,10 @@ Notes:
     the scenario names it. Nested tool calls (`parentToolCallId`, for example
     from `codemode`) are in `tool_calls` after their parent, with
     `parent_tool_id`; `usage` session entries (`entry_appended`, for example
-    cache warming) count in the run usage.
+    cache warming) count in the run usage. Pi can reuse a `toolCallId` (even
+    ""): the collector keeps each execution, binds the n-th transcript call
+    with an id to the n-th execution with that id, and gives a nested call to
+    the latest execution with the parent id at its start.
     Project `.pi/mcp.json` servers (not `enabled: false`) are also listed in
     the span metadata and the agent manifest (`PiRunner._reported_mcp_servers`),
     but they are not probed for tools, and they get no distributed-trace
