@@ -194,6 +194,8 @@ class ExperimentConfig:
     tasks: tuple[TaskConfig, ...]
     description: str | None = None
     judge_model: str = "anthropic/claude-sonnet-4-6"
+    judge_type: str = "rubric"
+    decisions_threshold: float | None = None
     runs: int = 1
     dataset_name: str | None = None
     defaults: dict[str, Any] | None = None
@@ -224,11 +226,20 @@ class ExperimentConfig:
             except ValueError as e:
                 raise ConfigError(f"Invalid model '{model}': {e}") from e
 
-        # Validate judge model
+        # Validate judge configuration.
         try:
             ModelSpec.parse(self.judge_model)
         except ValueError as e:
             raise ConfigError(f"Invalid judge model '{self.judge_model}': {e}") from e
+        if not isinstance(self.judge_type, str) or self.judge_type not in {"rubric", "decisions"}:
+            raise ConfigError("judge_type must be 'rubric' or 'decisions'")
+        if self.decisions_threshold is not None:
+            if isinstance(self.decisions_threshold, bool) or not isinstance(self.decisions_threshold, (int, float)):
+                raise ConfigError("decisions_threshold must be a number")
+            if self.judge_type != "decisions":
+                raise ConfigError("decisions_threshold requires judge_type = 'decisions'")
+            if not 0 <= self.decisions_threshold <= 1:
+                raise ConfigError("decisions_threshold must be between 0 and 1")
 
 
 _SCENARIO_KEYS = {
@@ -553,6 +564,8 @@ def load_experiment(path: str | Path) -> ExperimentConfig:
         "description",
         "models",
         "judge_model",
+        "judge_type",
+        "decisions_threshold",
         "runs",
         "dataset_name",
         "defaults",
@@ -622,6 +635,8 @@ def load_experiment(path: str | Path) -> ExperimentConfig:
         description=data.get("description"),
         models=tuple(data["models"]),
         judge_model=data.get("judge_model", "anthropic/claude-sonnet-4-6"),
+        judge_type=data.get("judge_type", "rubric"),
+        decisions_threshold=data.get("decisions_threshold"),
         runs=data.get("runs", 1),
         dataset_name=dataset_name,
         defaults=defaults,

@@ -26,11 +26,13 @@ from typing import TYPE_CHECKING, Any
 from ddtrace.llmobs import LLMObs
 
 from airedale import dataset as dataset_module
+from airedale.config import ConfigError
 from airedale.harness import create_runner, mcp_system_prompt
 from airedale.mcp import McpServerSpec, managed_servers
 from airedale.observability import enable_llmobs
 from airedale.progress import ProgressReporter
 from airedale.scoring import RubricEvaluator
+from airedale.scoring.decisions import DECISIONS_MODEL, DecisionsRubricEvaluator
 from airedale.summary import ExperimentSummary, print_summary
 from airedale.types import ModelSpec, slugify
 from airedale.workdir import WorkspaceManager
@@ -68,6 +70,11 @@ async def run_experiments(
     agentless: bool = True,
 ) -> list[ExperimentRunSummary]:
     """Run the filtered evaluation matrix and return per-cell summaries."""
+    if config.judge_type == "decisions" and judge_model is not None:
+        raise ConfigError(
+            f'--judge-model cannot be used with judge_type = "decisions"; Decisions uses {DECISIONS_MODEL}'
+        )
+
     selected_models = _select_models(config, models)
     selected_scenarios = _select_scenarios(config, scenarios)
     selected_tasks = _select_tasks(config, tasks)
@@ -216,7 +223,13 @@ async def _run_cell(
         name=experiment_name,
         task=experiment_task,
         dataset=dataset_module.dataset_for_task(dataset, task),
-        evaluators=[RubricEvaluator(judge_model=judge_model, gateway=gateway)],
+        evaluators=[
+            DecisionsRubricEvaluator(
+                threshold=0.5 if config.decisions_threshold is None else config.decisions_threshold, gateway=gateway
+            )
+            if config.judge_type == "decisions"
+            else RubricEvaluator(judge_model=judge_model, gateway=gateway)
+        ],
         project_name=config.project,
         description=f"{scenario.name} / {model.label} / {task.id}",
         tags={
@@ -224,14 +237,25 @@ async def _run_cell(
             "prompt_version": scenario.name,
             "model_name": model.label,
             "task_slug": task.id,
-            "judge_model": judge_model,
+            "judge_model": "gpt-6-luna" if config.judge_type == "decisions" else judge_model,
+            **({"judge_type": "decisions"} if config.judge_type == "decisions" else {}),
         },
         config={
             "model_name": model.label,
             "scenario": scenario.name,
             "prompt_version": scenario.name,
             "task": task.id,
-            "judge_model": judge_model,
+            "judge_model": "gpt-6-luna" if config.judge_type == "decisions" else judge_model,
+            **(
+                {
+                    "judge_type": "decisions",
+                    "decisions_threshold": config.decisions_threshold
+                    if config.decisions_threshold is not None
+                    else 0.5,
+                }
+                if config.judge_type == "decisions"
+                else {}
+            ),
             "mcp_servers": [server.to_safe_dict() for server in cell_mcp_servers],
             "gateway_enabled": gateway is not None,
         },

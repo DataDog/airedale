@@ -73,7 +73,15 @@ description = "Example eval suite"
 models = ["anthropic/claude-sonnet-4-6", "openai/gpt-5.5"]
 
 # Optional: judge model for the rubric scorer. Default below.
+# Decisions uses gpt-6-luna instead of this setting.
 judge_model = "anthropic/claude-sonnet-4-6"
+
+# Optional: "rubric" (default) or "decisions".
+judge_type = "rubric"
+
+# Optional: Decisions predicate threshold (default 0.5, range [0, 1]).
+# Set this only when judge_type = "decisions".
+# decisions_threshold = 0.5
 
 # Optional: how many times to run each (model, scenario, task) cell. Default 1.
 runs = 1
@@ -399,10 +407,15 @@ def slugify(value: str) -> str: ...
 - One `LLMObs.async_experiment(...)` per `(model, scenario, task)` cell, with:
   - `name` = stable, slugified `"<scenario>|<model.label>|<task.id>"` (≤180 chars)
   - `dataset` = a single-record view of the synced dataset
-  - `evaluators` = `[RubricEvaluator(judge_model=..., gateway=...)]`
+  - `evaluators` depends on `judge_type`: `"rubric"` selects
+    `[RubricEvaluator(judge_model=..., gateway=...)]`; `"decisions"` selects
+    `[DecisionsRubricEvaluator(threshold=..., gateway=...)]`, with threshold
+    from `decisions_threshold` or `0.5` when omitted
   - `project_name` = `project`
   - `config` carrying `model_name`, `scenario`, `task` id, `judge_model`,
     `mcp_servers` (redacted via `to_safe_dict()`), `gateway_enabled`
+  - For Decisions, `config` and `tags` record `judge_type = "decisions"` and
+    `judge_model = "gpt-6-luna"`; `config` also records `decisions_threshold`.
   - `runs` = configured runs
 - **Prefer native integrations** (`integrations_enabled=True`); only add manual
   spans where a provider has no native integration. Concretely: Claude runs emit
@@ -451,7 +464,7 @@ airedale CONFIG [options]
   --scenario S             run only these scenarios (repeatable / comma-separated)
   --task T                 run only these task ids (repeatable / comma-separated)
   --runs N                 override runs per cell
-  --judge-model M          override judge model
+  --judge-model M          override rubric judge model; rejected for Decisions
   --jobs N                 total cells run concurrently across the matrix (default 1)
   --dry-run                print the matrix and exit
   --no-progress            disable the live progress display
