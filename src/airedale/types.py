@@ -200,12 +200,14 @@ PI_USAGE_COUNT_KEYS = ("input", "output", "cacheRead", "cacheWrite", "totalToken
 def is_valid_pi_usage(usage: Any) -> bool:
     """Return True when ``usage`` is a complete pi usage record with usable values.
 
-    Pi writes ``input`` and ``output`` in every record, with the other counts
-    and ``cost`` (zeros for a call that produced no tokens: that is data). A
-    record is damaged when it is not an object, lacks ``input`` or ``output``, has a
-    count that is not a finite non-negative whole number (a missing count is
-    fine, a null, text, boolean, fraction or nested value is not), or has a
-    ``cost`` that is not an object with a finite non-negative ``total``.
+    Pi writes ``input``, ``output`` and ``cost.total`` in every record (pi 1.4.0
+    and 1.5.0 start each usage with a cost of zero and add the catalog price, so a
+    model with an unknown price has ``total`` 0: zeros are data). A record is
+    damaged when it is not an object, lacks ``input`` or ``output``, has a count
+    that is not a finite non-negative whole number (a missing optional count is
+    fine, a null, text, boolean, fraction or nested value is not), or has no
+    ``cost`` object with a finite non-negative ``total``: without it the cost of
+    the run would be recorded as zero.
     :meth:`UsageMetrics.from_pi` turns such values into zero, which hides the
     damage, so callers check this first.
     """
@@ -213,10 +215,8 @@ def is_valid_pi_usage(usage: Any) -> bool:
         return False
     if not all(key not in usage or _is_count(usage[key]) for key in PI_USAGE_COUNT_KEYS):
         return False
-    if "cost" not in usage:
-        return True
-    cost = usage["cost"]
-    return isinstance(cost, dict) and ("total" not in cost or _is_finite_number(cost["total"]))
+    cost = usage.get("cost")
+    return isinstance(cost, dict) and _is_finite_number(cost.get("total"))
 
 
 def _is_finite_number(value: Any) -> bool:

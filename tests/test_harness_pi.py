@@ -633,6 +633,9 @@ class TestEventCollector:
             {"input": 1, "output": 1, "cacheWrite": "x"},
             {"input": 1, "output": 1, "totalTokens": None},
             {"input": 1, "output": 1, "reasoning": []},
+            {"input": 1, "output": 1},  # no cost
+            {"input": 1, "output": 1, "cost": {}},  # no cost.total
+            {"input": 1, "output": 1, "cost": {"input": 0.1, "output": 0.2}},
             {"input": 1, "output": 1, "cost": 5},
             {"input": 1, "output": 1, "cost": {"total": "Infinity"}},
             {"input": 1, "output": 1, "cost": {"total": float("inf")}},
@@ -667,6 +670,9 @@ class TestEventCollector:
             {"type": "compaction_end", "result": {"usage": "bad"}},
             {"type": "entry_appended", "entry": {"type": "usage", "usage": {"input": 1, "output": 1, "cacheRead": []}}},
             {"type": "entry_appended", "entry": {"type": "usage", "usage": None}},
+            {"type": "message_end", "message": {"role": "toolResult", "usage": {"input": 1, "output": 1}}},
+            {"type": "compaction_end", "result": {"usage": {"input": 1, "output": 1, "cost": {}}}},
+            {"type": "entry_appended", "entry": {"type": "usage", "usage": {"input": 1, "output": 1}}},
         ],
         ids=lambda event: json.dumps(event)[:60],
     )

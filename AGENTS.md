@@ -321,7 +321,7 @@ Notes:
     cache warming) count in the run usage. A run fails when any model call (assistant message) has no
     usable `usage` record (`airedale.types.is_valid_pi_usage`: an object with `input`
     and `output`, counts that are finite whole numbers >= 0, a `cost.total` that
-    is finite and >= 0), even if the run total is not zero. A `usage` that is
+    is there, finite and >= 0; pi 1.4.0 and 1.5.0 always write it, 0 for a model with an unknown price), even if the run total is not zero. A `usage` that is
     present in a tool result, a compaction result or a `usage` entry must be
     usable too (a compaction result can have none). A zero record is data. Pi can reuse a `toolCallId` (even
     ""): the collector keeps each execution, binds the n-th transcript call
