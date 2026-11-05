@@ -448,8 +448,10 @@ class TestEventCollector:
         assert (first.result, first.error) == (None, "tool did not run")
         assert (second.result, second.error) == ("second", None)
 
-    def test_model_call_is_never_also_a_nested_call(self):
-        # A damaged stream: call_2 is a model call and also says call_1 made it.
+    def test_nested_execution_is_not_the_execution_of_a_model_call(self):
+        # A damaged stream: call_2 is a model call, and the only execution with
+        # this id says that call_1 made it. It is a nested call, so the model
+        # call did not run, and the nested call is not lost.
         events = _events_tool_run()
         events[4]["message"]["content"].append({"type": "toolCall", "id": "call_2", "name": "bash", "arguments": {}})
         events[6:6] = [
@@ -462,9 +464,44 @@ class TestEventCollector:
             },
         ]
         result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
-        assert [call.name for call in result.tool_calls] == ["ls", "bash", "read"]
-        assert "parent_tool_id" not in result.tool_calls[1].metadata
-        assert result.tool_calls[2].metadata["parent_tool_id"] == "call_2"
+        assert [call.name for call in result.tool_calls] == ["ls", "bash", "read", "bash"]
+        model_call, nested, child, unrun = result.tool_calls
+        assert model_call.error is None
+        assert nested.metadata["parent_tool_id"] == "call_1"
+        assert child.metadata["parent_tool_id"] == "call_2"
+        assert "parent_tool_id" not in unrun.metadata
+        assert unrun.error == "tool did not run"
+
+    def test_nested_execution_before_a_model_call_with_the_same_id(self):
+        # A nested call with id "" comes before the model call with id "": the
+        # model call gets its own execution, not the nested one.
+        events = _events_tool_run()
+        events[4]["message"]["content"][2]["id"] = ""
+        events[5:7] = [
+            {"type": "tool_execution_start", "toolCallId": "", "toolName": "inner", "parentToolCallId": "outer"},
+            {
+                "type": "tool_execution_end",
+                "toolCallId": "",
+                "toolName": "inner",
+                "parentToolCallId": "outer",
+                "result": {"content": [{"type": "text", "text": "nested"}]},
+                "durationMs": 9,
+            },
+            {"type": "tool_execution_start", "toolCallId": "", "toolName": "ls", "args": {"path": "."}},
+            {
+                "type": "tool_execution_end",
+                "toolCallId": "",
+                "toolName": "ls",
+                "result": {"content": [{"type": "text", "text": "top"}]},
+                "durationMs": 2,
+            },
+        ]
+        result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
+        assert result.error is None
+        assert [call.name for call in result.tool_calls] == ["ls", "inner"]
+        model_call, nested = result.tool_calls
+        assert (model_call.result, model_call.metadata["duration_ms"]) == ("top", 2)
+        assert (nested.result, nested.metadata["parent_tool_id"]) == ("nested", "outer")
 
     def test_nested_tool_call_id_cycle_does_not_loop(self):
         events = _events_tool_run()

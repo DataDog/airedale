@@ -1348,14 +1348,17 @@ class _PiEventCollector:
         The text of the last assistant message is the answer, so it is not a
         segment. The second value has the execution of each tool call, in the
         same order (``None``: pi did not run it). The n-th call of the model
-        with an id gets the n-th execution with that id, so a reused id does
-        not mix the results.
+        with an id gets the n-th top-level execution (no ``parentToolCallId``)
+        with that id, so a reused id does not mix the results.
         """
         segments: list[AgentOutputSegment] = []
         executions: list[_ToolExecution | None] = []
         by_id: dict[str, list[_ToolExecution]] = {}
         for execution in self.tool_executions:
-            by_id.setdefault(execution.tool_id, []).append(execution)
+            # Only the calls of the model: a nested call can reuse the id of a
+            # later call of the model, and must not take its place.
+            if execution.parent_id is None:
+                by_id.setdefault(execution.tool_id, []).append(execution)
         next_index: dict[str, int] = {}
         last_index = len(self.assistant_messages) - 1
         for index, message in enumerate(self.assistant_messages):
@@ -1406,8 +1409,7 @@ class _PiEventCollector:
                 children.setdefault(execution.parent, []).append(execution)
         if not any(execution.parent_id is not None for execution in self.tool_executions):
             return model_calls
-        # A model call is never added again as a nested call (its execution has
-        # priority).
+        # A model call is never added again as a nested call.
         added: set[_ToolExecution] = {execution for execution in model_executions if execution is not None}
         result: list[AgentToolCall] = []
 
