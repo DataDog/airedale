@@ -287,8 +287,14 @@ Notes:
     appended to the system prompt in pi's `project_context` format) and
     `PI_OFFLINE=1`. Parent
     `PI_*` session variables are removed from the env. Pi does not read
-    `.mcp.json`; it reads `<cwd>/.pi/mcp.json` itself, where a project server
-    would replace a same-named scenario server, so such a collision raises.
+    `.mcp.json`; it reads `<cwd>/.pi/mcp.json` itself and merges it over the
+    scenario servers. `airedale.pi_mcp` copies this merge and pi's validation of
+    each entry (pi 1.4.0 and 1.5.0; `tests/test_pi_mcp.py` compares both with
+    the installed pi releases when they are there). A run raises when the repo
+    file would replace or change a scenario server (a definition, an override
+    such as `"enabled": false`, a BOM is allowed); an entry that pi rejects
+    (invalid, or a name that differs only in `-`/`_`) is no collision, and `{}`
+    is a no-op override.
     Two scenario servers whose names differ only in `-`/`_` also raise (pi
     would run only one). `allowed_builtin_tools` is the complete `--tools`
     list for pi (plus `mcp__*` and pi's MCP resource tools when MCP servers are present; the resources of a server with a `tool_names` allow-list stay unavailable, as it is `hidden`; on Windows the all-tools default also has `powershell`): a repo extension tool is declared only when
@@ -300,7 +306,7 @@ Notes:
     ""): the collector keeps each execution, binds the n-th transcript call
     with an id to the n-th top-level execution (no `parentToolCallId`) with that id, and gives a nested call to
     the latest execution with the parent id at its start.
-    Project `.pi/mcp.json` servers (not `enabled: false`) are also listed in
+    Project `.pi/mcp.json` servers that pi loads (valid, not `enabled: false`) are also listed in
     the span metadata and the agent manifest (`PiRunner._reported_mcp_servers`),
     but they are not probed for tools, and they get no distributed-trace
     headers: pi reads the repo file as it is, and a project entry replaces a
@@ -418,6 +424,7 @@ src/airedale/
   mcp.py                 McpServerSpec (from McpServerConfig); HTTP/stdio rendering for both SDKs;
                          merged_headers (static + trace); managed-server start/health;
                          tools/list metadata catalog; discover_claude_project_mcp_servers (.mcp.json)
+  pi_mcp.py              copy of pi's MCP config merge/validation (repo .pi/mcp.json over scenario servers)
   skills.py              cross-provider skill staging (Claude + Codex) + collision guard;
                          discover_claude_skill_names (project skills allow-list)
   workdir.py             WorkspaceManager: clone-cache + git-worktree per-run workspaces;

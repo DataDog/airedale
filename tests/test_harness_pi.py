@@ -1061,35 +1061,11 @@ class TestRunnerConfig:
 
     def test_project_mcp_collision_raises(self, tmp_path):
         (tmp_path / ".pi").mkdir()
-        (tmp_path / ".pi" / "mcp.json").write_text(json.dumps({"mcpServers": {"my_server": {"command": "x"}}}))
+        (tmp_path / ".pi" / "mcp.json").write_text(json.dumps({"mcpServers": {"my-server": {"command": "x"}}}))
         runner = PiRunner(cwd=tmp_path, mcp_servers=[McpServerSpec(name="my-server", command="y")])
         with pytest.raises(ValueError, match="my-server"):
             runner._check_project_mcp_collisions()
         PiRunner(cwd=tmp_path, mcp_servers=[McpServerSpec(name="other", command="y")])._check_project_mcp_collisions()
-
-    @pytest.mark.parametrize(
-        "entry",
-        [
-            {"command": "x", "enabled": False},  # disabled
-            {"command": 5},  # a field with the wrong type: invalid
-            "not-a-record",
-        ],
-    )
-    def test_disabled_or_invalid_project_mcp_server_is_no_collision(self, tmp_path, entry):
-        (tmp_path / ".pi").mkdir()
-        (tmp_path / ".pi" / "mcp.json").write_text(json.dumps({"mcpServers": {"my_server": entry}}))
-        runner = PiRunner(cwd=tmp_path, mcp_servers=[McpServerSpec(name="my-server", command="y")])
-        runner._check_project_mcp_collisions()
-        assert runner._project_mcp_server_names() == []
-
-    def test_enabled_project_mcp_server_is_still_a_collision(self, tmp_path):
-        (tmp_path / ".pi").mkdir()
-        (tmp_path / ".pi" / "mcp.json").write_text(
-            json.dumps({"mcpServers": {"my_server": {"command": "x", "enabled": True}}})
-        )
-        runner = PiRunner(cwd=tmp_path, mcp_servers=[McpServerSpec(name="my-server", command="y")])
-        with pytest.raises(ValueError, match="my-server"):
-            runner._check_project_mcp_collisions()
 
 
 class TestPiSkillDirs:

@@ -214,37 +214,11 @@ def discover_claude_project_mcp_servers(cwd: str | Path) -> list[McpServerSpec]:
     return _parse_mcp_json(Path(cwd) / ".mcp.json")
 
 
-def discover_pi_project_mcp_servers(cwd: str | Path) -> list[McpServerSpec]:
-    """Parse ``<cwd>/.pi/mcp.json`` into MCP server specs, for reporting only.
-
-    Pi reads this file itself (the runner does not give these servers to pi).
-    The specs describe the project servers in the span metadata and the agent
-    manifest. Entries with ``"enabled": false`` are left out. The repo file can
-    hold credentials, and these specs go to telemetry, so ``env`` values,
-    ``args`` and everything in ``url`` after the host and port are redacted
-    (headers are redacted by :meth:`McpServerSpec.to_safe_dict`).
-    """
-    from pathlib import Path
-
-    return [
-        McpServerSpec(
-            name=spec.name,
-            type=spec.type,
-            url=_url_without_secrets(spec.url),
-            command=spec.command,
-            args=tuple(REDACTED for _ in spec.args),
-            env=dict.fromkeys(spec.env, REDACTED),
-            headers=dict.fromkeys(spec.headers, REDACTED),
-        )
-        for spec in _parse_mcp_json(Path(cwd) / ".pi" / "mcp.json", skip_disabled=True)
-    ]
-
-
 #: Replaces a value that is not reported.
 REDACTED = "<redacted>"
 
 
-def _url_without_secrets(url: str | None) -> str | None:
+def url_without_secrets(url: str | None) -> str | None:
     """Keep only the scheme, host and port of ``url``: the user info, path, query
     and fragment can hold tokens (for example ``/s/<token>/mcp``)."""
     if not url:
@@ -262,7 +236,7 @@ def _url_without_secrets(url: str | None) -> str | None:
     return urlunsplit((parts.scheme, netloc, "", "", ""))
 
 
-def _parse_mcp_json(path: Path, *, skip_disabled: bool = False) -> list[McpServerSpec]:
+def _parse_mcp_json(path: Path) -> list[McpServerSpec]:
     """Parse an ``{"mcpServers": {...}}`` file; a missing or bad file gives ``[]``."""
     if not path.is_file():
         return []
@@ -279,8 +253,6 @@ def _parse_mcp_json(path: Path, *, skip_disabled: bool = False) -> list[McpServe
     specs: list[McpServerSpec] = []
     for name, cfg in servers_raw.items():
         if not isinstance(cfg, Mapping):
-            continue
-        if skip_disabled and cfg.get("enabled") is False:
             continue
         args, env, headers = cfg.get("args") or [], cfg.get("env") or {}, cfg.get("headers") or {}
         if not (

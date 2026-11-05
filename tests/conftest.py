@@ -6,6 +6,12 @@
 
 from __future__ import annotations
 
+import json
+import os
+import shutil
+import subprocess
+from pathlib import Path
+
 import pytest
 
 
@@ -80,3 +86,40 @@ class FakeSpanLLMObs:
 @pytest.fixture
 def fake_span_llmobs() -> FakeSpanLLMObs:
     return FakeSpanLLMObs()
+
+
+PI_REFERENCE_SCRIPT = Path(__file__).parent / "support" / "pi_reference.mjs"
+PI_REFERENCE_VERSIONS = ("1.4.0", "1.5.0")
+
+
+@pytest.fixture(scope="session")
+def pi_reference():
+    """Return ``run(request)``: the answer of the installed pi releases, by version.
+
+    The tests that use it compare airedale with the code of pi 1.4.0 and 1.5.0.
+    They are skipped when ``node`` or the releases are not there. The releases
+    are in ``$PI_RELEASES`` (default ``~/.pi/agent/install/releases``).
+    """
+    releases = Path(os.environ.get("PI_RELEASES", Path.home() / ".pi" / "agent" / "install" / "releases"))
+    packages = {
+        version: releases / version / "node_modules" / "@earendil-works" / "pi-coding-agent"
+        for version in PI_REFERENCE_VERSIONS
+    }
+    if shutil.which("node") is None or not all(package.is_dir() for package in packages.values()):
+        pytest.skip("node and the pi releases 1.4.0 and 1.5.0 are needed")
+
+    def run(request: dict) -> dict[str, dict]:
+        answers = {}
+        for version, package in packages.items():
+            process = subprocess.run(
+                ["node", str(PI_REFERENCE_SCRIPT), str(package)],
+                input=json.dumps(request),
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=60,
+            )
+            answers[version] = json.loads(process.stdout)
+        return answers
+
+    return run

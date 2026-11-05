@@ -140,7 +140,8 @@ from airedale.harness.pi_spans import (
     message_text,
     tool_result_text,
 )
-from airedale.mcp import discover_pi_project_mcp_servers, pi_literal
+from airedale.mcp import pi_literal
+from airedale.pi_mcp import discover_pi_project_mcp_servers, merge_project_mcp_config
 from airedale.skills import pi_skill_dirs
 from airedale.types import ModelSpec, UsageMetrics
 
@@ -458,11 +459,14 @@ class PiRunner(DecoratorSpanAgentRunner):
         project entry replaces a user-level entry with the same name, so the
         runner cannot add headers without changing the evaluated repo.
         """
-        scenario_keys = {_pi_server_key(server.name) for server in self.mcp_servers}
+        # Servers that pi rejects (a name that differs from a scenario server
+        # only in "-"/"_") and replacements of a scenario server (the run fails
+        # first) are not in the list.
+        scenario_names = {server.name for server in self.mcp_servers}
         project = [
             server
-            for server in discover_pi_project_mcp_servers(self.cwd)
-            if _pi_server_key(server.name) not in scenario_keys
+            for server in discover_pi_project_mcp_servers(self.cwd, self._scenario_pi_configs())
+            if server.name not in scenario_names
         ]
         return [*self.mcp_servers, *project]
 
@@ -488,22 +492,29 @@ class PiRunner(DecoratorSpanAgentRunner):
                 "difference between '-' and '_') and pi would run only one of them. Rename the server(s)."
             )
         project_file = Path(self.cwd) / ".pi" / "mcp.json"
-        project_names = {_pi_server_key(name) for name in self._project_mcp_server_names()}
-        collisions = sorted(server.name for server in self.mcp_servers if _pi_server_key(server.name) in project_names)
-        if collisions:
+        changed = merge_project_mcp_config(project_file, self._scenario_pi_configs()).changed
+        if changed:
             raise ValueError(
-                f"Project MCP config {project_file} defines server(s) {', '.join(collisions)} with the same name as "
-                "scenario MCP server(s); pi would use the project definition. Rename the scenario server(s)."
+                f"Project MCP config {project_file} defines server(s) {', '.join(changed)} with the same name as "
+                "scenario MCP server(s) and pi would use the project definition (or apply its changes, for example "
+                '"enabled": false). Rename or remove the project entry.'
             )
 
-    def _project_mcp_server_names(self) -> list[str]:
-        """Return the names of the servers pi loads from the repo ``<cwd>/.pi/mcp.json``.
+    def _scenario_pi_configs(self) -> dict[str, dict[str, Any]]:
+        """Return the ``mcp.json`` entry of each scenario server (as pi sees the global servers)."""
+        try:
+            return {server.name: server.to_pi_config({}) for server in self.mcp_servers}
+        except ValueError:
+            # The run fails when the configuration is written, with a clear message.
+            return {}
 
-        Same list as the one in the span metadata: pi does not load an entry
-        with ``"enabled": false`` or an invalid entry, so those cannot replace
-        a scenario server.
+    def _project_mcp_server_names(self) -> list[str]:
+        """Return the names of the servers that pi loads and starts from the repo ``<cwd>/.pi/mcp.json``.
+
+        Same list as the one in the span metadata: pi does not load an invalid
+        entry, and does not start an entry with ``"enabled": false``.
         """
-        return [server.name for server in discover_pi_project_mcp_servers(self.cwd)]
+        return [server.name for server in discover_pi_project_mcp_servers(self.cwd, self._scenario_pi_configs())]
 
     def _models_json_token(self) -> str | None:
         """Return the gateway token that ``models.json`` holds (``None`` when it holds no token)."""
