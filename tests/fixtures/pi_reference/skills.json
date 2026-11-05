@@ -1,0 +1,1150 @@
+{
+ "_comment": "Answers of pi to the requests of the tests. Record again: see tests/conftest.py (pi_reference).",
+ "cases": {
+  "{\"action\":\"skills\",\"content\":\"---\\n  name: alpha\\n  description: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\n!!set\\nname: alpha\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\n!!set\\nname:\\ndescription:\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\n%YAML 1.2\\nname: alpha\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\n&a {name: alpha, description: d}\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\n'1': a\\n1: b\\nname: alpha\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\n'name': alpha\\n'description': d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\n*a : x\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\n- name\\n- alpha\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\n---\\ntext\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\n.nan: a\\n.nan: b\\nname: alpha\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\n1: a\\n01: b\\nname: alpha\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\n1: a\\n1.0: b\\nname: alpha\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\n<<: {name: alpha}\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "project"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "project"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\n? kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\\n: v\\nname: alpha\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\n? name\\n: alpha\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\n\\\" name \\\": alpha\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "project"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "project"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\n\\\"na\\\\u006de\\\": alpha\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\n\\\"na\\\\x6de\\\": alpha\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\n\\\"name\\\": alpha\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\n\\\"name\\\":\\talpha\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\njust text\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: !! x\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: !!binary aGk=\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "project"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "project"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: !!bool yes\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "yes"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "yes"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: !!float 1\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "1"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "1"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: !!int 5\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "project"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "project"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: !!int \\\"5\\\"\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "project"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "project"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: !!int x\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "x"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "x"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: !!null x\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "x"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "x"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: !!str 5\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "5"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "5"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: !!str alpha\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: !foo alpha\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: &n alpha\\ndescription: *n\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: ''\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "project"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "project"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: 'alpha'\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: *x\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: .inf\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "project"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "project"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: 017\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "project"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "project"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: 0b11\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "0b11"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "0b11"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: 0o17\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "project"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "project"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: 0xff\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "project"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "project"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: 1.5\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "project"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "project"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: 1:30\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "1:30"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "1:30"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: 1_000\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "1_000"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "1_000"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: 1e3\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "project"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "project"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: 2001-01-01T10:00:00Z\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "2001-01-01T10:00:00Z"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "2001-01-01T10:00:00Z"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: 2001-01-01\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "2001-01-01"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "2001-01-01"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: >-\\n  alpha\\ndescription: |\\n  d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: On\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "On"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "On"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: [alpha\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: [alpha]\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "project"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "project"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: \\\"al\\\\\\n  pha\\\"\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: \\\"alpha\\\\tbeta\\\"\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha\tbeta"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha\tbeta"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: \\\"alpha\\tbeta\\\"\\ndescription:\\td\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha\tbeta"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha\tbeta"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: al\\n  pha\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "al pha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "al pha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alph\\u00e4\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alph\u00e4"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alph\u00e4"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha # note\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: '  '\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: 5\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\n---body\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\n-0: a\\n0: b\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\n...\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\n0x10: a\\n16: b\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\n1e400: a\\n1e401: b\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\n9007199254740992: a\\n9007199254740993: b\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\n\\t\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nk: &a [1]\\nm: {? *a : 1, ? *a : 2}\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nl:\\n- {x: 1, x: 2}\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nm: !!map [a]\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nm: {? [a] : 1, ? [a] : 2}\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nm: {x: 1}\\nn: {x: 2}\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nmetadata: {x: 1, x: 2}\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nmetadata:\\n  x: 1\\n  x: 2\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\no: !!omap [a: 1, a: 2]\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\no: !!omap [a: 1, b: 2]\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\no: !!omap [x, x]\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\np: !!pairs [a: 1, a: 2]\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\np: !!pairs [{a: 1, b: 2}]\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\ns: !!set [a]\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\ns: !!set {a, b: ~}\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\ns: !!set {a: 1}\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nx:\\n-\\ta\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\nname: null\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\t# c\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\t\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\tbeta\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha\tbeta"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha\tbeta"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: beta\\nname: alpha\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: true\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "project"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "project"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: yes\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "yes"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "yes"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: {a: b}\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "project"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "project"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: ~\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "project"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "project"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname:\\n\\talpha\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname:\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "project"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "project"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname:\\talpha\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname:alpha\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname\\t: alpha\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nnull: a\\n~: b\\nname: alpha\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\n{name: alpha, description: d}\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\n{name:\\talpha, description:\\td}\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\rname: alpha\\rdescription: d\\r---\\r\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---x\\nname: alpha\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"\\ufeff---\\r\\nname: alpha\\r\\ndescription: d\\r\\n---\\r\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  }
+ },
+ "node": "v26.13.0",
+ "pi_versions": [
+  "1.4.0",
+  "1.5.0"
+ ]
+}

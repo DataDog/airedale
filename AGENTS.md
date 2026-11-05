@@ -665,6 +665,8 @@ here, including:
   real provider/LLMObs calls. Mock SDK clients and `LLMObs`. Cover: config TOML
   parsing & validation, gateway resolution, MCP spec rendering (Claude config &
   Codex overrides), `ModelSpec`/`UsageMetrics`, judge JSON parsing, skill staging.
+  Tests that compare airedale with pi use the answers recorded in
+  `tests/fixtures/pi_reference/` (live check when pi is installed; see `CONTRIBUTING.md`).
 - **Type hints:** everywhere; `from __future__ import annotations` at the top of
   every module. Prefer dataclasses for value objects.
 - **License headers:** every source file should begin with the Apache-2.0

@@ -137,7 +137,7 @@ UNSUPPORTED = {"tab as indentation", "plain value with a tab"}
 @pytest.mark.parametrize(("label", "content"), FILES, ids=[label for label, _ in FILES])
 def test_name_matches_pi(pi_reference, tmp_path, label, content):
     skill = _write(tmp_path, content)
-    answers = pi_reference({"action": "skills", "cwd": str(tmp_path), "paths": [str(skill)]})
+    answers = pi_reference({"action": "skills", "content": content})
     if label in UNSUPPORTED:
         with pytest.raises(UnsupportedFrontmatterError):
             _pi_skill_name(skill)

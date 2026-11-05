@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 from typing import Any
 
@@ -150,16 +151,19 @@ def test_scenario_servers_that_the_project_file_changes(tmp_path, label, scenari
 @pytest.mark.parametrize(("label", "scenario", "name", "entry", "bom", "changed"), CASES, ids=[c[0] for c in CASES])
 def test_merge_matches_pi(pi_reference, tmp_path, label, scenario, name, entry, bom, changed):
     """The servers (and their config) after the merge are the ones that pi 1.4.0 and 1.5.0 load."""
-    cwd, agent = tmp_path / "cwd", tmp_path / "agent"
-    agent.mkdir()
-    (agent / "mcp.json").write_text(json.dumps({"mcpServers": scenario}))
-    _write_project(cwd, name, entry, bom)
-    merge = merge_project_mcp_config(cwd / ".pi" / "mcp.json", scenario)
+    _write_project(tmp_path, name, entry, bom)
+    project_file = tmp_path / ".pi" / "mcp.json"
+    merge = merge_project_mcp_config(project_file, scenario)
     ours = {name: (entry.scope, entry.config) for name, entry in merge.servers.items()}
-    for version, answer in pi_reference({"action": "mcp", "agentDir": str(agent), "cwd": str(cwd)}).items():
+    request = {
+        "action": "mcp",
+        "global_file": {"mcpServers": scenario},
+        "project_b64": base64.b64encode(project_file.read_bytes()).decode(),
+    }
+    for version, answer in pi_reference(request).items():
         theirs = {server["name"]: (server["scope"], server["config"]) for server in answer["servers"]}
         assert ours == theirs, version
-        assert bool(merge.errors) == bool(answer["errors"]), version
+        assert bool(merge.errors) == bool(answer["error_count"]), version
 
 
 class TestRunnerCheck:
@@ -228,11 +232,12 @@ class TestTraceHeaders:
     def test_pi_drops_the_trace_header_of_a_replaced_server(self, pi_reference, tmp_path):
         """The real merge: the project entry wins and the global trace header is gone."""
         runner = self._copy_of_untraced_config(tmp_path)
-        agent = tmp_path / "agent"
-        agent.mkdir()
-        (agent / "mcp.json").write_text(json.dumps(runner._mcp_config(self.TRACE)))
-        answers = pi_reference({"action": "mcp", "agentDir": str(agent), "cwd": str(tmp_path)})
-        for answer in answers.values():
+        request = {
+            "action": "mcp",
+            "global_file": runner._mcp_config(self.TRACE),
+            "project_b64": base64.b64encode((tmp_path / ".pi" / "mcp.json").read_bytes()).decode(),
+        }
+        for answer in pi_reference(request).values():
             assert "headers" not in answer["servers"][0]["config"]
 
 

@@ -4,40 +4,47 @@
 
 // Runs code of an installed pi release, so that tests can compare airedale with pi.
 // Usage: node pi_reference.mjs <pi-coding-agent package dir>  (request as JSON on stdin)
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const base = process.argv[2];
 const request = JSON.parse(readFileSync(0, "utf8"));
 const load = (path) => import(pathToFileURL(`${base}/dist/${path}`).href);
 
+// Files are written to a temporary directory: the requests hold the content, not paths, so that they are
+// the same on every machine (the answers are recorded in tests/fixtures/pi_reference).
+const sandbox = mkdtempSync(join(tmpdir(), "pi-reference-"));
+process.on("exit", () => rmSync(sandbox, { recursive: true, force: true }));
+
 if (request.action === "mcp") {
-  // The merge of the global mcp.json (agentDir) and the repo .pi/mcp.json (cwd).
+  // The merge of the global mcp.json (the object ``global_file``) and the repo .pi/mcp.json (the bytes
+  // ``project_b64``, or no file).
   const { loadMcpConfig } = await load("extensions/mcp/config.js");
-  const result = loadMcpConfig({ agentDir: request.agentDir, cwd: request.cwd, projectTrusted: true });
+  const agentDir = join(sandbox, "agent");
+  const cwd = join(sandbox, "cwd");
+  mkdirSync(agentDir);
+  mkdirSync(join(cwd, ".pi"), { recursive: true });
+  writeFileSync(join(agentDir, "mcp.json"), JSON.stringify(request.global_file));
+  if (request.project_b64 !== null && request.project_b64 !== undefined) {
+    writeFileSync(join(cwd, ".pi", "mcp.json"), Buffer.from(request.project_b64, "base64"));
+  }
+  const result = loadMcpConfig({ agentDir, cwd, projectTrusted: true });
   console.log(
     JSON.stringify({
       servers: result.servers.map((server) => ({ name: server.name, scope: server.scope, config: server.config })),
-      errors: result.errors,
+      error_count: result.errors.length,
     }),
   );
 } else if (request.action === "skills") {
-  // The skills that pi loads from the given files, and its parse of the last one.
+  // The name that pi gives the skill in ``<dir>/project/SKILL.md`` with this content (none: pi does not load it).
   const { loadSkills } = await load("core/skills.js");
-  const { parseFrontmatter } = await load("utils/frontmatter.js");
-  const result = loadSkills({
-    cwd: request.cwd,
-    agentDir: request.cwd,
-    skillPaths: request.paths,
-    includeDefaults: false,
-  });
-  let parsed;
-  try {
-    parsed = parseFrontmatter(readFileSync(request.paths.at(-1), "utf8")).frontmatter;
-  } catch (error) {
-    parsed = { parseError: error.message };
-  }
-  console.log(JSON.stringify({ names: result.skills.map((skill) => skill.name), diagnostics: result.diagnostics, parsed }));
+  const file = join(sandbox, "project", "SKILL.md");
+  mkdirSync(join(sandbox, "project"));
+  writeFileSync(file, request.content);
+  const result = loadSkills({ cwd: sandbox, agentDir: sandbox, skillPaths: [file], includeDefaults: false });
+  console.log(JSON.stringify({ names: result.skills.map((skill) => skill.name) }));
 } else if (request.action === "names") {
   // The MCP tool names, with servers registered in the given order. Same
   // collision rule as the registration loop of the MCP extension.
@@ -84,6 +91,7 @@ if (request.action === "mcp") {
 } else if (request.action === "retry") {
   // The events of pi's agent loop (mock model) for a response that failed with a
   // tool call with id "", and a retry that uses the id "" again.
+  Date.now = () => 1_700_000_000_000; // The same events on every run.
   const modules = `${base}/../`;
   const { agentLoop } = await import(pathToFileURL(`${modules}pi-agent-core/dist/agent-loop.js`).href);
   const { AssistantMessageEventStream } = await import(

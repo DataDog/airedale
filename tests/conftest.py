@@ -89,26 +89,55 @@ def fake_span_llmobs() -> FakeSpanLLMObs:
 
 
 PI_REFERENCE_SCRIPT = Path(__file__).parent / "support" / "pi_reference.mjs"
+PI_REFERENCE_FIXTURES = Path(__file__).parent / "fixtures" / "pi_reference"
 PI_REFERENCE_VERSIONS = ("1.4.0", "1.5.0")
 
 
-@pytest.fixture(scope="session")
-def pi_reference():
-    """Return ``run(request)``: the answer of the installed pi releases, by version.
+def _canonical(request: dict) -> str:
+    return json.dumps(request, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
 
-    The tests that use it compare airedale with the code of pi 1.4.0 and 1.5.0.
-    They are skipped when ``node`` or the releases are not there. The releases
-    are in ``$PI_RELEASES`` (default ``~/.pi/agent/install/releases``).
-    """
+
+def _live_pi_packages() -> dict[str, Path] | None:
+    """Return the package directory of each installed pi release, or ``None`` without ``node`` or the releases."""
+    if os.environ.get("AIREDALE_PI_REFERENCE") == "fixtures" or shutil.which("node") is None:
+        return None
     releases = Path(os.environ.get("PI_RELEASES", Path.home() / ".pi" / "agent" / "install" / "releases"))
     packages = {
         version: releases / version / "node_modules" / "@earendil-works" / "pi-coding-agent"
         for version in PI_REFERENCE_VERSIONS
     }
-    if shutil.which("node") is None or not all(package.is_dir() for package in packages.values()):
-        pytest.skip("node and the pi releases 1.4.0 and 1.5.0 are needed")
+    return packages if all(package.is_dir() for package in packages.values()) else None
 
-    def run(request: dict) -> dict[str, dict]:
+
+@pytest.fixture(scope="session")
+def pi_reference():
+    """Return ``run(request)``: what pi 1.4.0 and 1.5.0 answer to ``request``, by version.
+
+    The tests that use it compare airedale with the code of pi. The answers are
+    recorded in ``tests/fixtures/pi_reference/<action>.json``, so that the tests
+    run everywhere, without ``node``. When ``node`` and the releases are installed
+    (``$PI_RELEASES``, default ``~/.pi/agent/install/releases``), each answer is
+    also computed live and must be the recorded one (set
+    ``AIREDALE_PI_REFERENCE=fixtures`` to skip that check).
+
+    To record the answers of new requests (or after a new pi release), run the
+    tests with ``AIREDALE_RECORD_PI_REFERENCE=1``: the answers of the live run are
+    written to the fixture files.
+    """
+    packages = _live_pi_packages()
+    record = os.environ.get("AIREDALE_RECORD_PI_REFERENCE") == "1"
+    if record and packages is None:
+        pytest.fail("AIREDALE_RECORD_PI_REFERENCE=1 needs node and the pi releases 1.4.0 and 1.5.0")
+    loaded: dict[str, dict] = {}
+
+    def fixtures_of(action: str) -> dict:
+        if action not in loaded:
+            path = PI_REFERENCE_FIXTURES / f"{action}.json"
+            loaded[action] = json.loads(path.read_text()) if path.is_file() else {"cases": {}}
+        return loaded[action]
+
+    def live(request: dict) -> dict[str, dict]:
+        assert packages is not None
         answers = {}
         for version, package in packages.items():
             process = subprocess.run(
@@ -117,9 +146,34 @@ def pi_reference():
                 capture_output=True,
                 text=True,
                 check=True,
-                timeout=60,
+                timeout=120,
             )
             answers[version] = json.loads(process.stdout)
         return answers
 
-    return run
+    def run(request: dict) -> dict[str, dict]:
+        key, cases = _canonical(request), fixtures_of(request["action"])["cases"]
+        if record:
+            cases[key] = live(request)
+            return cases[key]
+        if key not in cases:
+            pytest.fail(
+                "no recorded answer of pi for this request; record it with "
+                "AIREDALE_RECORD_PI_REFERENCE=1 (needs node and pi 1.4.0 and 1.5.0): " + key[:200]
+            )
+        if packages is not None:
+            assert live(request) == cases[key], "the recorded answer of pi is out of date; record it again"
+        return cases[key]
+
+    yield run
+    if record:
+        PI_REFERENCE_FIXTURES.mkdir(parents=True, exist_ok=True)
+        node_version = subprocess.run(["node", "--version"], capture_output=True, text=True, check=True).stdout.strip()
+        for action, data in loaded.items():
+            document = {
+                "_comment": "Answers of pi to the requests of the tests. Record again: see tests/conftest.py (pi_reference).",
+                "pi_versions": list(PI_REFERENCE_VERSIONS),
+                "node": node_version,
+                "cases": dict(sorted(data["cases"].items())),
+            }
+            (PI_REFERENCE_FIXTURES / f"{action}.json").write_text(json.dumps(document, indent=1, sort_keys=True) + "\n")

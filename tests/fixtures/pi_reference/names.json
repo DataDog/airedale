@@ -1,0 +1,1462 @@
+{
+ "_comment": "Answers of pi to the requests of the tests. Record again: see tests/conftest.py (pi_reference).",
+ "cases": {
+  "{\"action\":\"names\",\"servers\":[[\"a\",[\"\\u00e9\",\"_\"]],[\"b\",[\"\\u00e9\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a____e7308e4f",
+     "server": "a",
+     "tool": "\u00e9"
+    },
+    {
+     "name": "mcp__a____de7f0962",
+     "server": "a",
+     "tool": "_"
+    },
+    {
+     "name": "mcp__b___",
+     "server": "b",
+     "tool": "\u00e9"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a____e7308e4f",
+     "server": "a",
+     "tool": "\u00e9"
+    },
+    {
+     "name": "mcp__a____de7f0962",
+     "server": "a",
+     "tool": "_"
+    },
+    {
+     "name": "mcp__b___",
+     "server": "b",
+     "tool": "\u00e9"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a\",[\"\\u00e9\",\"_\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a____e7308e4f",
+     "server": "a",
+     "tool": "\u00e9"
+    },
+    {
+     "name": "mcp__a____de7f0962",
+     "server": "a",
+     "tool": "_"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a____e7308e4f",
+     "server": "a",
+     "tool": "\u00e9"
+    },
+    {
+     "name": "mcp__a____de7f0962",
+     "server": "a",
+     "tool": "_"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a\",[\"b\\ud83d\\ude00c\"]],[\"a__b\",[\"c\"]],[\"a_b\",[\"c\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a__b__c",
+     "server": "a",
+     "tool": "b\ud83d\ude00c"
+    },
+    {
+     "name": "mcp__a__b__c_a92700ce",
+     "server": "a__b",
+     "tool": "c"
+    },
+    {
+     "name": "mcp__a_b__c",
+     "server": "a_b",
+     "tool": "c"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a__b__c",
+     "server": "a",
+     "tool": "b\ud83d\ude00c"
+    },
+    {
+     "name": "mcp__a__b__c_a92700ce",
+     "server": "a__b",
+     "tool": "c"
+    },
+    {
+     "name": "mcp__a_b__c",
+     "server": "a_b",
+     "tool": "c"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a\",[\"b\\ud83d\\ude00c\"]],[\"a__b\",[\"c\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a__b__c",
+     "server": "a",
+     "tool": "b\ud83d\ude00c"
+    },
+    {
+     "name": "mcp__a__b__c_a92700ce",
+     "server": "a__b",
+     "tool": "c"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a__b__c",
+     "server": "a",
+     "tool": "b\ud83d\ude00c"
+    },
+    {
+     "name": "mcp__a__b__c_a92700ce",
+     "server": "a__b",
+     "tool": "c"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a\",[\"b\\ud83d\\ude00c\"]],[\"a_b\",[\"c\"]],[\"a__b\",[\"c\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a__b__c",
+     "server": "a",
+     "tool": "b\ud83d\ude00c"
+    },
+    {
+     "name": "mcp__a_b__c",
+     "server": "a_b",
+     "tool": "c"
+    },
+    {
+     "name": "mcp__a__b__c_a92700ce",
+     "server": "a__b",
+     "tool": "c"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a__b__c",
+     "server": "a",
+     "tool": "b\ud83d\ude00c"
+    },
+    {
+     "name": "mcp__a_b__c",
+     "server": "a_b",
+     "tool": "c"
+    },
+    {
+     "name": "mcp__a__b__c_a92700ce",
+     "server": "a__b",
+     "tool": "c"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a\",[\"b\\ud83d\\ude00c\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a__b__c",
+     "server": "a",
+     "tool": "b\ud83d\ude00c"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a__b__c",
+     "server": "a",
+     "tool": "b\ud83d\ude00c"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a\",[\"b__c\",\"b--c\"]],[\"a__b\",[\"c\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a__b__c_01b8a75b",
+     "server": "a",
+     "tool": "b__c"
+    },
+    {
+     "name": "mcp__a__b__c_f125c2f6",
+     "server": "a",
+     "tool": "b--c"
+    },
+    {
+     "name": "mcp__a__b__c",
+     "server": "a__b",
+     "tool": "c"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a__b__c_01b8a75b",
+     "server": "a",
+     "tool": "b__c"
+    },
+    {
+     "name": "mcp__a__b__c_f125c2f6",
+     "server": "a",
+     "tool": "b--c"
+    },
+    {
+     "name": "mcp__a__b__c",
+     "server": "a__b",
+     "tool": "c"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a\",[\"b__c\",\"b--c\"]],[\"a__b\",[\"c_01b8a75b\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a__b__c_01b8a75b",
+     "server": "a",
+     "tool": "b__c"
+    },
+    {
+     "name": "mcp__a__b__c_f125c2f6",
+     "server": "a",
+     "tool": "b--c"
+    },
+    {
+     "name": "mcp__a__b__c_01b8a75b_339be76f",
+     "server": "a__b",
+     "tool": "c_01b8a75b"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a__b__c_01b8a75b",
+     "server": "a",
+     "tool": "b__c"
+    },
+    {
+     "name": "mcp__a__b__c_f125c2f6",
+     "server": "a",
+     "tool": "b--c"
+    },
+    {
+     "name": "mcp__a__b__c_01b8a75b_339be76f",
+     "server": "a__b",
+     "tool": "c_01b8a75b"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a\",[\"b__c\",\"b--c\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a__b__c_01b8a75b",
+     "server": "a",
+     "tool": "b__c"
+    },
+    {
+     "name": "mcp__a__b__c_f125c2f6",
+     "server": "a",
+     "tool": "b--c"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a__b__c_01b8a75b",
+     "server": "a",
+     "tool": "b__c"
+    },
+    {
+     "name": "mcp__a__b__c_f125c2f6",
+     "server": "a",
+     "tool": "b--c"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a\",[\"b__c\"]],[\"a__b\",[\"c\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a__b__c",
+     "server": "a",
+     "tool": "b__c"
+    },
+    {
+     "name": "mcp__a__b__c_a92700ce",
+     "server": "a__b",
+     "tool": "c"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a__b__c",
+     "server": "a",
+     "tool": "b__c"
+    },
+    {
+     "name": "mcp__a__b__c_a92700ce",
+     "server": "a__b",
+     "tool": "c"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a\",[\"b__c\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a__b__c",
+     "server": "a",
+     "tool": "b__c"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a__b__c",
+     "server": "a",
+     "tool": "b__c"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a\",[\"get-doc\",\"get_doc\"]],[\"b\",[\"get_doc\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a__get_doc_718153ae",
+     "server": "a",
+     "tool": "get-doc"
+    },
+    {
+     "name": "mcp__a__get_doc_15a28488",
+     "server": "a",
+     "tool": "get_doc"
+    },
+    {
+     "name": "mcp__b__get_doc",
+     "server": "b",
+     "tool": "get_doc"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a__get_doc_718153ae",
+     "server": "a",
+     "tool": "get-doc"
+    },
+    {
+     "name": "mcp__a__get_doc_15a28488",
+     "server": "a",
+     "tool": "get_doc"
+    },
+    {
+     "name": "mcp__b__get_doc",
+     "server": "b",
+     "tool": "get_doc"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a\",[\"get-doc\",\"get_doc\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a__get_doc_718153ae",
+     "server": "a",
+     "tool": "get-doc"
+    },
+    {
+     "name": "mcp__a__get_doc_15a28488",
+     "server": "a",
+     "tool": "get_doc"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a__get_doc_718153ae",
+     "server": "a",
+     "tool": "get-doc"
+    },
+    {
+     "name": "mcp__a__get_doc_15a28488",
+     "server": "a",
+     "tool": "get_doc"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a\",[\"x\"]],[\"b\",[\"x\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a__x",
+     "server": "a",
+     "tool": "x"
+    },
+    {
+     "name": "mcp__b__x",
+     "server": "b",
+     "tool": "x"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a__x",
+     "server": "a",
+     "tool": "x"
+    },
+    {
+     "name": "mcp__b__x",
+     "server": "b",
+     "tool": "x"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a\",[\"x\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a__x",
+     "server": "a",
+     "tool": "x"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a__x",
+     "server": "a",
+     "tool": "x"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a\",[\"x-y\",\"x_y\"]],[\"a_\",[\"b__c\"]],[\"a__b\",[\"c\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a__x_y_fc178264",
+     "server": "a",
+     "tool": "x-y"
+    },
+    {
+     "name": "mcp__a__x_y_35d885f9",
+     "server": "a",
+     "tool": "x_y"
+    },
+    {
+     "name": "mcp__a___b__c",
+     "server": "a_",
+     "tool": "b__c"
+    },
+    {
+     "name": "mcp__a__b__c",
+     "server": "a__b",
+     "tool": "c"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a__x_y_fc178264",
+     "server": "a",
+     "tool": "x-y"
+    },
+    {
+     "name": "mcp__a__x_y_35d885f9",
+     "server": "a",
+     "tool": "x_y"
+    },
+    {
+     "name": "mcp__a___b__c",
+     "server": "a_",
+     "tool": "b__c"
+    },
+    {
+     "name": "mcp__a__b__c",
+     "server": "a__b",
+     "tool": "c"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a\",[\"x-y\",\"x_y\"]],[\"a__b\",[\"c\"]],[\"a_\",[\"b__c\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a__x_y_fc178264",
+     "server": "a",
+     "tool": "x-y"
+    },
+    {
+     "name": "mcp__a__x_y_35d885f9",
+     "server": "a",
+     "tool": "x_y"
+    },
+    {
+     "name": "mcp__a__b__c",
+     "server": "a__b",
+     "tool": "c"
+    },
+    {
+     "name": "mcp__a___b__c",
+     "server": "a_",
+     "tool": "b__c"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a__x_y_fc178264",
+     "server": "a",
+     "tool": "x-y"
+    },
+    {
+     "name": "mcp__a__x_y_35d885f9",
+     "server": "a",
+     "tool": "x_y"
+    },
+    {
+     "name": "mcp__a__b__c",
+     "server": "a__b",
+     "tool": "c"
+    },
+    {
+     "name": "mcp__a___b__c",
+     "server": "a_",
+     "tool": "b__c"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a\",[\"x-y\",\"x_y\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a__x_y_fc178264",
+     "server": "a",
+     "tool": "x-y"
+    },
+    {
+     "name": "mcp__a__x_y_35d885f9",
+     "server": "a",
+     "tool": "x_y"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a__x_y_fc178264",
+     "server": "a",
+     "tool": "x-y"
+    },
+    {
+     "name": "mcp__a__x_y_35d885f9",
+     "server": "a",
+     "tool": "x_y"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a\\ud83d\\ude00\",[\"x\"]],[\"a__\",[\"x\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a____x",
+     "server": "a\ud83d\ude00",
+     "tool": "x"
+    },
+    {
+     "name": "mcp__a____x_68148948",
+     "server": "a__",
+     "tool": "x"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a____x",
+     "server": "a\ud83d\ude00",
+     "tool": "x"
+    },
+    {
+     "name": "mcp__a____x_68148948",
+     "server": "a__",
+     "tool": "x"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a\\ud83d\\ude00\",[\"x\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a____x",
+     "server": "a\ud83d\ude00",
+     "tool": "x"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a____x",
+     "server": "a\ud83d\ude00",
+     "tool": "x"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a_\",[\"b__c\"]],[\"a\",[\"x-y\",\"x_y\"]],[\"a__b\",[\"c\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a___b__c",
+     "server": "a_",
+     "tool": "b__c"
+    },
+    {
+     "name": "mcp__a__x_y_fc178264",
+     "server": "a",
+     "tool": "x-y"
+    },
+    {
+     "name": "mcp__a__x_y_35d885f9",
+     "server": "a",
+     "tool": "x_y"
+    },
+    {
+     "name": "mcp__a__b__c",
+     "server": "a__b",
+     "tool": "c"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a___b__c",
+     "server": "a_",
+     "tool": "b__c"
+    },
+    {
+     "name": "mcp__a__x_y_fc178264",
+     "server": "a",
+     "tool": "x-y"
+    },
+    {
+     "name": "mcp__a__x_y_35d885f9",
+     "server": "a",
+     "tool": "x_y"
+    },
+    {
+     "name": "mcp__a__b__c",
+     "server": "a__b",
+     "tool": "c"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a_\",[\"b__c\"]],[\"a__b\",[\"c\"]],[\"a\",[\"x-y\",\"x_y\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a___b__c",
+     "server": "a_",
+     "tool": "b__c"
+    },
+    {
+     "name": "mcp__a__b__c",
+     "server": "a__b",
+     "tool": "c"
+    },
+    {
+     "name": "mcp__a__x_y_fc178264",
+     "server": "a",
+     "tool": "x-y"
+    },
+    {
+     "name": "mcp__a__x_y_35d885f9",
+     "server": "a",
+     "tool": "x_y"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a___b__c",
+     "server": "a_",
+     "tool": "b__c"
+    },
+    {
+     "name": "mcp__a__b__c",
+     "server": "a__b",
+     "tool": "c"
+    },
+    {
+     "name": "mcp__a__x_y_fc178264",
+     "server": "a",
+     "tool": "x-y"
+    },
+    {
+     "name": "mcp__a__x_y_35d885f9",
+     "server": "a",
+     "tool": "x_y"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a_\",[\"b__c\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a___b__c",
+     "server": "a_",
+     "tool": "b__c"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a___b__c",
+     "server": "a_",
+     "tool": "b__c"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a__\",[\"x\"]],[\"a\\ud83d\\ude00\",[\"x\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a____x",
+     "server": "a__",
+     "tool": "x"
+    },
+    {
+     "name": "mcp__a____x_197abc72",
+     "server": "a\ud83d\ude00",
+     "tool": "x"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a____x",
+     "server": "a__",
+     "tool": "x"
+    },
+    {
+     "name": "mcp__a____x_197abc72",
+     "server": "a\ud83d\ude00",
+     "tool": "x"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a__\",[\"x\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a____x",
+     "server": "a__",
+     "tool": "x"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a____x",
+     "server": "a__",
+     "tool": "x"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a__b\",[\"c\"]],[\"a\",[\"b\\ud83d\\ude00c\"]],[\"a_b\",[\"c\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a__b__c",
+     "server": "a__b",
+     "tool": "c"
+    },
+    {
+     "name": "mcp__a__b__c_c3a865b8",
+     "server": "a",
+     "tool": "b\ud83d\ude00c"
+    },
+    {
+     "name": "mcp__a_b__c",
+     "server": "a_b",
+     "tool": "c"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a__b__c",
+     "server": "a__b",
+     "tool": "c"
+    },
+    {
+     "name": "mcp__a__b__c_c3a865b8",
+     "server": "a",
+     "tool": "b\ud83d\ude00c"
+    },
+    {
+     "name": "mcp__a_b__c",
+     "server": "a_b",
+     "tool": "c"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a__b\",[\"c\"]],[\"a\",[\"b\\ud83d\\ude00c\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a__b__c",
+     "server": "a__b",
+     "tool": "c"
+    },
+    {
+     "name": "mcp__a__b__c_c3a865b8",
+     "server": "a",
+     "tool": "b\ud83d\ude00c"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a__b__c",
+     "server": "a__b",
+     "tool": "c"
+    },
+    {
+     "name": "mcp__a__b__c_c3a865b8",
+     "server": "a",
+     "tool": "b\ud83d\ude00c"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a__b\",[\"c\"]],[\"a\",[\"b__c\",\"b--c\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a__b__c",
+     "server": "a__b",
+     "tool": "c"
+    },
+    {
+     "name": "mcp__a__b__c_01b8a75b",
+     "server": "a",
+     "tool": "b__c"
+    },
+    {
+     "name": "mcp__a__b__c_f125c2f6",
+     "server": "a",
+     "tool": "b--c"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a__b__c",
+     "server": "a__b",
+     "tool": "c"
+    },
+    {
+     "name": "mcp__a__b__c_01b8a75b",
+     "server": "a",
+     "tool": "b__c"
+    },
+    {
+     "name": "mcp__a__b__c_f125c2f6",
+     "server": "a",
+     "tool": "b--c"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a__b\",[\"c\"]],[\"a\",[\"b__c\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a__b__c",
+     "server": "a__b",
+     "tool": "c"
+    },
+    {
+     "name": "mcp__a__b__c_01b8a75b",
+     "server": "a",
+     "tool": "b__c"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a__b__c",
+     "server": "a__b",
+     "tool": "c"
+    },
+    {
+     "name": "mcp__a__b__c_01b8a75b",
+     "server": "a",
+     "tool": "b__c"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a__b\",[\"c\"]],[\"a\",[\"x-y\",\"x_y\"]],[\"a_\",[\"b__c\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a__b__c",
+     "server": "a__b",
+     "tool": "c"
+    },
+    {
+     "name": "mcp__a__x_y_fc178264",
+     "server": "a",
+     "tool": "x-y"
+    },
+    {
+     "name": "mcp__a__x_y_35d885f9",
+     "server": "a",
+     "tool": "x_y"
+    },
+    {
+     "name": "mcp__a___b__c",
+     "server": "a_",
+     "tool": "b__c"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a__b__c",
+     "server": "a__b",
+     "tool": "c"
+    },
+    {
+     "name": "mcp__a__x_y_fc178264",
+     "server": "a",
+     "tool": "x-y"
+    },
+    {
+     "name": "mcp__a__x_y_35d885f9",
+     "server": "a",
+     "tool": "x_y"
+    },
+    {
+     "name": "mcp__a___b__c",
+     "server": "a_",
+     "tool": "b__c"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a__b\",[\"c\"]],[\"a_\",[\"b__c\"]],[\"a\",[\"x-y\",\"x_y\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a__b__c",
+     "server": "a__b",
+     "tool": "c"
+    },
+    {
+     "name": "mcp__a___b__c",
+     "server": "a_",
+     "tool": "b__c"
+    },
+    {
+     "name": "mcp__a__x_y_fc178264",
+     "server": "a",
+     "tool": "x-y"
+    },
+    {
+     "name": "mcp__a__x_y_35d885f9",
+     "server": "a",
+     "tool": "x_y"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a__b__c",
+     "server": "a__b",
+     "tool": "c"
+    },
+    {
+     "name": "mcp__a___b__c",
+     "server": "a_",
+     "tool": "b__c"
+    },
+    {
+     "name": "mcp__a__x_y_fc178264",
+     "server": "a",
+     "tool": "x-y"
+    },
+    {
+     "name": "mcp__a__x_y_35d885f9",
+     "server": "a",
+     "tool": "x_y"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a__b\",[\"c\"]],[\"a_b\",[\"c\"]],[\"a\",[\"b\\ud83d\\ude00c\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a__b__c",
+     "server": "a__b",
+     "tool": "c"
+    },
+    {
+     "name": "mcp__a_b__c",
+     "server": "a_b",
+     "tool": "c"
+    },
+    {
+     "name": "mcp__a__b__c_c3a865b8",
+     "server": "a",
+     "tool": "b\ud83d\ude00c"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a__b__c",
+     "server": "a__b",
+     "tool": "c"
+    },
+    {
+     "name": "mcp__a_b__c",
+     "server": "a_b",
+     "tool": "c"
+    },
+    {
+     "name": "mcp__a__b__c_c3a865b8",
+     "server": "a",
+     "tool": "b\ud83d\ude00c"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a__b\",[\"c\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a__b__c",
+     "server": "a__b",
+     "tool": "c"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a__b__c",
+     "server": "a__b",
+     "tool": "c"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a__b\",[\"c_01b8a75b\"]],[\"a\",[\"b__c\",\"b--c\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a__b__c_01b8a75b",
+     "server": "a__b",
+     "tool": "c_01b8a75b"
+    },
+    {
+     "name": "mcp__a__b__c_01b8a75b",
+     "server": "a",
+     "tool": "b__c"
+    },
+    {
+     "name": "mcp__a__b__c_f125c2f6",
+     "server": "a",
+     "tool": "b--c"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a__b__c_01b8a75b",
+     "server": "a__b",
+     "tool": "c_01b8a75b"
+    },
+    {
+     "name": "mcp__a__b__c_01b8a75b",
+     "server": "a",
+     "tool": "b__c"
+    },
+    {
+     "name": "mcp__a__b__c_f125c2f6",
+     "server": "a",
+     "tool": "b--c"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a__b\",[\"c_01b8a75b\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a__b__c_01b8a75b",
+     "server": "a__b",
+     "tool": "c_01b8a75b"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a__b__c_01b8a75b",
+     "server": "a__b",
+     "tool": "c_01b8a75b"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a_b\",[\"c\"]],[\"a\",[\"b\\ud83d\\ude00c\"]],[\"a__b\",[\"c\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a_b__c",
+     "server": "a_b",
+     "tool": "c"
+    },
+    {
+     "name": "mcp__a__b__c",
+     "server": "a",
+     "tool": "b\ud83d\ude00c"
+    },
+    {
+     "name": "mcp__a__b__c_a92700ce",
+     "server": "a__b",
+     "tool": "c"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a_b__c",
+     "server": "a_b",
+     "tool": "c"
+    },
+    {
+     "name": "mcp__a__b__c",
+     "server": "a",
+     "tool": "b\ud83d\ude00c"
+    },
+    {
+     "name": "mcp__a__b__c_a92700ce",
+     "server": "a__b",
+     "tool": "c"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a_b\",[\"c\"]],[\"a__b\",[\"c\"]],[\"a\",[\"b\\ud83d\\ude00c\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a_b__c",
+     "server": "a_b",
+     "tool": "c"
+    },
+    {
+     "name": "mcp__a__b__c",
+     "server": "a__b",
+     "tool": "c"
+    },
+    {
+     "name": "mcp__a__b__c_c3a865b8",
+     "server": "a",
+     "tool": "b\ud83d\ude00c"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a_b__c",
+     "server": "a_b",
+     "tool": "c"
+    },
+    {
+     "name": "mcp__a__b__c",
+     "server": "a__b",
+     "tool": "c"
+    },
+    {
+     "name": "mcp__a__b__c_c3a865b8",
+     "server": "a",
+     "tool": "b\ud83d\ude00c"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"a_b\",[\"c\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__a_b__c",
+     "server": "a_b",
+     "tool": "c"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__a_b__c",
+     "server": "a_b",
+     "tool": "c"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"b\",[\"\\u00e9\"]],[\"a\",[\"\\u00e9\",\"_\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__b___",
+     "server": "b",
+     "tool": "\u00e9"
+    },
+    {
+     "name": "mcp__a____e7308e4f",
+     "server": "a",
+     "tool": "\u00e9"
+    },
+    {
+     "name": "mcp__a____de7f0962",
+     "server": "a",
+     "tool": "_"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__b___",
+     "server": "b",
+     "tool": "\u00e9"
+    },
+    {
+     "name": "mcp__a____e7308e4f",
+     "server": "a",
+     "tool": "\u00e9"
+    },
+    {
+     "name": "mcp__a____de7f0962",
+     "server": "a",
+     "tool": "_"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"b\",[\"\\u00e9\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__b___",
+     "server": "b",
+     "tool": "\u00e9"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__b___",
+     "server": "b",
+     "tool": "\u00e9"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"b\",[\"get_doc\"]],[\"a\",[\"get-doc\",\"get_doc\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__b__get_doc",
+     "server": "b",
+     "tool": "get_doc"
+    },
+    {
+     "name": "mcp__a__get_doc_718153ae",
+     "server": "a",
+     "tool": "get-doc"
+    },
+    {
+     "name": "mcp__a__get_doc_15a28488",
+     "server": "a",
+     "tool": "get_doc"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__b__get_doc",
+     "server": "b",
+     "tool": "get_doc"
+    },
+    {
+     "name": "mcp__a__get_doc_718153ae",
+     "server": "a",
+     "tool": "get-doc"
+    },
+    {
+     "name": "mcp__a__get_doc_15a28488",
+     "server": "a",
+     "tool": "get_doc"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"b\",[\"get_doc\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__b__get_doc",
+     "server": "b",
+     "tool": "get_doc"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__b__get_doc",
+     "server": "b",
+     "tool": "get_doc"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"b\",[\"x\"]],[\"a\",[\"x\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__b__x",
+     "server": "b",
+     "tool": "x"
+    },
+    {
+     "name": "mcp__a__x",
+     "server": "a",
+     "tool": "x"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__b__x",
+     "server": "b",
+     "tool": "x"
+    },
+    {
+     "name": "mcp__a__x",
+     "server": "a",
+     "tool": "x"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"b\",[\"x\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__b__x",
+     "server": "b",
+     "tool": "x"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__b__x",
+     "server": "b",
+     "tool": "x"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"s\",[\"\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\"]],[\"t\",[\"x\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__s__________________________________________________345777a5",
+     "server": "s",
+     "tool": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"
+    },
+    {
+     "name": "mcp__t__x",
+     "server": "t",
+     "tool": "x"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__s__________________________________________________345777a5",
+     "server": "s",
+     "tool": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"
+    },
+    {
+     "name": "mcp__t__x",
+     "server": "t",
+     "tool": "x"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"s\",[\"\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__s__________________________________________________345777a5",
+     "server": "s",
+     "tool": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__s__________________________________________________345777a5",
+     "server": "s",
+     "tool": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"s\",[\"tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt\"]],[\"u\",[\"tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__s__ttttttttttttttttttttttttttttttttttttttttttttttt_02174516",
+     "server": "s",
+     "tool": "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+    },
+    {
+     "name": "mcp__u__ttttttttttttttttttttttttttttttttttttttttttttttt_38ba46c0",
+     "server": "u",
+     "tool": "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__s__ttttttttttttttttttttttttttttttttttttttttttttttt_02174516",
+     "server": "s",
+     "tool": "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+    },
+    {
+     "name": "mcp__u__ttttttttttttttttttttttttttttttttttttttttttttttt_38ba46c0",
+     "server": "u",
+     "tool": "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"s\",[\"tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__s__ttttttttttttttttttttttttttttttttttttttttttttttt_02174516",
+     "server": "s",
+     "tool": "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__s__ttttttttttttttttttttttttttttttttttttttttttttttt_02174516",
+     "server": "s",
+     "tool": "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"t\",[\"x\"]],[\"s\",[\"\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__t__x",
+     "server": "t",
+     "tool": "x"
+    },
+    {
+     "name": "mcp__s__________________________________________________345777a5",
+     "server": "s",
+     "tool": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__t__x",
+     "server": "t",
+     "tool": "x"
+    },
+    {
+     "name": "mcp__s__________________________________________________345777a5",
+     "server": "s",
+     "tool": "\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"t\",[\"x\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__t__x",
+     "server": "t",
+     "tool": "x"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__t__x",
+     "server": "t",
+     "tool": "x"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"u\",[\"tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt\"]],[\"s\",[\"tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__u__ttttttttttttttttttttttttttttttttttttttttttttttt_38ba46c0",
+     "server": "u",
+     "tool": "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+    },
+    {
+     "name": "mcp__s__ttttttttttttttttttttttttttttttttttttttttttttttt_02174516",
+     "server": "s",
+     "tool": "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__u__ttttttttttttttttttttttttttttttttttttttttttttttt_38ba46c0",
+     "server": "u",
+     "tool": "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+    },
+    {
+     "name": "mcp__s__ttttttttttttttttttttttttttttttttttttttttttttttt_02174516",
+     "server": "s",
+     "tool": "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+    }
+   ]
+  },
+  "{\"action\":\"names\",\"servers\":[[\"u\",[\"tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt\"]]]}": {
+   "1.4.0": [
+    {
+     "name": "mcp__u__ttttttttttttttttttttttttttttttttttttttttttttttt_38ba46c0",
+     "server": "u",
+     "tool": "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+    }
+   ],
+   "1.5.0": [
+    {
+     "name": "mcp__u__ttttttttttttttttttttttttttttttttttttttttttttttt_38ba46c0",
+     "server": "u",
+     "tool": "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+    }
+   ]
+  }
+ },
+ "node": "v26.13.0",
+ "pi_versions": [
+  "1.4.0",
+  "1.5.0"
+ ]
+}

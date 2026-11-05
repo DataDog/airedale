@@ -1,0 +1,1010 @@
+{
+ "_comment": "Answers of pi to the requests of the tests. Record again: see tests/conftest.py (pi_reference).",
+ "cases": {
+  "{\"action\":\"urls\",\"urls\":[\"https://example.test/mcp\",\"http://localhost:80/x?y#z\",\"ht\\ttps://example.invalid/mcp\",\"\\u0000https://example.invalid/mcp\",\"  https://x.test  \",\"http://127.1/meta\",\"http://0x7f.1/\",\"http://2130706433/\",\"http://0177.0.0.1/\",\"http://[::1]/\",\"http://[0:0:0:0:0:0:0:1]:8080/p\",\"http://[::ffff:127.0.0.1]/\",\"http://LOCALHOST/\",\"http://localhost./\",\"http://%6Cocalhost/\",\"http://\\uff4c\\uff4f\\uff43\\uff41\\uff4c\\uff48\\uff4f\\uff53\\uff54/\",\"http:///x\",\"http://\",\"http:\",\"http:example.test\",\"http:\\\\\\\\example.test\\\\x\",\"https:/\\\\example.test\",\"http://user@/x\",\"http://@host/\",\"http://u:p@host:8080/a/b\",\"http://host:/\",\"http://host:abc/\",\"http://host:65536/\",\"http://host:65535/\",\"http://host:0080/\",\"https://host:443/\",\"https://host:444/\",\"http://a b/\",\"http://a<b/\",\"http://a%25b/\",\"http://a%00b/\",\"http://1.2.3.4.5/\",\"http://1.2.3.256/\",\"http://256/\",\"http://4294967296/\",\"http://0x100000000/\",\"http://09/\",\"http://1.2.3/\",\"http://1.2.3./\",\"http://a.1/\",\"http://a.0x/\",\"http://xn--nxasmq6b/\",\"http://ex\\u00e4mple.com/\",\"http://127.0.0.1:8080/callback\",\"http://localhost/callback/.\",\"http://localhost/x/../callback\",\"http://localhost/%2e/callback\",\"http://localhost\\\\callback\",\"http://localhost/callback?\",\"http://localhost/callback#\",\"http://localhost/callback?a#b\",\"http://localhost/callback \",\"http://[::1\",\"http://[::1]x/\",\"http://[1::2::3]/\",\"ftp://x/\",\"file:///x\",\"mailto:x\",\"foo\",\"//x\",\"/x\",\"?x\",\"HTTP://X.TEST/\",\"https://x.test:/\",\"http://x.test:0/\",\"http://1.1.1.1.\",\"http://0/\",\"http://..\",\"http://.\",\"http://a..b/\",\"http://-x/\",\"https://[::1]:443/\",\"http://[::]/\",\"http://[v1.x]/\",\"http://x.test/a b?c d#e f\",\"http://x.test/%7e\",\"http://x\\u200by/\",\"http://x\\u00ady/\",\"http://\\u00ad/\"]}": {
+   "1.4.0": [
+    {
+     "hash": "",
+     "hostname": "example.test",
+     "pathname": "/mcp",
+     "port": "",
+     "scheme": "https",
+     "search": ""
+    },
+    {
+     "hash": "#z",
+     "hostname": "localhost",
+     "pathname": "/x",
+     "port": "",
+     "scheme": "http",
+     "search": "?y"
+    },
+    {
+     "hash": "",
+     "hostname": "example.invalid",
+     "pathname": "/mcp",
+     "port": "",
+     "scheme": "https",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "example.invalid",
+     "pathname": "/mcp",
+     "port": "",
+     "scheme": "https",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "x.test",
+     "pathname": "/",
+     "port": "",
+     "scheme": "https",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "127.0.0.1",
+     "pathname": "/meta",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "127.0.0.1",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "127.0.0.1",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "127.0.0.1",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "[::1]",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "[::1]",
+     "pathname": "/p",
+     "port": "8080",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "[::ffff:7f00:1]",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "localhost",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "localhost.",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "localhost",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "localhost",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "x",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    null,
+    null,
+    {
+     "hash": "",
+     "hostname": "example.test",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "example.test",
+     "pathname": "/x",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "example.test",
+     "pathname": "/",
+     "port": "",
+     "scheme": "https",
+     "search": ""
+    },
+    null,
+    {
+     "hash": "",
+     "hostname": "host",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "host",
+     "pathname": "/a/b",
+     "port": "8080",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "host",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    null,
+    null,
+    {
+     "hash": "",
+     "hostname": "host",
+     "pathname": "/",
+     "port": "65535",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "host",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "host",
+     "pathname": "/",
+     "port": "",
+     "scheme": "https",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "host",
+     "pathname": "/",
+     "port": "444",
+     "scheme": "https",
+     "search": ""
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    {
+     "hash": "",
+     "hostname": "0.0.1.0",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    null,
+    null,
+    null,
+    {
+     "hash": "",
+     "hostname": "1.2.0.3",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "1.2.0.3",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    null,
+    null,
+    {
+     "hash": "",
+     "hostname": "xn--nxasmq6b",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "xn--exmple-cua.com",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "127.0.0.1",
+     "pathname": "/callback",
+     "port": "8080",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "localhost",
+     "pathname": "/callback/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "localhost",
+     "pathname": "/callback",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "localhost",
+     "pathname": "/callback",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "localhost",
+     "pathname": "/callback",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "localhost",
+     "pathname": "/callback",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "localhost",
+     "pathname": "/callback",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "#b",
+     "hostname": "localhost",
+     "pathname": "/callback",
+     "port": "",
+     "scheme": "http",
+     "search": "?a"
+    },
+    {
+     "hash": "",
+     "hostname": "localhost",
+     "pathname": "/callback",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    null,
+    null,
+    null,
+    {
+     "hash": "",
+     "hostname": "x",
+     "pathname": "/",
+     "port": "",
+     "scheme": "ftp",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "",
+     "pathname": "/x",
+     "port": "",
+     "scheme": "file",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "",
+     "pathname": "x",
+     "port": "",
+     "scheme": "mailto",
+     "search": ""
+    },
+    null,
+    null,
+    null,
+    null,
+    {
+     "hash": "",
+     "hostname": "x.test",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "x.test",
+     "pathname": "/",
+     "port": "",
+     "scheme": "https",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "x.test",
+     "pathname": "/",
+     "port": "0",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "1.1.1.1",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "0.0.0.0",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "..",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": ".",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "a..b",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "-x",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "[::1]",
+     "pathname": "/",
+     "port": "",
+     "scheme": "https",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "[::]",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    null,
+    {
+     "hash": "#e%20f",
+     "hostname": "x.test",
+     "pathname": "/a%20b",
+     "port": "",
+     "scheme": "http",
+     "search": "?c%20d"
+    },
+    {
+     "hash": "",
+     "hostname": "x.test",
+     "pathname": "/%7e",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "xy",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "xy",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    null
+   ],
+   "1.5.0": [
+    {
+     "hash": "",
+     "hostname": "example.test",
+     "pathname": "/mcp",
+     "port": "",
+     "scheme": "https",
+     "search": ""
+    },
+    {
+     "hash": "#z",
+     "hostname": "localhost",
+     "pathname": "/x",
+     "port": "",
+     "scheme": "http",
+     "search": "?y"
+    },
+    {
+     "hash": "",
+     "hostname": "example.invalid",
+     "pathname": "/mcp",
+     "port": "",
+     "scheme": "https",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "example.invalid",
+     "pathname": "/mcp",
+     "port": "",
+     "scheme": "https",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "x.test",
+     "pathname": "/",
+     "port": "",
+     "scheme": "https",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "127.0.0.1",
+     "pathname": "/meta",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "127.0.0.1",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "127.0.0.1",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "127.0.0.1",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "[::1]",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "[::1]",
+     "pathname": "/p",
+     "port": "8080",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "[::ffff:7f00:1]",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "localhost",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "localhost.",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "localhost",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "localhost",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "x",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    null,
+    null,
+    {
+     "hash": "",
+     "hostname": "example.test",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "example.test",
+     "pathname": "/x",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "example.test",
+     "pathname": "/",
+     "port": "",
+     "scheme": "https",
+     "search": ""
+    },
+    null,
+    {
+     "hash": "",
+     "hostname": "host",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "host",
+     "pathname": "/a/b",
+     "port": "8080",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "host",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    null,
+    null,
+    {
+     "hash": "",
+     "hostname": "host",
+     "pathname": "/",
+     "port": "65535",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "host",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "host",
+     "pathname": "/",
+     "port": "",
+     "scheme": "https",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "host",
+     "pathname": "/",
+     "port": "444",
+     "scheme": "https",
+     "search": ""
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    {
+     "hash": "",
+     "hostname": "0.0.1.0",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    null,
+    null,
+    null,
+    {
+     "hash": "",
+     "hostname": "1.2.0.3",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "1.2.0.3",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    null,
+    null,
+    {
+     "hash": "",
+     "hostname": "xn--nxasmq6b",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "xn--exmple-cua.com",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "127.0.0.1",
+     "pathname": "/callback",
+     "port": "8080",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "localhost",
+     "pathname": "/callback/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "localhost",
+     "pathname": "/callback",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "localhost",
+     "pathname": "/callback",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "localhost",
+     "pathname": "/callback",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "localhost",
+     "pathname": "/callback",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "localhost",
+     "pathname": "/callback",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "#b",
+     "hostname": "localhost",
+     "pathname": "/callback",
+     "port": "",
+     "scheme": "http",
+     "search": "?a"
+    },
+    {
+     "hash": "",
+     "hostname": "localhost",
+     "pathname": "/callback",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    null,
+    null,
+    null,
+    {
+     "hash": "",
+     "hostname": "x",
+     "pathname": "/",
+     "port": "",
+     "scheme": "ftp",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "",
+     "pathname": "/x",
+     "port": "",
+     "scheme": "file",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "",
+     "pathname": "x",
+     "port": "",
+     "scheme": "mailto",
+     "search": ""
+    },
+    null,
+    null,
+    null,
+    null,
+    {
+     "hash": "",
+     "hostname": "x.test",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "x.test",
+     "pathname": "/",
+     "port": "",
+     "scheme": "https",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "x.test",
+     "pathname": "/",
+     "port": "0",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "1.1.1.1",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "0.0.0.0",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "..",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": ".",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "a..b",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "-x",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "[::1]",
+     "pathname": "/",
+     "port": "",
+     "scheme": "https",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "[::]",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    null,
+    {
+     "hash": "#e%20f",
+     "hostname": "x.test",
+     "pathname": "/a%20b",
+     "port": "",
+     "scheme": "http",
+     "search": "?c%20d"
+    },
+    {
+     "hash": "",
+     "hostname": "x.test",
+     "pathname": "/%7e",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "xy",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    {
+     "hash": "",
+     "hostname": "xy",
+     "pathname": "/",
+     "port": "",
+     "scheme": "http",
+     "search": ""
+    },
+    null
+   ]
+  }
+ },
+ "node": "v26.13.0",
+ "pi_versions": [
+  "1.4.0",
+  "1.5.0"
+ ]
+}
