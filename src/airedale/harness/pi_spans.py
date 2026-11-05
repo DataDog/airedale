@@ -392,6 +392,9 @@ class PiSpanRecorder:
         #: Every top-level or nested tool record by id, also after it ended, so
         #: that a nested call that ends late still gets its parent.
         self._tool_records: dict[str, SpanRecord] = {}
+        #: Nested calls that ended before their parent started, with the id of
+        #: the parent. They are at the root until the parent starts.
+        self._orphan_tools: list[tuple[str, SpanRecord]] = []
         self._compaction: SpanRecord | None = None
         #: The messages of the last request that the extension reported.
         self._extension_context: list[Any] | None = []
@@ -641,6 +644,7 @@ class PiSpanRecorder:
         # Also an empty id: pi can use "" as the id of a model call, and then
         # sends ``parentToolCallId`` "" for the calls that it makes.
         self._tool_records[tool_id] = record
+        self._adopt_orphan_tools(tool_id, record)
         # A child whose start record came first gets its parent now.
         for other in self._open_tools.values():
             if other.parent_record is None and other.parent_id == tool_id and other.record is not record:
@@ -710,6 +714,20 @@ class PiSpanRecorder:
                 record.end_ns = max(record.start_ns, min(record.end_ns, parent.end_ns))
             return
         self.records.append(record)
+        if open_tool.parent_id is not None and open_tool.parent_id != _tool_id_of(record):
+            # The parent did not start yet (damaged order): wait for it.
+            self._orphan_tools.append((open_tool.parent_id, record))
+
+    def _adopt_orphan_tools(self, parent_id: str, parent: SpanRecord) -> None:
+        """Move the nested calls that ended before ``parent`` started under it."""
+        adopted = [record for orphan_parent_id, record in self._orphan_tools if orphan_parent_id == parent_id]
+        if not adopted:
+            return
+        self._orphan_tools = [entry for entry in self._orphan_tools if entry[0] != parent_id]
+        self.records = [record for record in self.records if not any(record is other for other in adopted)]
+        parent.children.extend(adopted)
+        # The parent was running while its children ran.
+        parent.start_ns = min([parent.start_ns, *(child.start_ns for child in adopted)])
 
     # ------------------------------------------------------------------ #
     # Compaction
@@ -971,6 +989,10 @@ def _message_timestamp_ns(message: dict[str, Any], now: int) -> int | None:
     """Return the plausible ``timestamp`` (request start) of a message in ns, else ``None``."""
     timestamp_ns = _epoch_ms_to_ns(message.get("timestamp"))
     return timestamp_ns if timestamp_ns is not None and _plausible_start(timestamp_ns, now) else None
+
+
+def _tool_id_of(record: SpanRecord) -> str:
+    return str(record.metadata.get("tool_id") or "")
 
 
 def _parent_tool_id(event: dict[str, Any]) -> str | None:

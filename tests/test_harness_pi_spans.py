@@ -721,6 +721,52 @@ class TestTools:
         # The first call already ended: its child does not end after it.
         assert first.children[0].end_ns == first.end_ns
 
+    def test_child_that_ends_before_its_parent_starts_is_attached_to_it(self):
+        # start(child) -> end(child) -> start(parent) -> end(parent): the child
+        # is a child span of the parent, not a root span.
+        recorder = _feed(
+            _recorder(),
+            [
+                (1, _tool_start("code/1", parent="code")),
+                (2, _tool_end("code/1", parent="code")),
+                (3, _tool_start("code", name="codemode")),
+                (4, _tool_end("code")),
+            ],
+        )
+        recorder.close(received_ns=_ns(T0_MS + 5))
+        [parent] = recorder.records
+        assert parent.name == "codemode"
+        assert [child.metadata["tool_id"] for child in parent.children] == ["code/1"]
+        assert parent.children[0].metadata["parent_tool_id"] == "code"
+        # The parent was running while its child ran.
+        assert parent.start_ns <= parent.children[0].start_ns
+        assert parent.children[0].end_ns <= parent.end_ns
+
+    def test_child_whose_parent_never_starts_stays_at_the_root(self):
+        recorder = _feed(
+            _recorder(),
+            [(1, _tool_start("x/1", parent="x")), (2, _tool_end("x/1", parent="x"))],
+        )
+        recorder.close(received_ns=_ns(T0_MS + 5))
+        [child] = recorder.records
+        assert child.metadata["tool_id"] == "x/1"
+
+    def test_early_child_goes_to_the_first_parent_with_the_id(self):
+        recorder = _feed(
+            _recorder(),
+            [
+                (1, _tool_start("/1", parent="")),
+                (2, _tool_end("/1", parent="")),
+                (3, _tool_start("", name="first")),
+                (4, _tool_end("")),
+                (5, _tool_start("", name="second")),
+                (6, _tool_end("")),
+            ],
+        )
+        first, second = recorder.records
+        assert [child.metadata["tool_id"] for child in first.children] == ["/1"]
+        assert second.children == []
+
     @pytest.mark.parametrize("child_ends", [True, False])
     def test_child_that_starts_before_its_parent_keeps_that_parent(self, child_ends):
         events: list[tuple[float, dict[str, Any]]] = [
