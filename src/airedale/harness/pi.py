@@ -1166,6 +1166,8 @@ class _PiEventCollector:
     spans: PiSpanRecorder | None = None
     #: Number of JSON records read from stdout.
     records: int = 0
+    #: Number of model calls (assistant messages) with no usable ``usage``.
+    calls_without_usage: int = 0
 
     @property
     def stop_requested(self) -> bool:
@@ -1214,6 +1216,8 @@ class _PiEventCollector:
                 return None
             if message.get("role") == "assistant":
                 self.assistant_messages.append(message)
+                if not _has_usage(message.get("usage")):
+                    self.calls_without_usage += 1
                 self.usage.add(UsageMetrics.from_pi(message.get("usage")))
             elif message.get("role") == "toolResult" and isinstance(message.get("usage"), dict):
                 # Nested model work done inside a tool (pi counts it in its
@@ -1339,6 +1343,11 @@ class _PiEventCollector:
             return RuntimeError(
                 f"pi emitted {self.invalid_lines} malformed JSONL record(s) for {model.label}; "
                 "usage or tool data can be missing"
+            )
+        if self.calls_without_usage:
+            return RuntimeError(
+                f"pi reported no token usage for {self.calls_without_usage} model call(s) for {model.label}; "
+                "token and cost data are incomplete"
             )
         return None
 
@@ -1478,6 +1487,18 @@ class _PiEventCollector:
                 "duration_ms": execution.duration_ms if execution is not None else None,
             },
         )
+
+
+_USAGE_KEYS = ("input", "output", "cacheRead", "cacheWrite", "totalTokens")
+
+
+def _has_usage(usage: Any) -> bool:
+    """Return True when a pi message ``usage`` is a record with token counts.
+
+    Pi always writes ``usage`` (zeros for a call that failed). A message with no
+    ``usage``, or a ``usage`` that is not a record of counts, is damaged.
+    """
+    return isinstance(usage, dict) and any(key in usage for key in _USAGE_KEYS)
 
 
 def _parent_tool_id(event: dict[str, Any]) -> str | None:

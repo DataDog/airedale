@@ -512,6 +512,30 @@ class TestEventCollector:
         result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
         assert sorted(call.name for call in result.tool_calls) == ["ls", "x", "y"]
 
+    @pytest.mark.parametrize("damaged", ["missing", "not_a_record", "empty"])
+    def test_run_fails_when_any_model_call_has_no_usage(self, damaged):
+        # The first call has no usable usage, the final call has usage: the
+        # total is not zero, but the accounting is incomplete.
+        events = _events_tool_run()
+        message = events[4]["message"]
+        if damaged == "missing":
+            del message["usage"]
+        elif damaged == "not_a_record":
+            message["usage"] = "n/a"
+        else:
+            message["usage"] = {}
+        collector = _collect(events)
+        assert collector.usage.output_tokens > 0
+        error = collector.result(model=MODEL, returncode=0, stderr_tail="").error
+        assert error is not None
+        assert "no token usage for 1 model call(s)" in str(error)
+
+    def test_zero_usage_record_is_not_missing_usage(self):
+        # Pi writes zeros for a call that produced no tokens: that is data.
+        events = _events_tool_run()
+        events[4]["message"]["usage"] = _usage(0, 0)
+        assert _collect(events).result(model=MODEL, returncode=0, stderr_tail="").error is None
+
     def test_non_json_lines_are_counted(self):
         collector = _PiEventCollector()
         assert collector.feed_line(b"not json\n") is None

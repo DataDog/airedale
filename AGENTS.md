@@ -295,7 +295,8 @@ Notes:
     the scenario names it. Nested tool calls (`parentToolCallId`, for example
     from `codemode`) are in `tool_calls` after their parent, with
     `parent_tool_id`; `usage` session entries (`entry_appended`, for example
-    cache warming) count in the run usage. Pi can reuse a `toolCallId` (even
+    cache warming) count in the run usage. A run fails when any model call (assistant message) has no
+    `usage` record, even if the run total is not zero. Pi can reuse a `toolCallId` (even
     ""): the collector keeps each execution, binds the n-th transcript call
     with an id to the n-th top-level execution (no `parentToolCallId`) with that id, and gives a nested call to
     the latest execution with the parent id at its start.
