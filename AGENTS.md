@@ -344,7 +344,7 @@ Notes:
     pi hashes the tool of the server that connects second, which the runner cannot
     know. A scenario with `tool_names` lists that can collide fails before pi starts
     ("possible" collision: a list is an allow-list, hidden tools can change the
-    result, `pi_possible_tool_name_collisions`); for the probed tools of servers
+    result; the check runs pi's registration loop for every connection order (`pi_registered_tool_names`), hash-suffixed names included, which pi does not check again; `pi_possible_tool_name_collisions`); for the probed tools of servers
     without a list, `_mcp_tool_definitions` logs a warning and keeps the names.
     Project `.pi/mcp.json` servers stay in the `--tools` selection
     (`mcp__*`); their `codemode`-exposed tools need `codemode` in

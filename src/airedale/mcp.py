@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import itertools
 import json
 import logging
 import os
@@ -16,7 +17,7 @@ import re
 import signal
 import time
 from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -359,14 +360,57 @@ def _pi_hashed_tool_name(server_name: str, tool_name: str) -> str:
     return f"{name[: PI_MAX_TOOL_NAME_LENGTH - len(digest) - 1]}_{digest}"
 
 
+def pi_registered_tool_names(
+    servers: Sequence[tuple[str, Iterable[str]]],
+) -> dict[tuple[str, str], str]:
+    """Return the name that pi gives each ``(server, tool)`` when the servers connect in the order of ``servers``.
+
+    This is the registration loop of pi's MCP extension (1.4.0 and 1.5.0) with
+    the one name map that all servers share: a tool takes the plain name
+    ``mcp__<server>__<tool>`` unless it is longer than 64 characters, unless
+    another tool of the same server has that name after shortening, or unless a
+    tool of another server (or an earlier tool of this server) already has it.
+    Then the tool gets the hash suffix. Pi does not check the name with the suffix
+    again: it can be the name of another tool (that is rare, but it happens, for
+    example for a tool called ``c_01b8a75b``).
+    """
+    owners: dict[str, tuple[str, str]] = {}
+    names: dict[tuple[str, str], str] = {}
+    for server, tools in servers:
+        unique = list(dict.fromkeys(tools))
+        plain = Counter(pi_mcp_tool_name(server, tool) for tool in unique)
+        current: set[str] = set()
+        for tool in unique:
+            owner = (server, tool)
+            sanitized = _pi_plain_tool_name(server, tool)
+            taken = (sanitized in owners and owners[sanitized] != owner) or sanitized in current or plain[sanitized] > 1
+            name = (
+                sanitized
+                if len(sanitized) <= PI_MAX_TOOL_NAME_LENGTH and not taken
+                else _pi_hashed_tool_name(server, tool)
+            )
+            owners[name] = owner
+            current.add(name)
+            names[owner] = name
+    return names
+
+
+#: Up to this number of servers, every connection order is tried; with more servers, each pair in both orders.
+_PI_MAX_SERVERS_FOR_ALL_ORDERS = 6
+
+
 def pi_possible_tool_name_collisions(tools_by_server: Mapping[str, Iterable[str]]) -> dict[str, list[tuple[str, str]]]:
-    """Return the pi tool names that more than one server can claim, with the ``(server, tool)`` pairs.
+    """Return the tool names that depend on the connection order of the servers, with the ``(server, tool)`` pairs.
 
     Pi registers the tools of each server when it connects. A tool whose name
-    is taken by another server's tool gets a hash suffix, so which tool keeps
-    the plain name depends on which server connects first. The runner cannot
-    know that order. A collision inside one server does not depend on the
-    order (all its colliding tools get the suffix) and is not listed.
+    is taken by a tool of another server gets a hash suffix, so which tool keeps
+    the plain name depends on which server connects first, and the runner
+    cannot know that order. The names are computed with :func:`pi_registered_tool_names`
+    for every order (up to 6 servers; with more servers, for each pair of servers in
+    both orders). A name is listed when, in some order, a tool does not get the name
+    that it has alone with its server (``pi_mcp_tool_names``), or when two tools get
+    the same name. The names that a hash suffix makes are included: a suffix is not
+    checked again by pi.
 
     ``tools_by_server`` has the tools that are known for each server. For a
     server with a ``tool_names`` allow-list, the list is not the whole catalog:
@@ -374,14 +418,38 @@ def pi_possible_tool_name_collisions(tools_by_server: Mapping[str, Iterable[str]
     so can remove a collision (or make another one). The result is the
     collisions that are possible from the tools that are known.
     """
-    claimed: dict[str, list[tuple[str, str]]] = {}
-    for server, tools in tools_by_server.items():
-        in_server = {pi_mcp_tool_name(server, tool): (server, tool) for tool in dict.fromkeys(tools)}
-        counts = Counter(pi_mcp_tool_name(server, tool) for tool in dict.fromkeys(tools))
-        for name, pair in in_server.items():
-            if counts[name] == 1:  # Colliding tools of one server all get a suffix.
-                claimed.setdefault(name, []).append(pair)
-    return {name: pairs for name, pairs in claimed.items() if len({server for server, _ in pairs}) > 1}
+    catalog = {server: list(dict.fromkeys(tools)) for server, tools in tools_by_server.items()}
+    alone = {
+        (server, tool): name
+        for server, tools in catalog.items()
+        for tool, name in pi_mcp_tool_names(server, tools).items()
+    }
+    position = {pair: index for index, pair in enumerate(alone)}
+    claims: dict[str, set[tuple[str, str]]] = {}
+    for order in _connection_orders(list(catalog)):
+        names = pi_registered_tool_names([(server, catalog[server]) for server in order])
+        by_name: dict[str, list[tuple[str, str]]] = {}
+        for pair, name in names.items():
+            by_name.setdefault(name, []).append(pair)
+        for name, pairs in by_name.items():
+            if len(pairs) > 1:  # Two tools with one name.
+                claims.setdefault(name, set()).update(pairs)
+        for pair, name in names.items():
+            if name != alone[pair]:  # This tool lost its name to another one.
+                claim = claims.setdefault(alone[pair], set())
+                claim.add(pair)
+                claim.update(other for other, other_name in names.items() if other_name == alone[pair])
+    return {
+        name: sorted(pairs, key=lambda pair: position[pair]) for name, pairs in sorted(claims.items()) if len(pairs) > 1
+    }
+
+
+def _connection_orders(servers: list[str]) -> Iterable[list[str]]:
+    if len(servers) <= _PI_MAX_SERVERS_FOR_ALL_ORDERS:
+        yield from (list(order) for order in itertools.permutations(servers))
+        return
+    for first, second in itertools.permutations(servers, 2):
+        yield [first, second]
 
 
 def pi_literal(value: str) -> str:

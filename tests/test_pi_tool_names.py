@@ -14,7 +14,13 @@ import pytest
 
 from airedale.harness.base import McpToolMetadata, _mcp_tool_definitions
 from airedale.harness.pi import PiRunner
-from airedale.mcp import McpServerSpec, pi_mcp_tool_name, pi_mcp_tool_names, pi_possible_tool_name_collisions
+from airedale.mcp import (
+    McpServerSpec,
+    pi_mcp_tool_name,
+    pi_mcp_tool_names,
+    pi_possible_tool_name_collisions,
+    pi_registered_tool_names,
+)
 from airedale.types import ModelSpec
 
 #: Complete catalogs: (server, tools) in a registration order.
@@ -29,6 +35,8 @@ CATALOGS = [
     pytest.param([("s", ["t" * 80]), ("u", ["t" * 80])], id="long-names"),
     pytest.param([("a😀", ["x"]), ("a__", ["x"])], id="emoji-in-server-name"),
     pytest.param([("a", ["é", "_"]), ("b", ["é"])], id="non-ascii"),
+    pytest.param([("a", ["b__c", "b--c"]), ("a__b", ["c_01b8a75b"])], id="forced-hash-names-collide"),
+    pytest.param([("a", ["x-y", "x_y"]), ("a__b", ["c"]), ("a_", ["b__c"])], id="three-servers-with-hashes"),
 ]
 
 
@@ -54,6 +62,33 @@ def test_possible_collisions_match_pi(pi_reference, catalog):
                     changed = True
     collisions = pi_possible_tool_name_collisions(dict(catalog))
     assert bool(collisions) == changed
+
+
+@pytest.mark.parametrize("catalog", CATALOGS)
+def test_registered_names_match_pi_in_every_order(pi_reference, catalog):
+    """The names that pi gives, with each connection order: same as the registration loop of pi."""
+    for order in itertools.permutations(catalog):
+        ours = pi_registered_tool_names(list(order))
+        for version, answer in pi_reference({"action": "names", "servers": [[s, t] for s, t in order]}).items():
+            assert {(item["server"], item["tool"]): item["name"] for item in answer} == ours, (version, order)
+
+
+def test_names_that_hash_suffixes_make_collide():
+    # Pi hashes the two tools of ``a`` (same name after sanitizing); the hashed name of the first is the name of the tool
+    # of ``a__b``. If ``a__b`` connects first, two tools get the same name.
+    catalog = {"a": ["b__c", "b--c"], "a__b": ["c_01b8a75b"]}
+    first = pi_registered_tool_names([("a__b", catalog["a__b"]), ("a", catalog["a"])])
+    assert first[("a__b", "c_01b8a75b")] == first[("a", "b__c")] == "mcp__a__b__c_01b8a75b"
+    collisions = pi_possible_tool_name_collisions(catalog)
+    assert "mcp__a__b__c_01b8a75b" in collisions
+    assert {pair for pairs in collisions.values() for pair in pairs} >= {("a", "b__c"), ("a__b", "c_01b8a75b")}
+
+
+def test_many_servers_are_checked_two_by_two():
+    catalog = {f"s{index}": [f"t{index}"] for index in range(8)}
+    catalog["a"] = ["b__c"]
+    catalog["a__b"] = ["c"]
+    assert "mcp__a__b__c" in pi_possible_tool_name_collisions(catalog)
 
 
 def test_non_bmp_characters_count_twice():
@@ -91,6 +126,14 @@ class TestPreflight:
             McpServerSpec(name="a__b", command="y", tool_names=("c",)),
         ]
         with pytest.raises(ValueError, match="Possible"):
+            PiRunner(cwd=tmp_path, mcp_servers=servers)._check_tool_name_collisions()
+
+    def test_allow_lists_whose_hash_names_collide_raise(self, tmp_path):
+        servers = [
+            McpServerSpec(name="a", command="x", tool_names=("b__c", "b--c")),
+            McpServerSpec(name="a__b", command="y", tool_names=("c_01b8a75b",)),
+        ]
+        with pytest.raises(ValueError, match=r"Possible pi tool name collision.*mcp__a__b__c_01b8a75b"):
             PiRunner(cwd=tmp_path, mcp_servers=servers)._check_tool_name_collisions()
 
     def test_servers_without_an_allow_list_are_not_checked(self, tmp_path):
