@@ -91,6 +91,8 @@ from airedale.harness.base import (
 from airedale.types import UsageMetrics
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from airedale.types import ModelSpec
 
 logger = logging.getLogger(__name__)
@@ -395,6 +397,9 @@ class PiSpanRecorder:
         #: Nested calls that ended before their parent started, with the id of
         #: the parent. They are at the root until the parent starts.
         self._orphan_tools: list[tuple[str, SpanRecord]] = []
+        #: The parent span of each nested span that was attached (by ``id()`` of
+        #: the record): a nested span is never attached under one of its descendants.
+        self._span_parents: dict[int, SpanRecord] = {}
         self._compaction: SpanRecord | None = None
         #: The messages of the last request that the extension reported.
         self._extension_context: list[Any] | None = []
@@ -643,12 +648,7 @@ class PiSpanRecorder:
         )
         # Also an empty id: pi can use "" as the id of a model call, and then
         # sends ``parentToolCallId`` "" for the calls that it makes.
-        self._tool_records[tool_id] = record
-        self._adopt_orphan_tools(tool_id, record)
-        # A child whose start record came first gets its parent now.
-        for other in self._open_tools.values():
-            if other.parent_record is None and other.parent_id == tool_id and other.record is not record:
-                other.parent_record = record
+        self._register_tool_record(tool_id, record)
 
     def _on_tool_end(self, event: dict[str, Any], now: int) -> None:
         tool_id = str(event.get("toolCallId") or "")
@@ -664,6 +664,8 @@ class PiSpanRecorder:
                 end_ns=now,
                 metadata={"source": SOURCE, "tool_id": tool_id or None},
             )
+            if parent_id is not None:
+                record.metadata["parent_tool_id"] = parent_id
             open_tool = _OpenTool(
                 record=record,
                 parent_id=parent_id,
@@ -671,6 +673,8 @@ class PiSpanRecorder:
                 earliest_start_ns=self._last_call_end_ns,
             )
             self._open_tools[tool_id] = open_tool
+            # Like a start record: calls that wait for this id get it as their parent.
+            self._register_tool_record(tool_id, record)
         record = open_tool.record
         record.output_data = tool_result_text(event.get("result"))
         duration_ms = event.get("durationMs")
@@ -704,30 +708,58 @@ class PiSpanRecorder:
             record.error_type = "PiToolError"
             record.metadata["error"] = error
         parent = open_tool.parent_record
-        if parent is None and open_tool.parent_id is not None:
-            parent = self._tool_records.get(open_tool.parent_id)
-        if parent is not None and parent is not record:
-            parent.children.append(record)
+        if parent is not None and parent is not record and not self._is_ancestor(record, parent):
+            self._attach(parent, record)
             parent_open = any(other.record is parent for other in self._open_tools.values())
             if not parent_open:
                 # The parent already ended: a child span must not end after it.
                 record.end_ns = max(record.start_ns, min(record.end_ns, parent.end_ns))
             return
         self.records.append(record)
-        if open_tool.parent_id is not None and open_tool.parent_id != _tool_id_of(record):
-            # The parent did not start yet (damaged order): wait for it.
+        if parent is None and open_tool.parent_id is not None:
+            # The parent did not start yet (damaged order): wait for it. (The
+            # same id as its own is the id of the next call with that id.)
             self._orphan_tools.append((open_tool.parent_id, record))
 
-    def _adopt_orphan_tools(self, parent_id: str, parent: SpanRecord) -> None:
-        """Move the nested calls that ended before ``parent`` started under it."""
-        adopted = [record for orphan_parent_id, record in self._orphan_tools if orphan_parent_id == parent_id]
+    def _register_tool_record(self, tool_id: str, record: SpanRecord) -> None:
+        """Make ``record`` the latest tool record of ``tool_id``, and the parent of the calls waiting for it.
+
+        This is also the case for an id that pi uses again (even ""): a call
+        that waits for the id gets the first record that comes after it.
+        """
+        self._tool_records[tool_id] = record
+        # A call that is still open and started before its parent gets it now.
+        for other in self._open_tools.values():
+            if other.parent_record is None and other.parent_id == tool_id and other.record is not record:
+                other.parent_record = record
+        # A call that already ended is moved from the root under its parent.
+        adopted = [orphan for orphan_parent_id, orphan in self._orphan_tools if orphan_parent_id == tool_id]
         if not adopted:
             return
-        self._orphan_tools = [entry for entry in self._orphan_tools if entry[0] != parent_id]
-        self.records = [record for record in self.records if not any(record is other for other in adopted)]
-        parent.children.extend(adopted)
+        self._orphan_tools = [entry for entry in self._orphan_tools if entry[0] != tool_id]
+        moved = [orphan for orphan in adopted if orphan is not record and not self._is_ancestor(orphan, record)]
+        if not moved:
+            return
+        self.records = [item for item in self.records if not any(item is orphan for orphan in moved)]
+        for orphan in moved:
+            self._attach(record, orphan)
         # The parent was running while its children ran.
-        parent.start_ns = min([parent.start_ns, *(child.start_ns for child in adopted)])
+        record.start_ns = min([record.start_ns, *(orphan.start_ns for orphan in moved)])
+
+    def _attach(self, parent: SpanRecord, child: SpanRecord) -> None:
+        parent.children.append(child)
+        self._span_parents[id(child)] = parent
+
+    def _is_ancestor(self, candidate: SpanRecord, record: SpanRecord) -> bool:
+        """Return True when ``candidate`` is ``record`` or a span above it (attaching ``candidate`` under ``record`` would make a cycle)."""
+        seen: set[int] = set()
+        current: SpanRecord | None = record
+        while current is not None and id(current) not in seen:
+            if current is candidate:
+                return True
+            seen.add(id(current))
+            current = self._span_parents.get(id(current))
+        return False
 
     # ------------------------------------------------------------------ #
     # Compaction
@@ -909,14 +941,22 @@ def _cover_children(record: SpanRecord) -> None:
 
     The times come from records that can arrive late, so a child can be a
     little outside its parent. A trace must show the child inside its parent.
+    (No recursion: the nesting of pi tools has no limit.)
     """
-    for child in record.children:
-        _cover_children(child)
-        record.start_ns = min(record.start_ns, child.start_ns)
-        record.end_ns = max(record.end_ns, child.end_ns)
+    order = [record]
+    for item in order:  # Parents come before their children.
+        order.extend(item.children)
+    for item in reversed(order):
+        for child in item.children:
+            item.start_ns = min(item.start_ns, child.start_ns)
+            item.end_ns = max(item.end_ns, child.end_ns)
 
 
-def _emit_record(llmobs: Any, record: SpanRecord) -> None:
+def _open_span(llmobs: Any, record: SpanRecord) -> Any:
+    """Start the span of ``record`` (it becomes the active span) and annotate it.
+
+    If this fails, the span is finished and the error is raised.
+    """
     if record.kind == "llm":
         span = llmobs.llm(
             model_name=record.metadata.get("model_name"),
@@ -952,12 +992,36 @@ def _emit_record(llmobs: Any, record: SpanRecord) -> None:
             span.error = 1
             span.set_tag(ERROR_MSG, record.error)
             span.set_tag(ERROR_TYPE, record.error_type or "PiError")
-        # Children are sent while this span is active, so it is their parent.
-        for child in sorted(record.children, key=lambda item: item.start_ns):
-            with contextlib.suppress(Exception):
-                _emit_record(llmobs, child)
-    finally:
+    except BaseException:
         span.finish(finish_time=record.end_ns / 1e9)
+        raise
+    return span
+
+
+def _emit_record(llmobs: Any, root: SpanRecord) -> None:
+    """Send ``root`` and its children. Children are sent while their parent is the active span.
+
+    No recursion: the nesting of pi tools has no limit. A span that cannot be
+    sent is skipped with its children; the other spans are still sent.
+    """
+    stack: list[tuple[SpanRecord, Any, Iterator[SpanRecord]]] = []
+    span = _open_span(llmobs, root)
+    stack.append((root, span, iter(sorted(root.children, key=lambda item: item.start_ns))))
+    try:
+        while stack:
+            record, span, children = stack[-1]
+            child = next(children, None)
+            if child is None:
+                stack.pop()
+                span.finish(finish_time=record.end_ns / 1e9)
+                continue
+            with contextlib.suppress(Exception):
+                child_span = _open_span(llmobs, child)
+                stack.append((child, child_span, iter(sorted(child.children, key=lambda item: item.start_ns))))
+    finally:
+        while stack:  # An error that is not suppressed: finish what is open.
+            record, span, _ = stack.pop()
+            span.finish(finish_time=record.end_ns / 1e9)
 
 
 def _is_number(value: Any) -> TypeGuard[int | float]:
@@ -989,10 +1053,6 @@ def _message_timestamp_ns(message: dict[str, Any], now: int) -> int | None:
     """Return the plausible ``timestamp`` (request start) of a message in ns, else ``None``."""
     timestamp_ns = _epoch_ms_to_ns(message.get("timestamp"))
     return timestamp_ns if timestamp_ns is not None and _plausible_start(timestamp_ns, now) else None
-
-
-def _tool_id_of(record: SpanRecord) -> str:
-    return str(record.metadata.get("tool_id") or "")
 
 
 def _parent_tool_id(event: dict[str, Any]) -> str | None:

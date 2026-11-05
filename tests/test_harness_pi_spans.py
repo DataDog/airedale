@@ -767,6 +767,171 @@ class TestTools:
         assert [child.metadata["tool_id"] for child in first.children] == ["/1"]
         assert second.children == []
 
+    @pytest.mark.parametrize(
+        "events",
+        [
+            [
+                (1, _tool_start("p", "p")),
+                (2, _tool_start("a", "a", "p")),
+                (3, _tool_start("b", "b", "p")),
+                (4, _tool_end("b", parent="p")),
+                (5, _tool_end("a", parent="p")),
+                (6, _tool_end("p")),
+            ],
+            [(1, _tool_start("c", "c", "p")), (2, _tool_end("p")), (3, _tool_end("c", parent="p"))],
+            [(1, _tool_end("p")), (2, _tool_start("c", "c", "p")), (3, _tool_end("c", parent="p"))],
+            [
+                (1, _tool_start("c", "c", "p")),
+                (2, _tool_end("c", parent="p")),
+                (3, _tool_start("p", "p")),
+                (4, _tool_end("p")),
+            ],
+            [
+                (1, _tool_start("kid", "kid", "mid")),
+                (2, _tool_start("mid", "mid", "gone")),
+                (3, _tool_end("kid", parent="mid")),
+                (4, _tool_end("mid", parent="gone")),
+            ],
+            [(1, _tool_start("x", "x", "gone")), (2, _tool_end("x", parent="gone"))],
+            [
+                (1, _tool_start("g", "g", "c")),
+                (2, _tool_start("c", "c", "p")),
+                (3, _tool_start("p", "p")),
+                (4, _tool_end("g", parent="c")),
+                (5, _tool_end("c", parent="p")),
+                (6, _tool_end("p")),
+            ],
+        ],
+        ids=["parallel", "end-only parent", "end-only parent first", "early child", "orphan chain", "orphan", "chain"],
+    )
+    def test_span_tree_matches_the_collector(self, events):
+        """The span recorder and the result collector give each call the same parent."""
+        from airedale.harness.pi import _PiEventCollector
+
+        collector = _PiEventCollector()
+        recorder = _recorder()
+        for at_ms, event in events:
+            collector.feed(event)
+            recorder.feed(event, received_ns=_ns(T0_MS + at_ms))
+        recorder.close(received_ns=_ns(T0_MS + 99))
+        expected = {
+            execution.tool_id: (execution.parent.tool_id if execution.parent is not None else None)
+            for execution in collector.tool_executions
+        }
+        actual: dict[str, str | None] = {}
+
+        def walk(record, parent_id):
+            actual[record.metadata["tool_id"]] = parent_id
+            for child in record.children:
+                walk(child, record.metadata["tool_id"])
+
+        for root in recorder.records:
+            walk(root, None)
+        assert actual == expected
+
+    def test_parent_and_child_that_name_each_other_do_not_remove_the_spans(self):
+        # start(A, parent=B) -> end(A) -> start(B, parent=A) -> end(B): the ids make a
+        # cycle. Both spans are kept, one is the root, the other its child.
+        recorder = _feed(
+            _recorder(),
+            [
+                (1, _tool_start("A", name="a", parent="B")),
+                (2, _tool_end("A", parent="B")),
+                (3, _tool_start("B", name="b", parent="A")),
+                (4, _tool_end("B", parent="A")),
+            ],
+        )
+        recorder.close(received_ns=_ns(T0_MS + 5))
+        assert len(recorder.records) == 1
+        assert sum(1 + len(child.children) for child in recorder.records) == 2
+
+    def test_early_child_with_the_same_empty_id_as_its_parent(self):
+        # The child (id "", parent "") starts and ends before the parent (id "") starts.
+        recorder = _feed(
+            _recorder(),
+            [
+                (1, _tool_start("", name="child", parent="")),
+                (2, _tool_end("", parent="")),
+                (3, _tool_start("", name="parent")),
+                (4, _tool_end("")),
+            ],
+        )
+        [parent] = recorder.records
+        assert (parent.name, [child.name for child in parent.children]) == ("parent", ["child"])
+
+    def test_parent_that_has_only_an_end_record(self):
+        # start(c, parent=p) -> end(p, no start record) -> end(c): c is a child of p.
+        recorder = _feed(
+            _recorder(),
+            [
+                (1, _tool_start("c", name="child", parent="p")),
+                (2, _tool_end("p")),
+                (3, _tool_end("c", parent="p")),
+            ],
+        )
+        [parent] = recorder.records
+        assert parent.metadata["tool_id"] == "p"
+        assert [child.metadata["tool_id"] for child in parent.children] == ["c"]
+        assert parent.children[0].end_ns <= parent.end_ns
+
+    def test_child_of_a_parent_that_has_only_an_end_record_starts_after_it(self):
+        # end(p, no start record) -> start(c, parent=p) -> end(c)
+        recorder = _feed(
+            _recorder(),
+            [
+                (1, _tool_end("p")),
+                (2, _tool_start("c", parent="p")),
+                (3, _tool_end("c", parent="p")),
+            ],
+        )
+        [parent] = recorder.records
+        assert [child.metadata["tool_id"] for child in parent.children] == ["c"]
+
+    def test_end_only_call_keeps_its_parent_metadata(self):
+        recorder = _feed(_recorder(), [(1, _tool_end("x", parent="y"))])
+        assert recorder.records[0].metadata["parent_tool_id"] == "y"
+
+    def test_deep_tree_is_sent(self, fake_span_llmobs):
+        # 1,100 calls, each one the child of the previous: deeper than the
+        # recursion limit of Python. The calls end in reverse order.
+        depth = 1100
+        events: list[tuple[float, dict[str, Any]]] = []
+        for index in range(depth):
+            events.append((index, _tool_start(str(index), name=f"t{index}", parent=str(index - 1) if index else None)))
+        for index in reversed(range(depth)):
+            events.append((depth + (depth - index), _tool_end(str(index), parent=str(index - 1) if index else None)))
+        recorder = _feed(_recorder(), events)
+        recorder.emit(fake_span_llmobs)
+        assert len(fake_span_llmobs.spans) == depth
+        assert [span.name for span in fake_span_llmobs.spans[:2]] == ["t0", "t1"]
+        assert fake_span_llmobs.spans[1].parent is fake_span_llmobs.spans[0]
+        assert fake_span_llmobs.spans[-1].parent is fake_span_llmobs.spans[-2]
+        assert not fake_span_llmobs.active
+
+    def test_span_that_cannot_be_sent_does_not_stop_its_siblings(self, fake_span_llmobs):
+        recorder = _feed(
+            _recorder(),
+            [
+                (1, _tool_start("p", name="parent")),
+                (2, _tool_start("a", name="bad", parent="p")),
+                (3, _tool_end("a", parent="p")),
+                (4, _tool_start("b", name="good", parent="p")),
+                (5, _tool_end("b", parent="p")),
+                (6, _tool_end("p")),
+            ],
+        )
+        original = fake_span_llmobs.annotate
+
+        def annotate(span=None, **kwargs):
+            if span is not None and span.name == "bad":
+                raise RuntimeError("cannot annotate")
+            original(span=span, **kwargs)
+
+        fake_span_llmobs.annotate = annotate  # type: ignore[method-assign]
+        recorder.emit(fake_span_llmobs)
+        assert [span.name for span in fake_span_llmobs.spans] == ["parent", "bad", "good"]
+        assert not fake_span_llmobs.active
+
     @pytest.mark.parametrize("child_ends", [True, False])
     def test_child_that_starts_before_its_parent_keeps_that_parent(self, child_ends):
         events: list[tuple[float, dict[str, Any]]] = [
