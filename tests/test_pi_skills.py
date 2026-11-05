@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pytest
 
+from airedale.pi_frontmatter import UnsupportedFrontmatterError
 from airedale.skills import _frontmatter, _pi_skill_name, pi_skill_dirs
 
 #: (label, file content) of a project skill ``project/SKILL.md``. Pi's name for each is the reference.
@@ -82,12 +83,41 @@ FILES = [
     ("tab after quoted key", '---\n"name":\talpha\ndescription: d\n---\n'),
     ("tab before colon", "---\nname\t: alpha\ndescription: d\n---\n"),
     ("trailing tab line", "---\nname: alpha\ndescription: d\n\t\n---\n"),
-    ("tab indent", "---\nname:\n\talpha\ndescription: d\n---\n"),
+    ("tab as indentation", "---\nname:\n\talpha\ndescription: d\n---\n"),
     ("number keys", "---\n1: a\n01: b\nname: alpha\ndescription: d\n---\n"),
     ("nan keys", "---\n.nan: a\n.nan: b\nname: alpha\ndescription: d\n---\n"),
     ("null keys", "---\nnull: a\n~: b\nname: alpha\ndescription: d\n---\n"),
     ("string and number keys", "---\n'1': a\n1: b\nname: alpha\ndescription: d\n---\n"),
     ("int and float keys", "---\n1: a\n1.0: b\nname: alpha\ndescription: d\n---\n"),
+    ("plain value with a tab", "---\nname: alpha\tbeta\ndescription: d\n---\n"),
+    ("quoted name with a tab, tab after colon", '---\nname: "alpha\tbeta"\ndescription:\td\n---\n'),
+    ("quoted name with an escaped tab", '---\nname: "alpha\\tbeta"\ndescription: d\n---\n'),
+    ("tab before a comment", "---\nname: alpha\t# c\ndescription: d\n---\n"),
+    ("tab at the end of a line", "---\nname: alpha\t\ndescription: d\n---\n"),
+    ("tab in a flow mapping", "---\n{name:\talpha, description:\td}\n---\n"),
+    ("tab after a sequence indicator", "---\nname: alpha\ndescription: d\nx:\n-\ta\n---\n"),
+    ("nested duplicate key", "---\nname: alpha\ndescription: d\nmetadata: {x: 1, x: 2}\n---\n"),
+    ("nested duplicate key, block", "---\nname: alpha\ndescription: d\nmetadata:\n  x: 1\n  x: 2\n---\n"),
+    ("duplicate key in a list", "---\nname: alpha\ndescription: d\nl:\n- {x: 1, x: 2}\n---\n"),
+    ("nested key that is not a duplicate", "---\nname: alpha\ndescription: d\nm: {x: 1}\nn: {x: 2}\n---\n"),
+    ("root set with values", "---\n!!set\nname: alpha\ndescription: d\n---\n"),
+    ("root set with null values", "---\n!!set\nname:\ndescription:\n---\n"),
+    ("root anchor", "---\n&a {name: alpha, description: d}\n---\n"),
+    ("set with values, nested", "---\nname: alpha\ndescription: d\ns: !!set {a: 1}\n---\n"),
+    ("set with null values, nested", "---\nname: alpha\ndescription: d\ns: !!set {a, b: ~}\n---\n"),
+    ("set on a sequence", "---\nname: alpha\ndescription: d\ns: !!set [a]\n---\n"),
+    ("omap with a repeated key", "---\nname: alpha\ndescription: d\no: !!omap [a: 1, a: 2]\n---\n"),
+    ("omap with repeated scalars", "---\nname: alpha\ndescription: d\no: !!omap [x, x]\n---\n"),
+    ("omap with distinct keys", "---\nname: alpha\ndescription: d\no: !!omap [a: 1, b: 2]\n---\n"),
+    ("pairs with two keys in an item", "---\nname: alpha\ndescription: d\np: !!pairs [{a: 1, b: 2}]\n---\n"),
+    ("pairs with a repeated key", "---\nname: alpha\ndescription: d\np: !!pairs [a: 1, a: 2]\n---\n"),
+    ("map tag on a sequence", "---\nname: alpha\ndescription: d\nm: !!map [a]\n---\n"),
+    ("large number keys", "---\nname: alpha\ndescription: d\n9007199254740992: a\n9007199254740993: b\n---\n"),
+    ("hex and decimal keys", "---\nname: alpha\ndescription: d\n0x10: a\n16: b\n---\n"),
+    ("overflow keys", "---\nname: alpha\ndescription: d\n1e400: a\n1e401: b\n---\n"),
+    ("zero keys", "---\nname: alpha\ndescription: d\n-0: a\n0: b\n---\n"),
+    ("alias as a repeated key", "---\nname: alpha\ndescription: d\nk: &a [1]\nm: {? *a : 1, ? *a : 2}\n---\n"),
+    ("collection keys that look the same", "---\nname: alpha\ndescription: d\nm: {? [a] : 1, ? [a] : 2}\n---\n"),
     ("non-ascii", "---\nname: alphä\ndescription: d\n---\n"),
     ("long key", "---\n? " + "k" * 2000 + "\n: v\nname: alpha\ndescription: d\n---\n"),
 ]
@@ -100,10 +130,18 @@ def _write(tmp_path, content):
     return skill
 
 
+#: Files with a tab that the reader can not place: it refuses to read them (see ``UnsupportedFrontmatterError``).
+UNSUPPORTED = {"tab as indentation", "plain value with a tab"}
+
+
 @pytest.mark.parametrize(("label", "content"), FILES, ids=[label for label, _ in FILES])
 def test_name_matches_pi(pi_reference, tmp_path, label, content):
     skill = _write(tmp_path, content)
     answers = pi_reference({"action": "skills", "cwd": str(tmp_path), "paths": [str(skill)]})
+    if label in UNSUPPORTED:
+        with pytest.raises(UnsupportedFrontmatterError):
+            _pi_skill_name(skill)
+        return
     ours = _pi_skill_name(skill)
     for version, answer in answers.items():
         assert answer["names"] == ([ours] if ours else []), (version, answer)
@@ -163,3 +201,68 @@ def test_duplicate_key_skill_is_not_a_collision(tmp_path):
     # Pi rejects the YAML (duplicate key) and does not load this skill.
     (project / "SKILL.md").write_text("---\nname: beta\nname: alpha\ndescription: d\n---\n")
     assert pi_skill_dirs([str(scenario)], str(cwd))[0] == str(scenario.resolve())
+
+
+def _collision(tmp_path, scenario_content, project_content):
+    scenario = tmp_path / "src" / "scenario"
+    scenario.mkdir(parents=True)
+    (scenario / "SKILL.md").write_text(scenario_content)
+    cwd = tmp_path / "cwd"
+    project = cwd / ".pi" / "skills" / "other"
+    project.mkdir(parents=True)
+    (project / "SKILL.md").write_text(project_content)
+    return pi_skill_dirs([str(scenario)], str(cwd))
+
+
+def test_a_tab_in_a_plain_name_is_not_read_as_a_space(tmp_path):
+    # Pi reads the same name "alpha<TAB>beta" in both skills and hides the project skill.
+    # The reader can not place the tab of the plain name: the run fails, it does not go on.
+    with pytest.raises(UnsupportedFrontmatterError, match="tab"):
+        _collision(
+            tmp_path,
+            '---\nname: "alpha\\tbeta"\ndescription: d\n---\n',
+            "---\nname: alpha\tbeta\ndescription: d\n---\n",
+        )
+
+
+def test_a_separator_tab_does_not_change_a_quoted_name(tmp_path):
+    # The tab after ``description:`` is white space; the tab in the name is part of the name.
+    with pytest.raises(ValueError, match="'alpha\\tbeta'"):
+        _collision(
+            tmp_path,
+            '---\nname: "alpha\\tbeta"\ndescription: d\n---\n',
+            '---\nname: "alpha\tbeta"\ndescription:\td\n---\n',
+        )
+
+
+def test_a_name_with_a_space_is_not_a_name_with_a_tab(tmp_path):
+    assert _collision(
+        tmp_path,
+        '---\nname: "alpha beta"\ndescription: d\n---\n',
+        '---\nname: "alpha\tbeta"\ndescription:\td\n---\n',
+    )
+
+
+def test_nested_duplicate_key_skill_is_not_a_collision(tmp_path):
+    # Pi skips the file (the nested mapping has a repeated key), so the names do not collide.
+    assert _collision(
+        tmp_path,
+        "---\nname: alpha\ndescription: d\n---\n",
+        "---\nname: alpha\ndescription: d\nmetadata: {x: 1, x: 2}\n---\n",
+    )
+
+
+def test_tagged_root_set_is_not_a_collision(tmp_path):
+    assert _collision(
+        tmp_path,
+        "---\nname: alpha\ndescription: d\n---\n",
+        "---\n!!set\nname: alpha\ndescription: d\n---\n",
+    )
+
+
+def test_numbers_are_the_same_key_when_javascript_says_so(tmp_path):
+    assert _collision(
+        tmp_path,
+        "---\nname: alpha\ndescription: d\n---\n",
+        "---\nname: alpha\ndescription: d\n9007199254740992: a\n9007199254740993: b\n---\n",
+    )

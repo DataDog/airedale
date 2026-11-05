@@ -279,12 +279,18 @@ Notes:
     root (pi's directory loader has the rules of its discovery), then the
     skill files that pi's discovery finds in `<cwd>/.agents/skills`
     (`airedale.skills._pi_skill_entries`); collisions use the frontmatter
-    `name`, as pi does. The frontmatter is cut and parsed as pi does it:
-    YAML 1.2 (`ruamel.yaml` for the syntax, with the core-schema scalar rules of
-    the `yaml` package that pi uses, so `yes`, `1_000` and dates are strings, `0xff`
-    is a number, a duplicate key makes pi skip the skill). `tests/test_pi_skills.py`
-    compares both with the installed pi releases. Known limit: a tab inside a plain
-    value is read as a space. Not reproduced: ignore files in `.agents/skills`, and
+    `name`, as pi does. The frontmatter is cut and parsed as pi does it
+    (`airedale.pi_frontmatter`): YAML 1.2 (`ruamel.yaml` for the syntax, with the
+    core-schema scalar rules of the `yaml` package that pi uses, so `yes`, `1_000` and
+    dates are strings and `0xff` is a number), checked over the whole document:
+    a repeated key at any depth, `!!set` with a value that is not null, and `!!omap` /
+    `!!pairs` with a bad item make pi skip the skill; numbers are keys of the same value
+    when JavaScript says so. `tests/test_pi_skills.py` compares this with the installed
+    pi releases. A tab is read exactly or not at all: tabs after `:`, before a
+    comment or `:`, and at the end of a line are white space and are placed; any
+    other tab that the parser rejects (inside a plain value, as indentation) makes
+    `pi_skill_dirs` raise `UnsupportedFrontmatterError`, because a tab that is read as a space could
+    hide a name collision. Not reproduced: ignore files in `.agents/skills`, and
     the `!`/`+`/`-` filters of the settings `skills` list),
     `--approve` (project `.pi/` files are honored), `--no-context-files` (pi
     would read `AGENTS.md`/`CLAUDE.md` of every parent dir of `cwd`; the
@@ -451,6 +457,7 @@ src/airedale/
   pi_mcp_config.py       translation of pi's MCP config loader/validator (MIT, Mario Zechner: pi's notice, no Datadog header)
   whatwg_url.py          reads URLs like JavaScript's URL (for the pi MCP guard; undecidable hosts count as accepted)
   pi_mcp.py              uses it: which scenario servers a repo .pi/mcp.json changes, which servers it adds
+  pi_frontmatter.py      reads the YAML frontmatter of pi skills like pi does (core schema, unique keys, tabs exact or refused)
   skills.py              cross-provider skill staging (Claude + Codex) + collision guard;
                          discover_claude_skill_names (project skills allow-list)
   workdir.py             WorkspaceManager: clone-cache + git-worktree per-run workspaces;
