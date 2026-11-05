@@ -110,6 +110,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import heapq
 import json
 import logging
 import os
@@ -1398,8 +1399,9 @@ class _PiEventCollector:
         A tool such as ``codemode`` can call other tools. Pi reports these
         calls only as ``tool_execution_*`` events (with ``parentToolCallId``),
         not in the transcript, so they are not in ``segments`` (which shows
-        what the model asked for). Each nested call comes after its parent, in
-        start order, with ``parent_tool_id`` in its metadata. A nested call
+        what the model asked for). The nested calls of a model call come after
+        it in start order (all depths together), each one after its own
+        parent, with ``parent_tool_id`` in its metadata. A nested call
         whose parent is not known comes at the end.
 
         A parent is an execution, not an id: pi can reuse an id (even ""), and
@@ -1407,6 +1409,7 @@ class _PiEventCollector:
         it starts.
         """
         children: dict[_ToolExecution, list[_ToolExecution]] = {}
+        position = {execution: index for index, execution in enumerate(self.tool_executions)}
         for execution in self.tool_executions:
             if execution.parent is not None:
                 children.setdefault(execution.parent, []).append(execution)
@@ -1417,19 +1420,19 @@ class _PiEventCollector:
         result: list[AgentToolCall] = []
 
         def add_descendants(root: _ToolExecution) -> None:
-            # Depth first, with a stack instead of recursion: the nesting depth
-            # has no limit in pi.
-            stack = [iter(children.get(root, ()))]
-            while stack:
-                child = next(stack[-1], None)
-                if child is None:
-                    stack.pop()
-                    continue
+            # In start order, but a call only after its parent: take the
+            # earliest call whose parent is already in the result. (No
+            # recursion: the nesting depth has no limit in pi.)
+            ready = [(position[child], child) for child in children.get(root, ())]
+            heapq.heapify(ready)
+            while ready:
+                _, child = heapq.heappop(ready)
                 if child in added:  # damaged ids: never loop
                     continue
                 added.add(child)
                 result.append(self._nested_call(child))
-                stack.append(iter(children.get(child, ())))
+                for grandchild in children.get(child, ()):
+                    heapq.heappush(ready, (position[grandchild], grandchild))
 
         for call, execution in zip(model_calls, model_executions, strict=True):
             result.append(call)

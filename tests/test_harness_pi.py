@@ -329,6 +329,33 @@ class TestEventCollector:
         # The segments show what the model asked for: the nested calls are not in them.
         assert [s for s in result.segments if isinstance(s, AgentToolCall)] == [model_call]
 
+    def test_parallel_nested_calls_keep_start_order(self):
+        # B starts before A1 (a child of A): the flat list is A, B, A1.
+        events = _events_tool_run()
+
+        def start(tool_id: str, parent: str) -> dict[str, Any]:
+            return {
+                "type": "tool_execution_start",
+                "toolCallId": tool_id,
+                "toolName": tool_id,
+                "parentToolCallId": parent,
+            }
+
+        events[6:6] = [start("A", "call_1"), start("B", "call_1"), start("A1", "A"), start("B1", "B")]
+        result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
+        assert [call.name for call in result.tool_calls] == ["ls", "A", "B", "A1", "B1"]
+
+    def test_nested_call_that_started_before_its_parent_comes_after_it(self):
+        # The start record of the child came first (damaged order): the parent
+        # still comes before it.
+        events = _events_tool_run()
+        events[6:6] = [
+            {"type": "tool_execution_start", "toolCallId": "kid", "toolName": "kid", "parentToolCallId": "mid"},
+            {"type": "tool_execution_start", "toolCallId": "mid", "toolName": "mid", "parentToolCallId": "call_1"},
+        ]
+        result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
+        assert [call.name for call in result.tool_calls] == ["ls", "mid", "kid"]
+
     def test_deep_nested_tool_calls(self):
         # Pi has no nesting limit; a chain deeper than the recursion limit works.
         depth = sys.getrecursionlimit() + 500

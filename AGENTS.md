@@ -293,8 +293,8 @@ Notes:
     would run only one). `allowed_builtin_tools` is the complete `--tools`
     list for pi (plus `mcp__*` and pi's MCP resource tools when MCP servers are present; the resources of a server with a `tool_names` allow-list stay unavailable, as it is `hidden`; on Windows the all-tools default also has `powershell`): a repo extension tool is declared only when
     the scenario names it. Nested tool calls (`parentToolCallId`, for example
-    from `codemode`) are in `tool_calls` after their parent, with
-    `parent_tool_id`; `usage` session entries (`entry_appended`, for example
+    from `codemode`) are in `tool_calls` after the model call that made them,
+    in start order (each one after its own parent), with `parent_tool_id`; `usage` session entries (`entry_appended`, for example
     cache warming) count in the run usage. A run fails when any model call (assistant message) has no
     `usage` record, even if the run total is not zero. Pi can reuse a `toolCallId` (even
     ""): the collector keeps each execution, binds the n-th transcript call
