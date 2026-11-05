@@ -63,6 +63,24 @@ if (request.action === "mcp") {
     }
   }
   console.log(JSON.stringify(result));
+} else if (request.action === "urls") {
+  // What JavaScript's URL (the one pi calls) makes of each string.
+  console.log(
+    JSON.stringify(
+      request.urls.map((value) => {
+        if (!URL.canParse(value)) return null;
+        const url = new URL(value);
+        return {
+          scheme: url.protocol.slice(0, -1),
+          hostname: url.hostname,
+          port: url.port,
+          pathname: url.pathname,
+          search: url.search,
+          hash: url.hash,
+        };
+      }),
+    ),
+  );
 } else if (request.action === "retry") {
   // The events of pi's agent loop (mock model) for a response that failed with a
   // tool call with id "", and a retry that uses the id "" again.

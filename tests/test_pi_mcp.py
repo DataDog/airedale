@@ -69,6 +69,68 @@ CASES: list[tuple[str, dict, str, Any, bool, list[str]]] = [
         False,
         [],
     ),
+    ("url with a tab in the scheme", SCENARIO, "same", {"url": "ht\ttps://example.invalid/mcp"}, False, ["same"]),
+    ("url with a leading NUL", SCENARIO, "same", {"url": "\x00https://example.invalid/mcp"}, False, ["same"]),
+    ("url with a newline", SCENARIO, "same", {"url": "http://exa\nmple.test/"}, False, ["same"]),
+    (
+        "oauth metadata url 127.1",
+        SCENARIO,
+        "same",
+        {"url": "https://example.invalid/mcp", "oauth": {"authServerMetadataUrl": "http://127.1/meta"}},
+        False,
+        ["same"],
+    ),
+    (
+        "oauth metadata url, not loopback",
+        SCENARIO,
+        "same",
+        {"url": "https://example.invalid/mcp", "oauth": {"authServerMetadataUrl": "http://example.test/meta"}},
+        False,
+        [],
+    ),
+    (
+        "oauth callback url, hex loopback",
+        SCENARIO,
+        "same",
+        {"url": "https://e.test", "oauth": {"callbackUrl": "http://0x7f.1:8080/callback"}},
+        False,
+        ["same"],
+    ),
+    (
+        "oauth cimd callback with dot segments",
+        SCENARIO,
+        "same",
+        {
+            "url": "https://e.test",
+            "oauth": {"clientRegistration": "cimd", "callbackUrl": "http://localhost/x/../callback"},
+        },
+        False,
+        ["same"],
+    ),
+    (
+        "auth with http and a host that is not loopback",
+        SCENARIO,
+        "same",
+        {"url": "http://e.test", "auth": {"provider": "p"}},
+        False,
+        [],
+    ),
+    ("url without a host", SCENARIO, "same", {"url": "http:///"}, False, []),
+    ("url with a bad port", SCENARIO, "same", {"url": "http://e.test:99999/"}, False, []),
+    ("type null with command", SCENARIO, "same", {"command": "project", "type": None}, False, []),
+    ("type null with url", SCENARIO, "same", {"url": "https://e.test/mcp", "type": None}, False, []),
+    ("type null alone", SCENARIO, "same", {"type": None}, False, []),
+    ("type http with url", SCENARIO, "same", {"url": "https://e.test/mcp", "type": "http"}, False, ["same"]),
+    (
+        "type streamable-http with url",
+        SCENARIO,
+        "same",
+        {"url": "https://e.test/mcp", "type": "streamable-http"},
+        False,
+        ["same"],
+    ),
+    ("type stdio with url", SCENARIO, "same", {"url": "https://e.test/mcp", "type": "stdio"}, False, []),
+    ("identical definition", SCENARIO, "same", SCENARIO["same"], False, ["same"]),
 ]
 
 
@@ -131,6 +193,47 @@ class TestRunnerCheck:
     def test_no_op_override_does_not_raise(self, tmp_path):
         runner = self._runner(tmp_path, [McpServerSpec(name="same", command="scenario")], "same", {})
         runner._check_project_mcp_collisions()
+
+
+class TestTraceHeaders:
+    """A repo entry that repeats a scenario server replaces it, and the replacement has no trace header."""
+
+    TRACE = {"traceparent": "00-11111111111111111111111111111111-2222222222222222-01"}
+
+    def _runner(self, tmp_path, entry):
+        runner = PiRunner(cwd=tmp_path, mcp_servers=[McpServerSpec(name="same", url="https://example.invalid/mcp")])
+        (tmp_path / ".pi").mkdir(exist_ok=True)
+        (tmp_path / ".pi" / "mcp.json").write_text(json.dumps({"mcpServers": {"same": entry}}))
+        return runner
+
+    def _copy_of_untraced_config(self, tmp_path):
+        runner = self._runner(tmp_path, {})
+        (tmp_path / ".pi" / "mcp.json").write_text(json.dumps({"mcpServers": runner._mcp_config({})["mcpServers"]}))
+        return runner
+
+    def test_copy_of_the_untraced_config_raises_when_the_run_is_traced(self, tmp_path):
+        runner = self._copy_of_untraced_config(tmp_path)
+        with pytest.raises(ValueError, match="same"):
+            runner._check_project_mcp_collisions(self.TRACE)
+
+    def test_copy_of_the_untraced_config_raises_without_trace(self, tmp_path):
+        # The entry is still a repo entry for pi, whatever the headers are.
+        runner = self._copy_of_untraced_config(tmp_path)
+        with pytest.raises(ValueError, match="same"):
+            runner._check_project_mcp_collisions({})
+
+    def test_no_op_override_is_allowed_when_the_run_is_traced(self, tmp_path):
+        self._runner(tmp_path, {})._check_project_mcp_collisions(self.TRACE)
+
+    def test_pi_drops_the_trace_header_of_a_replaced_server(self, pi_reference, tmp_path):
+        """The real merge: the project entry wins and the global trace header is gone."""
+        runner = self._copy_of_untraced_config(tmp_path)
+        agent = tmp_path / "agent"
+        agent.mkdir()
+        (agent / "mcp.json").write_text(json.dumps(runner._mcp_config(self.TRACE)))
+        answers = pi_reference({"action": "mcp", "agentDir": str(agent), "cwd": str(tmp_path)})
+        for answer in answers.values():
+            assert "headers" not in answer["servers"][0]["config"]
 
 
 class TestReporting:

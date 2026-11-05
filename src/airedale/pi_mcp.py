@@ -77,7 +77,13 @@ def merge_project_mcp_config(project_file: Path, scenario: Mapping[str, Mapping[
     merge = PiMcpMerge(servers={name: PiMcpEntry(dict(config), "global") for name, config in scenario.items()})
     before = {name: dict(config) for name, config in scenario.items()}
     apply_project_config(project_file, merge.servers, merge.errors)
-    merge.changed = [name for name, config in before.items() if merge.servers[name].config != config]
+    # A scenario server is changed when its config differs (an override, a replacement) or when the repo
+    # file defines it again, even with the same config: the entry is then a repo entry for pi.
+    merge.changed = [
+        name
+        for name, config in before.items()
+        if merge.servers[name].config != config or merge.servers[name].scope != "global"
+    ]
     return merge
 
 

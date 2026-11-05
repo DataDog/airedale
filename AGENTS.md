@@ -299,7 +299,13 @@ Notes:
     file would replace or change a scenario server (a definition, an override
     such as `"enabled": false`, a BOM is allowed); an entry that pi rejects
     (invalid, or a name that differs only in `-`/`_`) is no collision, and `{}`
-    is a no-op override.
+    is a no-op override. The guard **fails closed**: the scenario entries it
+    compares with are the ones written for pi, with the trace headers of the
+    run (a repo entry that repeats a server replaces it, and drops the
+    headers); an explicit `"type": null` is not a missing type; the URLs are read
+    like JavaScript's `URL` (`airedale.whatwg_url`: tabs and newlines removed,
+    `127.1` is `127.0.0.1`), and a host that the reader cannot decide in every
+    detail (IDNA, odd IPv6) counts as accepted by pi.
     Two scenario servers whose names differ only in `-`/`_` also raise (pi
     would run only one). `allowed_builtin_tools` is the complete `--tools`
     list for pi (plus `mcp__*` and pi's MCP resource tools when MCP servers are present; the resources of a server with a `tool_names` allow-list stay unavailable, as it is `hidden`; on Windows the all-tools default also has `powershell`): a repo extension tool is declared only when
@@ -443,6 +449,7 @@ src/airedale/
                          merged_headers (static + trace); managed-server start/health;
                          tools/list metadata catalog; discover_claude_project_mcp_servers (.mcp.json)
   pi_mcp_config.py       translation of pi's MCP config loader/validator (MIT, Mario Zechner: pi's notice, no Datadog header)
+  whatwg_url.py          reads URLs like JavaScript's URL (for the pi MCP guard; undecidable hosts count as accepted)
   pi_mcp.py              uses it: which scenario servers a repo .pi/mcp.json changes, which servers it adds
   skills.py              cross-provider skill staging (Claude + Codex) + collision guard;
                          discover_claude_skill_names (project skills allow-list)

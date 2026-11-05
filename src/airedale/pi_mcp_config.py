@@ -38,11 +38,12 @@ import logging
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
-from urllib.parse import SplitResult, urlsplit
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
     from pathlib import Path
+
+from airedale.whatwg_url import is_loopback_host, parse_url
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +170,6 @@ def validate_server_config(name: str, raw: Any) -> dict[str, Any] | str:
     if not isinstance(raw, dict):
         return f'server "{name}" must be an object'
     value = _resolve_exposure_aliases(raw)
-    server_type = value.get("type")
     exposure = value.get("exposure")
     exposures = ", ".join(f'"{item}"' for item in _EXPOSURES)
     if "exposure" in value and not _is_exposure(exposure):
@@ -189,10 +189,10 @@ def validate_server_config(name: str, raw: Any) -> dict[str, Any] | str:
         timeout = value["timeout"]
         if not _is_number(timeout) or not timeout > 0:
             return f'server "{name}": timeout must be a positive number of seconds'
-    if server_type == "sse":
+    if value.get("type") == "sse":
         return f'server "{name}": legacy SSE transport is not supported; use the streamable HTTP URL'
-    if isinstance(value.get("url"), str) and server_type in (None, "http", "streamable-http"):
-        url = _parse_url(value["url"])
+    if isinstance(value.get("url"), str) and _has_type(value, "http", "streamable-http"):
+        url = parse_url(value["url"])
         if url is None or url.scheme not in ("http", "https"):
             return f'server "{name}": url must be an http or https URL'
         if "headers" in value and not _is_string_record(value["headers"]):
@@ -204,10 +204,10 @@ def validate_server_config(name: str, raw: Any) -> dict[str, Any] | str:
             auth = value["auth"]
             if not isinstance(auth, dict) or not isinstance(auth.get("provider"), str) or not auth["provider"]:
                 return f'server "{name}": auth.provider must be a provider name'
-            if url.scheme != "https" and _host(url) not in _LOOPBACK_HOSTS:
+            if url.scheme != "https" and not is_loopback_host(url, _LOOPBACK_HOSTS):
                 return f'server "{name}": auth requires an https URL, or http on localhost, 127.0.0.1, or [::1]'
         return value
-    if isinstance(value.get("command"), str) and server_type in (None, "stdio"):
+    if isinstance(value.get("command"), str) and _has_type(value, "stdio"):
         args = value.get("args")
         if "args" in value and not (isinstance(args, list) and all(isinstance(arg, str) for arg in args)):
             return f'server "{name}": args must be an array of strings'
@@ -221,7 +221,12 @@ def validate_server_config(name: str, raw: Any) -> dict[str, Any] | str:
 
 def is_http_config(config: Mapping[str, Any]) -> bool:
     """The branch of ``validate_server_config`` that a valid entry took (url first, as pi)."""
-    return isinstance(config.get("url"), str) and config.get("type") in (None, "http", "streamable-http")
+    return isinstance(config.get("url"), str) and _has_type(config, "http", "streamable-http")
+
+
+def _has_type(value: Mapping[str, Any], *types: str) -> bool:
+    """JavaScript ``type === undefined || type === "..."``: a ``type`` that is ``null`` is not undefined."""
+    return "type" not in value or value["type"] in types
 
 
 def _validate_oauth(value: Any, present: bool) -> str | None:
@@ -240,8 +245,8 @@ def _validate_oauth(value: Any, present: bool) -> str | None:
         callback = value["callbackUrl"]
         if not isinstance(callback, str) or not _is_loopback_redirect_uri(callback):
             return "oauth.callbackUrl must be an http URI on localhost, 127.0.0.1, or [::1] without query or fragment"
-        url_port = _port(_parse_url(callback))
-        if url_port and "callbackPort" in value and int(url_port) != port:
+        url = parse_url(callback)
+        if url is not None and url.port and "callbackPort" in value and int(url.port) != port:
             return "oauth.callbackUrl and oauth.callbackPort name different ports"
     if "scope" in value and not isinstance(value["scope"], str):
         return "oauth.scope must be a string"
@@ -255,16 +260,18 @@ def _validate_oauth(value: Any, present: bool) -> str | None:
             return 'oauth.clientRegistration "cimd" cannot be combined with oauth.clientId or oauth.clientName'
         callback_url = value.get("callbackUrl")
         if isinstance(callback_url, str):
-            parsed = _parse_url(callback_url)
-            if parsed is None or _host(parsed) == "[::1]" or parsed.path != "/callback":
+            parsed = parse_url(callback_url)
+            if parsed is None or (parsed.exact and parsed.hostname == "[::1]") or parsed.pathname != "/callback":
                 return (
                     'oauth.clientRegistration "cimd" requires oauth.callbackUrl on localhost or 127.0.0.1 '
                     "with path /callback"
                 )
     if "authServerMetadataUrl" in value:
         metadata_url = value["authServerMetadataUrl"]
-        url = _parse_url(metadata_url) if isinstance(metadata_url, str) else None
-        if url is None or not (url.scheme == "https" or (url.scheme == "http" and _host(url) in _LOOPBACK_HOSTS)):
+        url = parse_url(metadata_url) if isinstance(metadata_url, str) else None
+        if url is None or not (
+            url.scheme == "https" or (url.scheme == "http" and is_loopback_host(url, _LOOPBACK_HOSTS))
+        ):
             return "oauth.authServerMetadataUrl must be an https URL, or http on localhost, 127.0.0.1, or [::1]"
     return None
 
@@ -300,46 +307,12 @@ def _is_integer(value: Any) -> bool:
     return _is_number(value) and float(value).is_integer()
 
 
-_URL_RE = re.compile(r"^[\x00-\x20]*([A-Za-z][A-Za-z0-9+.-]*):[/\\]*([^/\\?#]+)")
-
-
-def _parse_url(value: str) -> SplitResult | None:
-    """Parse ``value`` like ``URL.canParse`` (simplified): ``None`` when it is not a URL with a host."""
-    match = _URL_RE.match(value)
-    if match is None:
-        return None
-    scheme, authority = match.group(1).lower(), match.group(2)
-    if scheme not in ("http", "https"):
-        return SplitResult(scheme, authority, "", "", "")
-    try:
-        # Repeat the parse with a normal prefix, so that "http:host" and "http:\\host" work.
-        rest = value.strip()[len(match.group(1)) + 1 :].lstrip("/\\")
-        parts = urlsplit(f"{scheme}://{rest.replace(chr(92), '/')}")
-        _ = parts.port  # Raises ValueError for an invalid port.
-    except ValueError:
-        return None
-    return parts if parts.hostname else None
-
-
-def _host(url: SplitResult | None) -> str:
-    """``URL.hostname``: IPv6 addresses are in brackets."""
-    host = (url.hostname or "") if url is not None else ""
-    return f"[{host}]" if ":" in host else host
-
-
-def _port(url: SplitResult | None) -> str:
-    """``URL.port``: empty for the default port of the scheme."""
-    if url is None or url.port is None or (url.scheme, url.port) in (("http", 80), ("https", 443)):
-        return ""
-    return str(url.port)
-
-
 def _is_loopback_redirect_uri(value: str) -> bool:
-    url = _parse_url(value)
+    url = parse_url(value)
     return (
         url is not None
         and url.scheme == "http"
-        and _host(url) in _LOOPBACK_HOSTS
-        and not url.query
-        and not url.fragment
+        and is_loopback_host(url, _LOOPBACK_HOSTS)
+        and not url.search
+        and not url.hash
     )

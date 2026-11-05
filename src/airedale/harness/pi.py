@@ -329,7 +329,7 @@ class PiRunner(DecoratorSpanAgentRunner):
         progress: ProgressCallback | None,
         spans: PiSpanRecorder | None = None,
     ) -> AgentRunResult:
-        self._check_project_mcp_collisions()
+        self._check_project_mcp_collisions(trace_headers)
         self._check_tool_name_collisions()
         skill_dirs = pi_skill_dirs(self.skills, self.cwd)
         agent_dir = _make_private_agent_dir(Path(self.cwd))
@@ -472,7 +472,7 @@ class PiRunner(DecoratorSpanAgentRunner):
         ]
         return [*self.mcp_servers, *project]
 
-    def _check_project_mcp_collisions(self) -> None:
+    def _check_project_mcp_collisions(self, trace_headers: Mapping[str, str] | None = None) -> None:
         """Raise when pi would not run every scenario MCP server.
 
         For pi, names that differ only in ``-``/``_`` are the same server. Two
@@ -494,7 +494,7 @@ class PiRunner(DecoratorSpanAgentRunner):
                 "difference between '-' and '_') and pi would run only one of them. Rename the server(s)."
             )
         project_file = Path(self.cwd) / ".pi" / "mcp.json"
-        changed = merge_project_mcp_config(project_file, self._scenario_pi_configs()).changed
+        changed = merge_project_mcp_config(project_file, self._scenario_pi_configs(trace_headers)).changed
         if changed:
             raise ValueError(
                 f"Project MCP config {project_file} defines server(s) {', '.join(changed)} with the same name as "
@@ -531,10 +531,15 @@ class PiRunner(DecoratorSpanAgentRunner):
             "collision is possible, not sure. Rename a server or change 'tool_names'."
         )
 
-    def _scenario_pi_configs(self) -> dict[str, dict[str, Any]]:
-        """Return the ``mcp.json`` entry of each scenario server (as pi sees the global servers)."""
+    def _scenario_pi_configs(self, trace_headers: Mapping[str, str] | None = None) -> dict[str, dict[str, Any]]:
+        """Return the ``mcp.json`` entry of each scenario server, as it is written for pi (the global servers).
+
+        The entries have the headers of the distributed trace of the run: a repo
+        entry that repeats the static settings of a server, but not these
+        headers, would replace the entry and remove them.
+        """
         try:
-            return {server.name: server.to_pi_config({}) for server in self.mcp_servers}
+            return {server.name: server.to_pi_config(trace_headers or {}) for server in self.mcp_servers}
         except ValueError:
             # The run fails when the configuration is written, with a clear message.
             return {}
