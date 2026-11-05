@@ -293,7 +293,7 @@ Notes:
     `PI_OFFLINE=1`. Parent
     `PI_*` session variables are removed from the env. Pi does not read
     `.mcp.json`; it reads `<cwd>/.pi/mcp.json` itself and merges it over the
-    scenario servers. `airedale.pi_mcp` copies this merge and pi's validation of
+    scenario servers. `airedale.pi_mcp_config` translates this merge and pi's validation of
     each entry (pi 1.4.0 and 1.5.0; `tests/test_pi_mcp.py` compares both with
     the installed pi releases when they are there). A run raises when the repo
     file would replace or change a scenario server (a definition, an override
@@ -442,7 +442,8 @@ src/airedale/
   mcp.py                 McpServerSpec (from McpServerConfig); HTTP/stdio rendering for both SDKs;
                          merged_headers (static + trace); managed-server start/health;
                          tools/list metadata catalog; discover_claude_project_mcp_servers (.mcp.json)
-  pi_mcp.py              copy of pi's MCP config merge/validation (repo .pi/mcp.json over scenario servers)
+  pi_mcp_config.py       translation of pi's MCP config loader/validator (MIT, Mario Zechner: pi's notice, no Datadog header)
+  pi_mcp.py              uses it: which scenario servers a repo .pi/mcp.json changes, which servers it adds
   skills.py              cross-provider skill staging (Claude + Codex) + collision guard;
                          discover_claude_skill_names (project skills allow-list)
   workdir.py             WorkspaceManager: clone-cache + git-worktree per-run workspaces;
