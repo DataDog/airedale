@@ -496,19 +496,13 @@ class PiRunner(DecoratorSpanAgentRunner):
             )
 
     def _project_mcp_server_names(self) -> list[str]:
-        """Return the server names of the repo ``<cwd>/.pi/mcp.json`` (if any)."""
-        project_file = Path(self.cwd) / ".pi" / "mcp.json"
-        if not project_file.is_file():
-            return []
-        try:
-            data = json.loads(project_file.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            logger.warning("Unable to parse project MCP config %s", project_file, exc_info=True)
-            return []
-        servers = data.get("mcpServers") if isinstance(data, dict) else None
-        if not isinstance(servers, dict):
-            return []
-        return [str(name) for name in servers]
+        """Return the names of the servers pi loads from the repo ``<cwd>/.pi/mcp.json``.
+
+        Same list as the one in the span metadata: pi does not load an entry
+        with ``"enabled": false`` or an invalid entry, so those cannot replace
+        a scenario server.
+        """
+        return [server.name for server in discover_pi_project_mcp_servers(self.cwd)]
 
     def _models_json_token(self) -> str | None:
         """Return the gateway token that ``models.json`` holds (``None`` when it holds no token)."""
