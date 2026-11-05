@@ -279,7 +279,12 @@ Notes:
     root (pi's directory loader has the rules of its discovery), then the
     skill files that pi's discovery finds in `<cwd>/.agents/skills`
     (`airedale.skills._pi_skill_entries`); collisions use the frontmatter
-    `name`, as pi does. Not reproduced: ignore files in `.agents/skills`, and
+    `name`, as pi does. The frontmatter is cut and parsed as pi does it:
+    YAML 1.2 (`ruamel.yaml` for the syntax, with the core-schema scalar rules of
+    the `yaml` package that pi uses, so `yes`, `1_000` and dates are strings, `0xff`
+    is a number, a duplicate key makes pi skip the skill). `tests/test_pi_skills.py`
+    compares both with the installed pi releases. Known limit: a tab inside a plain
+    value is read as a space. Not reproduced: ignore files in `.agents/skills`, and
     the `!`/`+`/`-` filters of the settings `skills` list),
     `--approve` (project `.pi/` files are honored), `--no-context-files` (pi
     would read `AGENTS.md`/`CLAUDE.md` of every parent dir of `cwd`; the

@@ -1264,13 +1264,6 @@ class TestPiSkillDirs:
         with pytest.raises(ValueError, match="'alpha'"):
             pi_skill_dirs([str(scenario)], str(cwd))
 
-    def test_quoted_yaml_key_with_a_colon_or_a_quote(self, tmp_path):
-        from airedale.skills import _frontmatter
-
-        path = tmp_path / "SKILL.md"
-        path.write_text('---\n"a: b": 1x\n\'it\'\'s\': two\n"q\\"k": three\n"open: x\n---\n')
-        assert _frontmatter(path) == {"a: b": "1x", "it's": "two", 'q"k': "three"}
-
     @pytest.mark.parametrize(
         ("header", "expected"), [(">-", "alpha"), ("|-", "alpha"), ("|", "alpha\n"), (">", "alpha\n")]
     )

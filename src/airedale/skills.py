@@ -11,6 +11,19 @@ import logging
 import re
 import shutil
 from pathlib import Path
+from typing import Any
+
+from ruamel.yaml import YAML
+from ruamel.yaml.error import YAMLError
+from ruamel.yaml.events import (
+    AliasEvent,
+    DocumentStartEvent,
+    MappingEndEvent,
+    MappingStartEvent,
+    ScalarEvent,
+    SequenceEndEvent,
+    SequenceStartEvent,
+)
 
 from airedale.types import slugify
 
@@ -141,11 +154,6 @@ def discover_claude_skill_names(cwd: str) -> list[str]:
 PI_PROJECT_SKILL_ROOTS: tuple[tuple[str, str], ...] = ((".pi/skills", "pi"), (".agents/skills", "agents"))
 #: Directory names that pi does not enter when it looks for skills.
 _PI_SKIPPED_SKILL_DIRS = frozenset({"node_modules"})
-#: YAML plain scalars that are not strings (pi then ignores the ``name``).
-_YAML_NON_STRING_RE = re.compile(
-    r"^(?:[-+]?(?:\d[\d_]*(?:\.\d*)?(?:[eE][-+]?\d+)?|\.inf|\.Inf|\.INF)|\.nan|\.NaN|\.NAN|"
-    r"true|True|TRUE|false|False|FALSE|null|Null|NULL|~)$"
-)
 
 
 def pi_skill_dirs(skill_dirs: list[str], cwd: str) -> list[str]:
@@ -325,126 +333,175 @@ def _pi_skill_name(skill_file: Path) -> str | None:
 
 
 def _frontmatter(path: Path) -> dict[str, str] | None:
-    """Return the top-level string values of the YAML frontmatter of ``path``.
+    """Return the string values of the top-level YAML frontmatter of ``path``.
 
-    A small YAML subset, enough for ``name`` and ``description``: plain,
-    single-quoted and double-quoted scalars, with ``#`` comments. Values that
-    YAML reads as numbers, booleans or null are left out (pi ignores a name
-    that is not a string). ``None`` when the file has no frontmatter.
+    Same steps as pi (``utils/frontmatter.js``): remove a BOM, turn CRLF and CR
+    into LF, then the frontmatter starts at ``---`` and ends at the first
+    ``\\n---``. The text is parsed as YAML 1.2 with the core schema (pi uses the
+    ``yaml`` package): flow mappings, quoted keys and values, tags and anchors
+    work, and ``yes``, ``1_000``, ``0b11`` or ``2001-01-01`` are strings. A
+    value that is not a string is left out (pi ignores a ``name`` or
+    ``description`` that is not a string). ``None`` when pi would not load a
+    skill from the file: no frontmatter, invalid YAML (also a duplicate key), or
+    a frontmatter that is not a mapping.
     """
     try:
-        text = path.read_text(encoding="utf-8-sig", errors="replace")
+        text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return None
-    lines = text.splitlines()
-    if not lines or lines[0].strip() != "---":
+    text = text.removeprefix("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
+    if not text.startswith("---"):
         return None
-    values: dict[str, str] = {}
-    body = lines[1:]
-    index = 0
-    while index < len(body):
-        line = body[index]
-        index += 1
-        if line.strip() in ("---", "..."):
-            return values
-        if not line or line[0] in " \t#":
-            continue
-        split = _yaml_key(line)
-        if split is None:
-            continue
-        key, raw = split
-        raw = raw.strip()
-        if raw[:1] in ("|", ">"):
-            # Block scalar: the indented lines that follow.
-            block: list[str] = []
-            while index < len(body) and (not body[index].strip() or body[index][:1] in " \t"):
-                block.append(body[index])
-                index += 1
-            values[key] = _yaml_block(raw, block)
-            continue
-        value = _yaml_scalar(raw)
-        if value is not None:
-            values[key] = value
+    end = text.find("\n---", 3)
+    if end == -1:
+        return None
+    yaml_text = text[4:end]
+    if not yaml_text:
+        return {}
+    try:
+        return _yaml_top_level_strings(yaml_text)
+    except (YAMLError, ValueError, RecursionError):
+        if "\t" not in yaml_text:
+            return None
+    # YAML 1.2 allows a tab as the white space after a token (the YAML library of
+    # pi does too), the parser of ``ruamel.yaml`` does not: try again with a space.
+    try:
+        return _yaml_top_level_strings(_YAML_TAB_RE.sub(" ", _YAML_BLANK_LINE_RE.sub("", yaml_text)))
+    except (YAMLError, ValueError, RecursionError):
+        return None
+
+
+_YAML_TAB_RE = re.compile(r"(?<=\S)[ \t]*\t[ \t]*")
+_YAML_BLANK_LINE_RE = re.compile(r"(?m)^[ \t]+$")
+_YAML_INT_RE = re.compile(r"[-+]?[0-9]+|0o[0-7]+|0x[0-9a-fA-F]+")
+_YAML_FLOAT_RE = re.compile(r"[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)[eE][-+]?[0-9]+|[-+]?(?:\.[0-9]+|[0-9]+\.[0-9]*)")
+_YAML_INF_RE = re.compile(r"[-+]?\.(?:inf|Inf|INF)")
+_YAML_NAN = frozenset({".nan", ".NaN", ".NAN"})
+_YAML_NULL = frozenset({"", "~", "null", "Null", "NULL"})
+_YAML_BOOL = {"true": True, "True": True, "TRUE": True, "false": False, "False": False, "FALSE": False}
+_YAML_STR_TAG = "tag:yaml.org,2002:str"
+#: Tags of types that are not strings and are not in the core schema.
+_YAML_NON_STRING_TAGS = frozenset(
+    f"tag:yaml.org,2002:{name}" for name in ("binary", "timestamp", "set", "omap", "pairs", "map", "seq", "merge")
+)
+#: ``(kind, value)`` of a node that is not a scalar.
+_YAML_COLLECTION: tuple[str, Any] = ("collection", None)
+
+
+def _yaml_top_level_strings(text: str) -> dict[str, str]:
+    """Parse ``text`` (one YAML 1.2 document); return the string keys with string values of its top-level mapping.
+
+    Scalars are resolved with the core schema of YAML 1.2, as the ``yaml``
+    package of pi does it (``ruamel.yaml`` resolves some scalars in another way:
+    ``1_000`` and ``0b11`` are numbers for it, a date is a timestamp), so this
+    reads the parser events and not the loaded value. Raises :class:`YAMLError`
+    for invalid YAML and for duplicate keys, or :class:`ValueError` for several
+    documents. Returns ``{}`` when the document is empty or not a mapping.
+    """
+    loader = YAML(typ="safe", pure=True)
+    loader.version = (1, 2)
+    strings: dict[str, str] = {}
+    keys: set[Any] = set()
+    anchors: dict[str, tuple[str, Any]] = {}
+    kinds: list[str] = []  # the open collections
+    pending_key: tuple[str, Any] | None = None
+    documents = 0
+    for event in loader.parse(text):
+        if isinstance(event, DocumentStartEvent):
+            documents += 1
+            if documents > 1:
+                raise ValueError("Source contains multiple documents")
+        elif isinstance(event, MappingEndEvent | SequenceEndEvent):
+            kinds.pop()
+        elif isinstance(event, AliasEvent | ScalarEvent | MappingStartEvent | SequenceStartEvent):
+            if isinstance(event, AliasEvent):
+                if event.anchor not in anchors:
+                    raise ValueError(f"Unresolved alias *{event.anchor}")
+                node = anchors[event.anchor]
+            elif isinstance(event, ScalarEvent):
+                node = _resolve_yaml_scalar(event)
+            else:
+                node = _YAML_COLLECTION
+            if not isinstance(event, AliasEvent) and event.anchor:
+                anchors[event.anchor] = node
+            if kinds == ["mapping"]:  # A key or a value of the top-level mapping.
+                if pending_key is None:
+                    pending_key = node
+                    identity = _yaml_key_identity(node)
+                    if identity is not None:
+                        if identity in keys:
+                            raise ValueError("Map keys must be unique")
+                        keys.add(identity)
+                else:
+                    if pending_key[0] == "str" and node[0] == "str":
+                        strings[pending_key[1]] = node[1]
+                    elif pending_key[0] == "str":
+                        strings.pop(pending_key[1], None)
+                    pending_key = None
+            if isinstance(event, MappingStartEvent):
+                kinds.append("mapping")
+            elif isinstance(event, SequenceStartEvent):
+                kinds.append("sequence")
+    return strings
+
+
+def _yaml_key_identity(node: tuple[str, Any]) -> tuple[str, Any] | None:
+    """Return what makes two keys equal for pi (same type and value), ``None``: never equal."""
+    kind, value = node
+    if kind in ("collection", "other") or (kind == "float" and value != value):
+        return None
+    return ("number", value) if kind in ("int", "float") else node
+
+
+def _resolve_yaml_scalar(event: ScalarEvent) -> tuple[str, Any]:
+    """Return ``(kind, value)`` of a scalar, by the core schema of YAML 1.2.
+
+    ``kind`` is ``str``, ``int``, ``float``, ``bool``, ``null`` or ``other``.
+    """
+    text = event.value
+    if event.tag is not None:
+        return _resolve_tagged_yaml_scalar(event.tag, text)
+    if event.style:  # Quoted or block scalars are strings.
+        return ("str", text)
+    return _resolve_plain_yaml_scalar(text) or ("str", text)
+
+
+def _resolve_plain_yaml_scalar(text: str) -> tuple[str, Any] | None:
+    """Return ``(kind, value)`` when ``text`` is a null, bool, int or float of the core schema, else ``None``."""
+    if text in _YAML_NULL:
+        return ("null", None)
+    if text in _YAML_BOOL:
+        return ("bool", _YAML_BOOL[text])
+    if _YAML_INT_RE.fullmatch(text):
+        prefix = text[:2]
+        return ("int", int(text[2:], 8 if prefix == "0o" else 16) if prefix in ("0o", "0x") else int(text))
+    if _YAML_INF_RE.fullmatch(text) or text in _YAML_NAN:
+        return ("float", float(text.replace(".", "").replace("NaN", "nan").lower()))
+    if _YAML_FLOAT_RE.fullmatch(text):
+        return ("float", float(text))
     return None
 
 
-def _yaml_key(line: str) -> tuple[str, str] | None:
-    """Split a top-level ``key: value`` line into the decoded key and the rest.
+def _resolve_tagged_yaml_scalar(tag: str, text: str) -> tuple[str, Any]:
+    """Return ``(kind, value)`` of a scalar with an explicit tag, as the ``yaml`` package of pi does.
 
-    The key can be quoted (``"name": foo``): YAML reads it as ``name``.
-    ``None`` when the line is not a mapping entry.
+    A core tag (``!!int``, ``!!float``, ``!!bool``, ``!!null``) gives that type
+    when the text has the form of it, and a string if not (``!!int x`` is the
+    string ``x``). The types that the package knows besides the core schema
+    (``!!binary``, ``!!timestamp``, ``!!set``...) are not strings. Any other tag
+    leaves the text as a string (pi only warns).
     """
-    if line[0] in "'\"":
-        # Same quoting rules as the scalars; the closing quote is followed by ":".
-        quote = line[0]
-        end = 1
-        while True:
-            end = line.find(quote, end)
-            if end == -1:
-                return None
-            if quote == "'" and line[end + 1 : end + 2] == "'":
-                end += 2
-                continue
-            if quote == '"' and _is_escaped(line, end):
-                end += 1
-                continue
-            break
-        rest = line[end + 1 :].lstrip(" \t")
-        if not rest.startswith(":"):
-            return None
-        key = _yaml_scalar(line[: end + 1])
-        return (key.strip(), rest[1:]) if key is not None else None
-    if ":" not in line:
-        return None
-    key, _, raw = line.partition(":")
-    return key.strip(), raw
-
-
-def _is_escaped(text: str, index: int) -> bool:
-    """Return True when the character at ``index`` follows an odd number of backslashes."""
-    count = 0
-    while index - 1 - count >= 0 and text[index - 1 - count] == "\\":
-        count += 1
-    return count % 2 == 1
-
-
-def _yaml_block(header: str, block: list[str]) -> str:
-    """Return the text of a YAML block scalar (``|`` keeps lines, ``>`` folds them)."""
-    indents = [len(line) - len(line.lstrip()) for line in block if line.strip()]
-    indent = min(indents) if indents else 0
-    text_lines = [line[indent:] for line in block]
-    trailing = 0
-    while text_lines and not text_lines[-1].strip():
-        text_lines.pop()
-        trailing += 1
-    if header.startswith(">"):
-        text = " ".join(line.strip() for line in text_lines if line.strip())
-    else:
-        text = "\n".join(text_lines)
-    # Chomping as in YAML: "-" strips the final line break, "+" keeps all of
-    # them, the default keeps one.
-    if "-" in header or not text:
-        return text
-    return text + "\n" * (1 + trailing if "+" in header else 1)
-
-
-def _yaml_scalar(raw: str) -> str | None:
-    """Return the string value of a one-line YAML scalar (``None`` if not a string)."""
-    if raw.startswith("'"):
-        end = raw.find("'", 1)
-        while end != -1 and raw[end + 1 : end + 2] == "'":
-            end = raw.find("'", end + 2)
-        return raw[1:end].replace("''", "'") if end != -1 else None
-    if raw.startswith('"'):
-        try:
-            value, _ = json.JSONDecoder().raw_decode(raw)
-        except ValueError:
-            return None
-        return value if isinstance(value, str) else None
-    value = re.split(r"\s#", raw, maxsplit=1)[0].strip()
-    if not value or _YAML_NON_STRING_RE.match(value) or value[0] in "|>[{&*!":
-        return None
-    return value
+    if tag in ("!", _YAML_STR_TAG):
+        return ("str", text)
+    if tag in ("!!", "tag:yaml.org,2002:"):
+        raise ValueError("Invalid tag")
+    if tag in _YAML_NON_STRING_TAGS:
+        return ("other", None)
+    kind = tag.removeprefix("tag:yaml.org,2002:") if tag.startswith("tag:yaml.org,2002:") else None
+    plain = _resolve_plain_yaml_scalar(text)
+    if kind in ("int", "float", "bool", "null") and plain is not None and (plain[0] == kind):
+        return plain
+    return ("str", text)
 
 
 def _discover_skill_names(skills_base: Path) -> list[str]:
