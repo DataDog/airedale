@@ -141,7 +141,7 @@ from airedale.harness.pi_spans import (
     message_text,
     tool_result_text,
 )
-from airedale.mcp import pi_literal
+from airedale.mcp import pi_literal, pi_possible_tool_name_collisions
 from airedale.pi_mcp import discover_pi_project_mcp_servers, merge_project_mcp_config
 from airedale.skills import pi_skill_dirs
 from airedale.types import ModelSpec, UsageMetrics, is_valid_pi_usage
@@ -330,6 +330,7 @@ class PiRunner(DecoratorSpanAgentRunner):
         spans: PiSpanRecorder | None = None,
     ) -> AgentRunResult:
         self._check_project_mcp_collisions()
+        self._check_tool_name_collisions()
         skill_dirs = pi_skill_dirs(self.skills, self.cwd)
         agent_dir = _make_private_agent_dir(Path(self.cwd))
         try:
@@ -500,6 +501,35 @@ class PiRunner(DecoratorSpanAgentRunner):
                 "scenario MCP server(s) and pi would use the project definition (or apply its changes, for example "
                 '"enabled": false). Rename or remove the project entry.'
             )
+
+    def _check_tool_name_collisions(self) -> None:
+        """Raise when tools of two servers with a ``tool_names`` list can get the same pi name.
+
+        Pi gives a tool whose name another server's tool has a hash suffix, and
+        the tool of the server that connects second gets it. The runner cannot
+        know the order, so the tool names that it reports (LLMObs tool
+        definitions, agent manifest) could be wrong. A ``tool_names`` list is
+        an allow-list, not the catalog: the tools that it hides are registered
+        too, and a hidden tool with a hash suffix can remove the collision, so
+        the error says that the collision is possible. Servers without
+        ``tool_names`` are not checked here (their tools are known only when
+        the metadata probe runs; ``_mcp_tool_definitions`` logs a warning).
+        """
+        collisions = pi_possible_tool_name_collisions(
+            {server.name: server.tool_names for server in self.mcp_servers if server.tool_names}
+        )
+        if not collisions:
+            return
+        details = "; ".join(
+            f"{name} for " + " and ".join(f"{server}/{tool}" for server, tool in pairs)
+            for name, pairs in sorted(collisions.items())
+        )
+        raise ValueError(
+            f"Possible pi tool name collision between MCP servers: {details}. Pi adds a hash suffix to the tool of "
+            "the server that connects second, so the tool names in the run report could be wrong. 'tool_names' is "
+            "an allow-list, not the full tool list of the server: its hidden tools can change the result, so the "
+            "collision is possible, not sure. Rename a server or change 'tool_names'."
+        )
 
     def _scenario_pi_configs(self) -> dict[str, dict[str, Any]]:
         """Return the ``mcp.json`` entry of each scenario server (as pi sees the global servers)."""

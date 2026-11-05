@@ -50,7 +50,7 @@ MANAGED_MCP_DRAIN_CHUNK_BYTES = 4096
 
 # Pi accepts only these characters in MCP server names (see pi docs/mcp.md).
 PI_MCP_SERVER_NAME_RE = re.compile(r"[A-Za-z0-9_-]+")
-_PI_TOOL_NAME_UNSAFE_RE = re.compile(r"[^A-Za-z0-9_]")
+_PI_TOOL_NAME_SAFE_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_")
 PI_MAX_TOOL_NAME_LENGTH = 64
 
 
@@ -323,7 +323,8 @@ def pi_mcp_tool_names(server_name: str, tool_names: Iterable[str]) -> dict[str, 
     pi, the names compared are the names after shortening (a long name with
     its hash suffix). Not reproduced: a collision with a tool of another
     server (``mcp__a__b__c`` from server ``a`` and from server ``a__b``),
-    where pi's result depends on which server connects first.
+    where pi's result depends on which server connects first; see
+    :func:`pi_possible_tool_name_collisions`.
     """
     unique = list(dict.fromkeys(tool_names))
     plain = {tool: pi_mcp_tool_name(server_name, tool) for tool in unique}
@@ -337,13 +338,50 @@ def pi_mcp_tool_names(server_name: str, tool_names: Iterable[str]) -> dict[str, 
 
 
 def _pi_plain_tool_name(server_name: str, tool_name: str) -> str:
-    return _PI_TOOL_NAME_UNSAFE_RE.sub("_", f"mcp__{server_name}__{tool_name}")
+    """Return ``mcp__<server>__<tool>`` with every unsafe character replaced by ``_``, as pi does.
+
+    Pi works with JavaScript strings (UTF-16): its regular expression replaces
+    each UTF-16 code unit, so a character outside the Basic Multilingual Plane
+    (for example an emoji) becomes two ``_``, and the length that pi limits is
+    the number of UTF-16 code units.
+    """
+    return "".join(
+        char if char in _PI_TOOL_NAME_SAFE_CHARS else ("__" if ord(char) > 0xFFFF else "_")
+        for char in f"mcp__{server_name}__{tool_name}"
+    )
 
 
 def _pi_hashed_tool_name(server_name: str, tool_name: str) -> str:
     name = _pi_plain_tool_name(server_name, tool_name)
-    digest = hashlib.sha256(f"{server_name}\0{tool_name}".encode()).hexdigest()[:8]
+    # Node encodes a lone surrogate of a JavaScript string as U+FFFD.
+    text = f"{server_name}\0{tool_name}".encode("utf-16", "surrogatepass").decode("utf-16", "replace")
+    digest = hashlib.sha256(text.encode()).hexdigest()[:8]
     return f"{name[: PI_MAX_TOOL_NAME_LENGTH - len(digest) - 1]}_{digest}"
+
+
+def pi_possible_tool_name_collisions(tools_by_server: Mapping[str, Iterable[str]]) -> dict[str, list[tuple[str, str]]]:
+    """Return the pi tool names that more than one server can claim, with the ``(server, tool)`` pairs.
+
+    Pi registers the tools of each server when it connects. A tool whose name
+    is taken by another server's tool gets a hash suffix, so which tool keeps
+    the plain name depends on which server connects first. The runner cannot
+    know that order. A collision inside one server does not depend on the
+    order (all its colliding tools get the suffix) and is not listed.
+
+    ``tools_by_server`` has the tools that are known for each server. For a
+    server with a ``tool_names`` allow-list, the list is not the whole catalog:
+    a tool that the list hides is also registered, can take a hash suffix, and
+    so can remove a collision (or make another one). The result is the
+    collisions that are possible from the tools that are known.
+    """
+    claimed: dict[str, list[tuple[str, str]]] = {}
+    for server, tools in tools_by_server.items():
+        in_server = {pi_mcp_tool_name(server, tool): (server, tool) for tool in dict.fromkeys(tools)}
+        counts = Counter(pi_mcp_tool_name(server, tool) for tool in dict.fromkeys(tools))
+        for name, pair in in_server.items():
+            if counts[name] == 1:  # Colliding tools of one server all get a suffix.
+                claimed.setdefault(name, []).append(pair)
+    return {name: pairs for name, pairs in claimed.items() if len({server for server, _ in pairs}) > 1}
 
 
 def pi_literal(value: str) -> str:

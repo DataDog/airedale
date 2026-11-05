@@ -38,6 +38,7 @@ from airedale.mcp import (
     _mcp_tool_metadata_catalog,
     configured_tool_names,
     pi_mcp_tool_names,
+    pi_possible_tool_name_collisions,
     provider_mcp_tool_name,
 )
 from airedale.tracing import current_trace_headers
@@ -305,6 +306,8 @@ def _mcp_tool_definitions(
     tool in ``mcp_tool_metadata`` (the probed catalog) for the server.
     """
     definitions = []
+    if sdk_name == "pi":
+        _warn_about_pi_tool_name_collisions(mcp_servers, mcp_tool_metadata)
     for server in mcp_servers:
         pi_names: dict[str, str] = {}
         if sdk_name == "pi":
@@ -330,6 +333,31 @@ def _mcp_tool_definitions(
                     definition["schema"] = metadata.input_schema
             definitions.append(definition)
     return definitions
+
+
+def _warn_about_pi_tool_name_collisions(
+    mcp_servers: list[McpServerSpec], mcp_tool_metadata: Mapping[tuple[str, str], McpToolMetadata] | None
+) -> None:
+    """Log a warning when tools of two servers can get the same pi name.
+
+    Pi adds a hash suffix to the tool of the server that connects second, and the
+    runner does not know the order: the names in the tool definitions can be
+    wrong for these tools. The tools of a server are its ``tool_names`` and the
+    tools of the metadata probe (a ``tool_names`` list is also checked before
+    the run starts, see ``PiRunner._check_tool_name_collisions``).
+    """
+    tools_by_server: dict[str, list[str]] = {}
+    for server in mcp_servers:
+        known = [*configured_tool_names(server)]
+        known.extend(tool for server_name, tool in (mcp_tool_metadata or {}) if server_name == server.name)
+        tools_by_server[server.name] = known
+    for name, pairs in pi_possible_tool_name_collisions(tools_by_server).items():
+        logger.warning(
+            "Pi tool name %s can belong to %s: pi adds a hash suffix to the tool of the server that connects "
+            "second, so the tool names in the run report can be wrong",
+            name,
+            " or ".join(f"{server}/{tool}" for server, tool in pairs),
+        )
 
 
 def _llmobs_tool_definitions(

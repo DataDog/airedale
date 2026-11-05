@@ -326,7 +326,14 @@ Notes:
     at all). Pi names MCP tools with a hash suffix
     when long or when names of one server collide after sanitizing;
     `pi_mcp_tool_names` reproduces this from the server's complete tool list
-    (the metadata probe keeps every tool for this).
+    (the metadata probe keeps every tool for this), with JavaScript's UTF-16
+    rules (a character outside the BMP is two `_`). Tools of two servers can also
+    get the same name (`mcp__a__b__c` from server `a` / `b__c` and server `a__b` / `c`):
+    pi hashes the tool of the server that connects second, which the runner cannot
+    know. A scenario with `tool_names` lists that can collide fails before pi starts
+    ("possible" collision: a list is an allow-list, hidden tools can change the
+    result, `pi_possible_tool_name_collisions`); for the probed tools of servers
+    without a list, `_mcp_tool_definitions` logs a warning and keeps the names.
     Project `.pi/mcp.json` servers stay in the `--tools` selection
     (`mcp__*`); their `codemode`-exposed tools need `codemode` in
     `allowed_builtin_tools` (never added implicitly: it can call other models). `--approve` lets repo `.pi/extensions` run in-process with
