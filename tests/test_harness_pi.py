@@ -539,23 +539,94 @@ class TestEventCollector:
         result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
         assert sorted(call.name for call in result.tool_calls) == ["ls", "x", "y"]
 
-    @pytest.mark.parametrize("damaged", ["missing", "not_a_record", "empty"])
-    def test_run_fails_when_any_model_call_has_no_usage(self, damaged):
-        # The first call has no usable usage, the final call has usage: the
+    @pytest.mark.parametrize(
+        "usage",
+        [
+            "missing",
+            "n/a",
+            True,
+            [],
+            {},
+            {"output": 1},  # no input
+            {"input": 1},  # no output
+            {"input": None, "output": 1},
+            {"input": "n/a", "output": 1},
+            {"input": False, "output": 1},
+            {"input": True, "output": 1},
+            {"input": -1, "output": 1},
+            {"input": 1.5, "output": 1},
+            {"input": {}, "output": 1},
+            {"input": [], "output": 1},
+            {"input": 1, "output": 1, "cacheRead": None},
+            {"input": 1, "output": 1, "cacheWrite": "x"},
+            {"input": 1, "output": 1, "totalTokens": None},
+            {"input": 1, "output": 1, "reasoning": []},
+            {"input": 1, "output": 1, "cost": 5},
+            {"input": 1, "output": 1, "cost": {"total": "Infinity"}},
+            {"input": 1, "output": 1, "cost": {"total": float("inf")}},
+            {"input": 1, "output": 1, "cost": {"total": -1}},
+            {"input": 1, "output": 1, "cost": {"total": None}},
+            {"input": float("nan"), "output": 1},
+        ],
+        ids=repr,
+    )
+    def test_run_fails_when_a_model_call_has_unusable_usage(self, usage):
+        # The first call has damaged usage, the final call has usage: the
         # total is not zero, but the accounting is incomplete.
         events = _events_tool_run()
-        message = events[4]["message"]
-        if damaged == "missing":
-            del message["usage"]
-        elif damaged == "not_a_record":
-            message["usage"] = "n/a"
+        if usage == "missing":
+            del events[4]["message"]["usage"]
         else:
-            message["usage"] = {}
-        collector = _collect(events)
+            events[4]["message"]["usage"] = usage
+        collector = _PiEventCollector()
+        for event in events:
+            collector.feed(event)
         assert collector.usage.output_tokens > 0
         error = collector.result(model=MODEL, returncode=0, stderr_tail="").error
         assert error is not None
-        assert "no token usage for 1 model call(s)" in str(error)
+        assert "damaged token usage (1 model call)" in str(error)
+
+    @pytest.mark.parametrize(
+        "event",
+        [
+            {"type": "message_end", "message": {"role": "toolResult", "usage": {"input": "bad", "output": 1}}},
+            {"type": "message_end", "message": {"role": "toolResult", "usage": None}},
+            {"type": "compaction_end", "result": {"usage": {"input": 1, "output": None}}},
+            {"type": "compaction_end", "result": {"usage": "bad"}},
+            {"type": "entry_appended", "entry": {"type": "usage", "usage": {"input": 1, "output": 1, "cacheRead": []}}},
+            {"type": "entry_appended", "entry": {"type": "usage", "usage": None}},
+        ],
+        ids=lambda event: json.dumps(event)[:60],
+    )
+    def test_run_fails_when_other_usage_is_damaged(self, event):
+        events = _events_tool_run()
+        events.insert(-1, event)
+        error = _collect(events).result(model=MODEL, returncode=0, stderr_tail="").error
+        assert error is not None
+        assert "damaged token usage" in str(error)
+
+    def test_compaction_without_usage_is_valid(self):
+        events = _events_tool_run()
+        events.insert(-1, {"type": "compaction_end", "result": {"summary": "s"}})
+        assert _collect(events).result(model=MODEL, returncode=0, stderr_tail="").error is None
+
+    def test_damaged_usage_is_not_counted(self):
+        events = _events_tool_run()
+        events.insert(-1, {"type": "compaction_end", "result": {"usage": _usage(1000, 1000) | {"cacheRead": "x"}}})
+        collector = _collect(events)
+        assert collector.usage.output_tokens == 20
+
+    @pytest.mark.parametrize("stop", ["error", "aborted"])
+    def test_complete_zero_usage_of_a_failed_call_is_valid(self, stop):
+        events = _events_tool_run()
+        failed = _assistant([{"type": "text", "text": ""}], usage=_usage(0, 0), stop=stop, errorMessage="x")
+        events.insert(4, {"type": "message_end", "message": failed})
+        assert _collect(events).result(model=MODEL, returncode=0, stderr_tail="").error is None
+
+    def test_infinite_cost_does_not_reach_the_metrics(self):
+        usage = UsageMetrics.from_pi({"input": 1, "output": 1, "cost": {"total": "Infinity"}})
+        assert usage.estimated_cost_usd == 0.0
+        json.dumps(usage.to_llmobs_metrics(), allow_nan=False)
 
     def test_zero_usage_record_is_not_missing_usage(self):
         # Pi writes zeros for a call that produced no tokens: that is data.

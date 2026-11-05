@@ -119,6 +119,7 @@ import shutil
 import signal
 import tempfile
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -143,7 +144,7 @@ from airedale.harness.pi_spans import (
 from airedale.mcp import pi_literal
 from airedale.pi_mcp import discover_pi_project_mcp_servers, merge_project_mcp_config
 from airedale.skills import pi_skill_dirs
-from airedale.types import ModelSpec, UsageMetrics
+from airedale.types import ModelSpec, UsageMetrics, is_valid_pi_usage
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -1172,8 +1173,9 @@ class _PiEventCollector:
     spans: PiSpanRecorder | None = None
     #: Number of JSON records read from stdout.
     records: int = 0
-    #: Number of model calls (assistant messages) with no usable ``usage``.
-    calls_without_usage: int = 0
+    #: Where pi gave a ``usage`` record that is missing or damaged (see
+    #: :func:`is_valid_pi_usage`), one entry for each record. Their tokens are not counted.
+    damaged_usage: list[str] = field(default_factory=list)
 
     @property
     def stop_requested(self) -> bool:
@@ -1222,13 +1224,12 @@ class _PiEventCollector:
                 return None
             if message.get("role") == "assistant":
                 self.assistant_messages.append(message)
-                if not _has_usage(message.get("usage")):
-                    self.calls_without_usage += 1
-                self.usage.add(UsageMetrics.from_pi(message.get("usage")))
-            elif message.get("role") == "toolResult" and isinstance(message.get("usage"), dict):
+                # A model call must have usage.
+                self._add_usage(message.get("usage"), "model call")
+            elif message.get("role") == "toolResult" and "usage" in message:
                 # Nested model work done inside a tool (pi counts it in its
                 # session totals too).
-                self.usage.add(UsageMetrics.from_pi(message["usage"]))
+                self._add_usage(message["usage"], "tool result")
             return None
         if event_type == "tool_execution_start":
             name = str(event.get("toolName") or "unknown")
@@ -1249,8 +1250,10 @@ class _PiEventCollector:
         if event_type == "compaction_end":
             # Compaction calls the model too; count that usage.
             result = event.get("result")
-            if isinstance(result, dict) and isinstance(result.get("usage"), dict):
-                self.usage.add(UsageMetrics.from_pi(result["usage"]))
+            # A compaction hook can leave usage out: that is valid. Usage that
+            # is there must be usable.
+            if isinstance(result, dict) and "usage" in result:
+                self._add_usage(result["usage"], "compaction")
             return "compaction"
         if event_type == "entry_appended":
             # Model work outside the messages, for example prompt-cache warming
@@ -1259,8 +1262,8 @@ class _PiEventCollector:
             # counted. (Repo code in pi can write any record to stdout: only
             # evaluate trusted repositories.)
             entry = event.get("entry")
-            if isinstance(entry, dict) and entry.get("type") == "usage" and isinstance(entry.get("usage"), dict):
-                self.usage.add(UsageMetrics.from_pi(entry["usage"]))
+            if isinstance(entry, dict) and entry.get("type") == "usage" and "usage" in entry:
+                self._add_usage(entry["usage"], "usage entry")
             return None
         if event_type == "auto_retry_end":
             if event.get("success") is False:
@@ -1273,6 +1276,13 @@ class _PiEventCollector:
             self.aborted = bool(event.get("aborted"))
             return None
         return None
+
+    def _add_usage(self, usage: Any, source: str) -> None:
+        """Count a ``usage`` record; remember a record that is damaged."""
+        if is_valid_pi_usage(usage):
+            self.usage.add(UsageMetrics.from_pi(usage))
+        else:
+            self.damaged_usage.append(source)
 
     def _begin_execution(self, event: dict[str, Any], *, args: Any = None, track_open: bool = True) -> _ToolExecution:
         tool_id = str(event.get("toolCallId") or "")
@@ -1350,9 +1360,10 @@ class _PiEventCollector:
                 f"pi emitted {self.invalid_lines} malformed JSONL record(s) for {model.label}; "
                 "usage or tool data can be missing"
             )
-        if self.calls_without_usage:
+        if self.damaged_usage:
+            sources = ", ".join(f"{count} {source}" for source, count in Counter(self.damaged_usage).items())
             return RuntimeError(
-                f"pi reported no token usage for {self.calls_without_usage} model call(s) for {model.label}; "
+                f"pi reported missing or damaged token usage ({sources}) for {model.label}; "
                 "token and cost data are incomplete"
             )
         return None
@@ -1495,18 +1506,6 @@ class _PiEventCollector:
                 "duration_ms": execution.duration_ms if execution is not None else None,
             },
         )
-
-
-_USAGE_KEYS = ("input", "output", "cacheRead", "cacheWrite", "totalTokens")
-
-
-def _has_usage(usage: Any) -> bool:
-    """Return True when a pi message ``usage`` is a record with token counts.
-
-    Pi always writes ``usage`` (zeros for a call that failed). A message with no
-    ``usage``, or a ``usage`` that is not a record of counts, is damaged.
-    """
-    return isinstance(usage, dict) and any(key in usage for key in _USAGE_KEYS)
 
 
 def _parent_tool_id(event: dict[str, Any]) -> str | None:

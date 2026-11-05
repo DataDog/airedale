@@ -302,7 +302,11 @@ Notes:
     from `codemode`) are in `tool_calls` after the model call that made them,
     in start order (each one after its own parent), with `parent_tool_id`; `usage` session entries (`entry_appended`, for example
     cache warming) count in the run usage. A run fails when any model call (assistant message) has no
-    `usage` record, even if the run total is not zero. Pi can reuse a `toolCallId` (even
+    usable `usage` record (`airedale.types.is_valid_pi_usage`: an object with `input`
+    and `output`, counts that are finite whole numbers >= 0, a `cost.total` that
+    is finite and >= 0), even if the run total is not zero. A `usage` that is
+    present in a tool result, a compaction result or a `usage` entry must be
+    usable too (a compaction result can have none). A zero record is data. Pi can reuse a `toolCallId` (even
     ""): the collector keeps each execution, binds the n-th transcript call
     with an id to the n-th top-level execution (no `parentToolCallId`) with that id, and gives a nested call to
     the latest execution with the parent id at its start.

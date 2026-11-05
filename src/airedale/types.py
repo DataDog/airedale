@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -179,6 +180,8 @@ class UsageMetrics:
             cost_total = float(cost.get("total") or 0.0) if isinstance(cost, dict) else 0.0
         except (TypeError, ValueError):
             cost_total = 0.0
+        if not math.isfinite(cost_total):
+            cost_total = 0.0  # "Infinity" or "NaN": not a cost, and not valid JSON in the metrics.
         return cls(
             input_tokens=effective_input,
             output_tokens=output_tokens,
@@ -188,6 +191,40 @@ class UsageMetrics:
             reasoning_output_tokens=coerce_int(usage_dict.get("reasoning")),
             estimated_cost_usd=max(0.0, cost_total),
         )
+
+
+#: The token counts of a pi ``usage`` record.
+PI_USAGE_COUNT_KEYS = ("input", "output", "cacheRead", "cacheWrite", "totalTokens", "reasoning")
+
+
+def is_valid_pi_usage(usage: Any) -> bool:
+    """Return True when ``usage`` is a complete pi usage record with usable values.
+
+    Pi writes ``input`` and ``output`` in every record, with the other counts
+    and ``cost`` (zeros for a call that produced no tokens: that is data). A
+    record is damaged when it is not an object, lacks ``input`` or ``output``, has a
+    count that is not a finite non-negative whole number (a missing count is
+    fine, a null, text, boolean, fraction or nested value is not), or has a
+    ``cost`` that is not an object with a finite non-negative ``total``.
+    :meth:`UsageMetrics.from_pi` turns such values into zero, which hides the
+    damage, so callers check this first.
+    """
+    if not isinstance(usage, dict) or "input" not in usage or "output" not in usage:
+        return False
+    if not all(key not in usage or _is_count(usage[key]) for key in PI_USAGE_COUNT_KEYS):
+        return False
+    if "cost" not in usage:
+        return True
+    cost = usage["cost"]
+    return isinstance(cost, dict) and ("total" not in cost or _is_finite_number(cost["total"]))
+
+
+def _is_finite_number(value: Any) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool) and math.isfinite(value) and value >= 0
+
+
+def _is_count(value: Any) -> bool:
+    return _is_finite_number(value) and float(value).is_integer()
 
 
 @dataclass
