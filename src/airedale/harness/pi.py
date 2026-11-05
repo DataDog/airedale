@@ -1405,10 +1405,16 @@ class _PiEventCollector:
                         segments.append(AgentThought(text=text, kind="text"))
                 elif block_type == "toolCall":
                     tool_id = str(block.get("id") or "")
-                    position = next_index.get(tool_id, 0)
-                    next_index[tool_id] = position + 1
-                    candidates = by_id.get(tool_id, [])
-                    execution = candidates[position] if position < len(candidates) else None
+                    execution = None
+                    # Pi runs no tool for a response that failed or was aborted
+                    # (it can be tried again, with the same ids): the call does
+                    # not take an execution. (A response cut at its length can
+                    # have executed tools.)
+                    if message.get("stopReason") not in _PI_NO_TOOL_STOP_REASONS:
+                        position = next_index.get(tool_id, 0)
+                        next_index[tool_id] = position + 1
+                        candidates = by_id.get(tool_id, [])
+                        execution = candidates[position] if position < len(candidates) else None
                     executions.append(execution)
                     segments.append(self._tool_call(block, execution))
         return segments, executions
@@ -1460,11 +1466,24 @@ class _PiEventCollector:
             result.append(call)
             if execution is not None:
                 add_descendants(execution)
-        for execution in self.tool_executions:
-            if execution.parent_id is not None and execution not in added:
-                added.add(execution)
-                result.append(self._nested_call(execution))
-                add_descendants(execution)
+        # Nested calls whose parent is not in the list: first the calls with a parent
+        # that never started, then the rest (a parent that is a call of the model
+        # without a transcript block, or ids that make a cycle). The call at the
+        # top of a chain comes first, so that each call is after its own parent.
+        unresolved = [e for e in self.tool_executions if e.parent_id is not None and e.parent is None]
+        leftovers = [e for e in self.tool_executions if e.parent_id is not None and e.parent is not None]
+        for execution in [*unresolved, *leftovers]:
+            if execution in added:
+                continue
+            top, seen = execution, {execution}
+            while top.parent is not None and top.parent.parent_id is not None and top.parent not in seen:
+                top = top.parent
+                seen.add(top)
+            if top in added:
+                continue
+            added.add(top)
+            result.append(self._nested_call(top))
+            add_descendants(top)
         return result
 
     def _nested_call(self, execution: _ToolExecution) -> AgentToolCall:
@@ -1506,6 +1525,10 @@ class _PiEventCollector:
                 "duration_ms": execution.duration_ms if execution is not None else None,
             },
         )
+
+
+#: ``stopReason`` of an assistant message whose tool calls pi does not run.
+_PI_NO_TOOL_STOP_REASONS = frozenset({"error", "aborted"})
 
 
 def _parent_tool_id(event: dict[str, Any]) -> str | None:

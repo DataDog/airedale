@@ -530,6 +530,78 @@ class TestEventCollector:
         assert (model_call.result, model_call.metadata["duration_ms"]) == ("top", 2)
         assert (nested.result, nested.metadata["parent_tool_id"]) == ("nested", "outer")
 
+    def test_orphan_chain_starts_with_its_top_call(self):
+        # ``kid`` started before ``mid``, but its parent is ``mid`` (which has a
+        # parent that never started): ``mid`` comes first.
+        events = _events_tool_run()
+        events[6:6] = [
+            {"type": "tool_execution_start", "toolCallId": "kid", "toolName": "kid", "parentToolCallId": "mid"},
+            {"type": "tool_execution_start", "toolCallId": "mid", "toolName": "mid", "parentToolCallId": "gone"},
+        ]
+        result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
+        assert [call.name for call in result.tool_calls] == ["ls", "mid", "kid"]
+
+    def test_chain_under_a_call_without_transcript_block_starts_with_its_top_call(self):
+        # ``top`` is a call that is not in the transcript, so it is not listed.
+        # Its descendants are, and each one comes after its own parent.
+        events = _events_tool_run()
+        events[6:6] = [
+            {"type": "tool_execution_start", "toolCallId": "b", "toolName": "b", "parentToolCallId": "a"},
+            {"type": "tool_execution_start", "toolCallId": "top", "toolName": "top"},
+            {"type": "tool_execution_start", "toolCallId": "a", "toolName": "a", "parentToolCallId": "top"},
+        ]
+        result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
+        assert [call.name for call in result.tool_calls] == ["ls", "a", "b"]
+
+    @pytest.mark.parametrize("stop", ["error", "aborted"])
+    def test_failed_response_does_not_take_the_execution_of_a_retry(self, stop):
+        # A response that failed has a tool call with id "" and no execution. The
+        # retry uses the id "" again: its execution belongs to the retry.
+        failed = _assistant(
+            [{"type": "toolCall", "id": "", "name": "failed", "arguments": {}}],
+            usage=_usage(0, 0),
+            stop=stop,
+            errorMessage="overloaded",
+        )
+        retry = _assistant(
+            [{"type": "toolCall", "id": "", "name": "worked", "arguments": {}}], usage=_usage(1, 1), stop="toolUse"
+        )
+        events = _events_tool_run()
+        events[4:7] = [
+            {"type": "message_end", "message": failed},
+            {"type": "message_end", "message": retry},
+            {"type": "tool_execution_start", "toolCallId": "", "toolName": "worked", "args": {}},
+            {
+                "type": "tool_execution_end",
+                "toolCallId": "",
+                "toolName": "worked",
+                "result": {"content": [{"type": "text", "text": "worked result"}]},
+                "isError": False,
+            },
+        ]
+        result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
+        failed_call, worked = result.tool_calls
+        assert (failed_call.name, failed_call.result, failed_call.error) == ("failed", None, "tool did not run")
+        assert (worked.name, worked.result, worked.error) == ("worked", "worked result", None)
+        # The usage of the failed response is counted (it is data), the run is fine.
+        assert result.error is None
+
+    def test_retry_events_of_pi_agent_loop(self, pi_reference):
+        """The events of pi's real agent loop: the failed call has no execution."""
+        for version, events in pi_reference({"action": "retry"}).items():
+            result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
+            assert [(call.name, call.result, call.error) for call in result.tool_calls] == [
+                ("failed", None, "tool did not run"),
+                ("worked", "worked result", None),
+            ], version
+
+    def test_response_cut_at_its_length_keeps_its_executions(self):
+        # Pi can run tools for a response with stopReason "length".
+        events = _events_tool_run()
+        events[4]["message"]["stopReason"] = "length"
+        result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
+        assert result.tool_calls[0].result == "(empty directory)"
+
     def test_nested_tool_call_id_cycle_does_not_loop(self):
         events = _events_tool_run()
         events[6:6] = [

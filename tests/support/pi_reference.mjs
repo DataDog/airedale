@@ -63,4 +63,68 @@ if (request.action === "mcp") {
     }
   }
   console.log(JSON.stringify(result));
+} else if (request.action === "retry") {
+  // The events of pi's agent loop (mock model) for a response that failed with a
+  // tool call with id "", and a retry that uses the id "" again.
+  const modules = `${base}/../`;
+  const { agentLoop } = await import(pathToFileURL(`${modules}pi-agent-core/dist/agent-loop.js`).href);
+  const { AssistantMessageEventStream } = await import(
+    pathToFileURL(`${modules}pi-ai/dist/utils/event-stream.js`).href
+  );
+  const model = { id: "claude-sonnet-4-6", provider: "anthropic", api: "anthropic-messages" };
+  const usage = {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
+  const message = (content, stopReason) => ({
+    role: "assistant",
+    api: model.api,
+    provider: model.provider,
+    model: model.id,
+    content,
+    stopReason,
+    usage,
+    timestamp: Date.now(),
+    ...(stopReason === "error" ? { errorMessage: "overloaded" } : {}),
+  });
+  const call = (name) => ({ type: "toolCall", id: "", name, arguments: {} });
+  const context = {
+    messages: [],
+    tools: [
+      {
+        name: "worked",
+        label: "worked",
+        description: "test",
+        parameters: { type: "object", properties: {} },
+        execute: async () => ({ content: [{ type: "text", text: "worked result" }], details: {} }),
+      },
+    ],
+  };
+  const events = [];
+  const rounds = [
+    [message([call("failed")], "error")],
+    [message([call("worked")], "toolUse"), message([{ type: "text", text: "done" }], "stop")],
+  ];
+  for (const responses of rounds) {
+    const streamFn = () => {
+      const response = responses.shift();
+      const stream = new AssistantMessageEventStream();
+      stream.push(
+        response.stopReason === "error"
+          ? { type: "error", reason: "error", error: response }
+          : { type: "done", reason: response.stopReason, message: response },
+      );
+      return stream;
+    };
+    const prompt = [{ role: "user", content: "run", timestamp: Date.now() }];
+    for await (const event of agentLoop(prompt, context, { model, convertToLlm: (m) => m }, undefined, streamFn)) {
+      events.push(event);
+    }
+  }
+  events.push({ type: "agent_settled", aborted: false });
+  console.log(JSON.stringify(events));
 }
