@@ -1195,6 +1195,9 @@ class _ToolExecution:
     #: The execution that ``parent_id`` named when this one started (the latest
     #: one with that id), once it is known. ``None``: not known (yet).
     parent: _ToolExecution | None = None
+    #: The finished execution with the id of ``parent_id`` when this one started. Another execution with that
+    #: id can still come and be the parent (pi reuses ids), so this one is the parent only at the end of the run.
+    fallback_parent: _ToolExecution | None = None
 
 
 @dataclass
@@ -1391,8 +1394,12 @@ class _PiEventCollector:
         )
         parent_id = execution.parent_id
         if parent_id is not None:
-            execution.parent = self._latest_executions.get(parent_id)
-            if execution.parent is None:
+            latest = self._latest_executions.get(parent_id)
+            if latest is not None and not latest.finished:
+                execution.parent = latest
+            else:
+                # No parent, or one that has ended: the next execution with this id can be the parent.
+                execution.fallback_parent = latest
                 self._waiting_for_parent.setdefault(parent_id, []).append(execution)
         self.tool_executions.append(execution)
         if track_open:
@@ -1402,11 +1409,16 @@ class _PiEventCollector:
         for waiting in self._waiting_for_parent.pop(tool_id, ()):
             if waiting is not execution:
                 waiting.parent = execution
+                waiting.fallback_parent = None
             else:  # A call that names its own id: wait for the next one.
                 self._waiting_for_parent.setdefault(tool_id, []).append(waiting)
         return execution
 
     def result(self, *, model: ModelSpec, returncode: int | None, stderr_tail: str) -> AgentRunResult:
+        for execution in self.tool_executions:
+            # No later execution took the id: the finished one that was there when the call started is the parent.
+            if execution.parent is None and execution.fallback_parent is not None:
+                execution.parent = execution.fallback_parent
         segments, model_executions = self._segments()
         tool_calls = self._with_nested_calls(
             [segment for segment in segments if isinstance(segment, AgentToolCall)], model_executions

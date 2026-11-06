@@ -349,6 +349,10 @@ class _OpenTool:
     #: again (for example "" for every model call without id), so the child
     #: keeps the record it started under, not the latest one with the id.
     parent_record: SpanRecord | None = None
+    #: The earlier record with the id of the parent, when it had already ended at the start of the call. Another
+    #: record with that id can still come and be the parent (pi reuses ids): this one is the parent only at the
+    #: end, when no other record came.
+    fallback_parent_record: SpanRecord | None = None
     #: End of the model call that asked for the tool: the tool cannot start
     #: before it (``None`` when not known).
     earliest_start_ns: int | None = None
@@ -396,7 +400,7 @@ class PiSpanRecorder:
         self._tool_records: dict[str, SpanRecord] = {}
         #: Nested calls that ended before their parent started, with the id of
         #: the parent. They are at the root until the parent starts.
-        self._orphan_tools: list[tuple[str, SpanRecord]] = []
+        self._orphan_tools: list[tuple[str, SpanRecord, SpanRecord | None]] = []
         #: The parent span of each nested span that was attached (by ``id()`` of
         #: the record): a nested span is never attached under one of its descendants.
         self._span_parents: dict[int, SpanRecord] = {}
@@ -463,6 +467,7 @@ class PiSpanRecorder:
             self._compaction.error_type = "PiCompactionError"
             self.records.append(self._compaction)
             self._compaction = None
+        self._resolve_orphans()
 
     # ------------------------------------------------------------------ #
     # Model calls
@@ -640,10 +645,12 @@ class PiSpanRecorder:
         if tool_id in self._open_tools:
             # A repeated id: close the earlier execution so that no data is lost.
             self.close_tool(tool_id, now, error="tool started again before it ended")
+        parent_record, fallback = self._parent_at_start(parent_id)
         self._open_tools[tool_id] = _OpenTool(
             record=record,
             parent_id=parent_id,
-            parent_record=self._tool_records.get(parent_id) if parent_id is not None else None,
+            parent_record=parent_record,
+            fallback_parent_record=fallback,
             earliest_start_ns=self._last_call_end_ns,
         )
         # Also an empty id: pi can use "" as the id of a model call, and then
@@ -666,10 +673,12 @@ class PiSpanRecorder:
             )
             if parent_id is not None:
                 record.metadata["parent_tool_id"] = parent_id
+            parent_record, fallback = self._parent_at_start(parent_id)
             open_tool = _OpenTool(
                 record=record,
                 parent_id=parent_id,
-                parent_record=self._tool_records.get(parent_id) if parent_id is not None else None,
+                parent_record=parent_record,
+                fallback_parent_record=fallback,
                 earliest_start_ns=self._last_call_end_ns,
             )
             self._open_tools[tool_id] = open_tool
@@ -719,7 +728,7 @@ class PiSpanRecorder:
         if parent is None and open_tool.parent_id is not None:
             # The parent did not start yet (damaged order): wait for it. (The
             # same id as its own is the id of the next call with that id.)
-            self._orphan_tools.append((open_tool.parent_id, record))
+            self._orphan_tools.append((open_tool.parent_id, record, open_tool.fallback_parent_record))
 
     def _register_tool_record(self, tool_id: str, record: SpanRecord) -> None:
         """Make ``record`` the latest tool record of ``tool_id``, and the parent of the calls waiting for it.
@@ -732,8 +741,9 @@ class PiSpanRecorder:
         for other in self._open_tools.values():
             if other.parent_record is None and other.parent_id == tool_id and other.record is not record:
                 other.parent_record = record
+                other.fallback_parent_record = None
         # A call that already ended is moved from the root under its parent.
-        adopted = [orphan for orphan_parent_id, orphan in self._orphan_tools if orphan_parent_id == tool_id]
+        adopted = [orphan for orphan_parent_id, orphan, _ in self._orphan_tools if orphan_parent_id == tool_id]
         if not adopted:
             return
         self._orphan_tools = [entry for entry in self._orphan_tools if entry[0] != tool_id]
@@ -745,6 +755,33 @@ class PiSpanRecorder:
             self._attach(record, orphan)
         # The parent was running while its children ran.
         record.start_ns = min([record.start_ns, *(orphan.start_ns for orphan in moved)])
+
+    def _parent_at_start(self, parent_id: str | None) -> tuple[SpanRecord | None, SpanRecord | None]:
+        """Return ``(parent, fallback)`` for a call that names ``parent_id`` when it starts.
+
+        The parent is the latest record with that id while it is still open. If that record has ended, a later
+        record with the same id can still be the parent (pi reuses ids, and records can come out of order), so the
+        call waits for it, and the ended record is only the fallback for the end of the run.
+        """
+        if parent_id is None:
+            return None, None
+        latest = self._tool_records.get(parent_id)
+        if latest is None:
+            return None, None
+        open_tool = self._open_tools.get(parent_id)
+        if open_tool is not None and open_tool.record is latest:
+            return latest, None
+        return None, latest
+
+    def _resolve_orphans(self) -> None:
+        """At the end of the run, put the calls that waited for a parent under the ended record they named."""
+        waiting, self._orphan_tools = self._orphan_tools, []
+        for _parent_id, record, fallback in waiting:
+            if fallback is None or fallback is record or self._is_ancestor(record, fallback):
+                continue
+            self.records = [item for item in self.records if item is not record]
+            self._attach(fallback, record)
+            fallback.start_ns = min(fallback.start_ns, record.start_ns)
 
     def _attach(self, parent: SpanRecord, child: SpanRecord) -> None:
         parent.children.append(child)
@@ -892,6 +929,7 @@ class PiSpanRecorder:
         """Send the recorded spans as children of the active span. Never raises."""
         if not getattr(llmobs, "enabled", False):
             return
+        self._resolve_orphans()
         for record in sorted(self.records, key=lambda item: item.start_ns):
             with contextlib.suppress(Exception):
                 _cover_children(record)

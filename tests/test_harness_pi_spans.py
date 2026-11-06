@@ -814,6 +814,7 @@ class TestTools:
             collector.feed(event)
             recorder.feed(event, received_ns=_ns(T0_MS + at_ms))
         recorder.close(received_ns=_ns(T0_MS + 99))
+        collector.result(model=MODEL, returncode=0, stderr_tail="")  # Settles the parents that wait for an id.
         expected = {
             execution.tool_id: (execution.parent.tool_id if execution.parent is not None else None)
             for execution in collector.tool_executions
@@ -884,8 +885,54 @@ class TestTools:
                 (3, _tool_end("c", parent="p")),
             ],
         )
+        recorder.close(received_ns=_ns(T0_MS + 4))  # No other record with the id came: p is the parent.
         [parent] = recorder.records
         assert [child.metadata["tool_id"] for child in parent.children] == ["c"]
+
+    def test_nested_call_that_comes_before_the_next_use_of_a_parent_id(self):
+        """The id "x" is used twice. A nested call names "x" after the first use ended: it waits for the second."""
+        from airedale.harness.pi import _PiEventCollector
+
+        events = [
+            (1, _tool_start("x", "first")),
+            (2, _tool_end("x")),
+            (3, _tool_start("kid", "kid", "x")),
+            (4, _tool_end("kid", parent="x")),
+            (5, _tool_start("x", "second")),
+            (6, _tool_end("x")),
+        ]
+        collector, recorder = _PiEventCollector(), _recorder()
+        for at_ms, event in events:
+            collector.feed(event)
+            recorder.feed(event, received_ns=_ns(T0_MS + at_ms))
+        recorder.close(received_ns=_ns(T0_MS + 9))
+        collector.result(model=MODEL, returncode=0, stderr_tail="")
+        by_name = {execution.tool_name: execution for execution in collector.tool_executions}
+        assert by_name["kid"].parent is by_name["second"]
+        first, second = recorder.records
+        assert (first.name, second.name) == ("first", "second")
+        assert first.children == []
+        assert [child.name for child in second.children] == ["kid"]
+
+    def test_nested_call_after_the_end_of_a_parent_id_that_is_not_used_again(self):
+        from airedale.harness.pi import _PiEventCollector
+
+        events = [
+            (1, _tool_start("x", "first")),
+            (2, _tool_end("x")),
+            (3, _tool_start("kid", "kid", "x")),
+            (4, _tool_end("kid", parent="x")),
+        ]
+        collector, recorder = _PiEventCollector(), _recorder()
+        for at_ms, event in events:
+            collector.feed(event)
+            recorder.feed(event, received_ns=_ns(T0_MS + at_ms))
+        recorder.close(received_ns=_ns(T0_MS + 9))
+        collector.result(model=MODEL, returncode=0, stderr_tail="")
+        by_name = {execution.tool_name: execution for execution in collector.tool_executions}
+        assert by_name["kid"].parent is by_name["first"]  # No other use of "x": the ended one is the parent.
+        [first] = recorder.records
+        assert [child.metadata["tool_id"] for child in first.children] == ["kid"]
 
     def test_end_only_call_keeps_its_parent_metadata(self):
         recorder = _feed(_recorder(), [(1, _tool_end("x", parent="y"))])
