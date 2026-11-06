@@ -1017,6 +1017,54 @@
     ]
    }
   },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nm: &a [!!omap [*a]]\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nm: &a {o: !!omap [*a]}\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nm: &a {o: !!pairs [*a]}\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nm: &a {x: 1}\\no: !!omap [*a]\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
   "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nm: &m [*m, *m]\\n---\\n\"}": {
    "1.4.0": {
     "names": [
@@ -1066,6 +1114,18 @@
    }
   },
   "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nm: {x: 1}\\nn: {x: 2}\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nmetadata: &a {b: &b {o: !!omap [*a, *b]}}\\n---\\n\"}": {
    "1.4.0": {
     "names": [
      "alpha"

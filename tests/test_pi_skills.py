@@ -144,6 +144,14 @@ FILES = [
     ("alias key replaces the name with a number", "---\n&k name: alpha\n*k : 5\ndescription: d\n---\n"),
     ("alias key with the same string value", "---\n&k name: alpha\n*k : alpha\ndescription: d\n---\n"),
     ("alias key of another key", "---\n&k other: x\n*k : y\nname: alpha\ndescription: d\n---\n"),
+    (
+        "omap of aliases to open mappings",
+        "---\nname: alpha\ndescription: d\nmetadata: &a {b: &b {o: !!omap [*a, *b]}}\n---\n",
+    ),
+    ("omap of an alias to an open mapping", "---\nname: alpha\ndescription: d\nm: &a {o: !!omap [*a]}\n---\n"),
+    ("pairs of an alias to an open mapping", "---\nname: alpha\ndescription: d\nm: &a {o: !!pairs [*a]}\n---\n"),
+    ("omap of an alias to a finished mapping", "---\nname: alpha\ndescription: d\nm: &a {x: 1}\no: !!omap [*a]\n---\n"),
+    ("omap of an alias to an open sequence", "---\nname: alpha\ndescription: d\nm: &a [!!omap [*a]]\n---\n"),
     ("non-ascii", "---\nname: alphä\ndescription: d\n---\n"),
     ("long key", "---\n? " + "k" * 2000 + "\n: v\nname: alpha\ndescription: d\n---\n"),
 ]
@@ -166,6 +174,9 @@ UNSUPPORTED = {
     "tab after a dash in a value",
     "tab after a question mark in a value",
     "tab between two sequence indicators",
+    "omap of aliases to open mappings",
+    "omap of an alias to an open mapping",
+    "pairs of an alias to an open mapping",
     "tab after an anchor",
     "tab after a tag",
 }
@@ -343,4 +354,14 @@ def test_alias_key_that_nulls_the_name_gives_the_directory_name(tmp_path):
             tmp_path,
             "---\nname: other\ndescription: d\n---\n",
             "---\n&k name: alpha\n*k : null\ndescription: d\n---\n",
+        )
+
+
+def test_omap_of_open_mappings_stops_the_run(tmp_path):
+    # Pi loads this skill as "alpha". The reader can not tell if the ordered map is valid, so it does not skip the skill.
+    with pytest.raises(UnsupportedFrontmatterError, match="open mapping"):
+        _collision(
+            tmp_path,
+            "---\nname: alpha\ndescription: d\n---\n",
+            "---\nname: alpha\ndescription: d\nmetadata: &a {b: &b {o: !!omap [*a, *b]}}\n---\n",
         )

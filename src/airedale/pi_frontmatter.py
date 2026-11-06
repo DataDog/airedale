@@ -57,6 +57,8 @@ _YAML_STR_TAG = _YAML_PREFIX + "str"
 #: Tags of scalars that are not strings and are not in the core schema (pi knows them).
 _YAML_NON_STRING_TAGS = frozenset(_YAML_PREFIX + name for name in ("binary", "timestamp", "merge"))
 _SET_TAG, _OMAP_TAG, _PAIRS_TAG = _YAML_PREFIX + "set", _YAML_PREFIX + "omap", _YAML_PREFIX + "pairs"
+#: ``pairs`` of a mapping that is not finished (an alias refers to it from inside).
+_UNFINISHED = -1
 #: How many tabs the reader places before it gives up.
 _MAX_TAB_REPAIRS = 1000
 
@@ -212,7 +214,7 @@ def _top_level_strings(text: str) -> dict[str, str]:
             stack.append(_Frame(kind, event.tag, event.anchor))
             if event.anchor:
                 # An alias inside the collection can refer to it (``&m [*m]``): the anchor exists from the start.
-                anchors[event.anchor] = ("mapping", (0, None)) if kind == "mapping" else ("sequence", None)
+                anchors[event.anchor] = ("mapping", (_UNFINISHED, None)) if kind == "mapping" else ("sequence", None)
             continue
         if isinstance(event, MappingEndEvent | SequenceEndEvent):
             frame = stack.pop()
@@ -282,6 +284,9 @@ def _finish_collection(frame: _Frame) -> Node:
             key: Node | None = item
             if item[0] == "mapping":
                 pairs, first_key = item[1]
+                if pairs == _UNFINISHED:
+                    # An alias to a mapping that is still open (``&a {o: !!omap [*a]}``): its pairs are not known yet.
+                    raise UnsupportedFrontmatterError("an ordered map or pairs list holds an alias to an open mapping")
                 if pairs > 1:
                     raise YAMLError("Each pair must have its own sequence indicator")
                 key = first_key if first_key is not None else ("null", None)
