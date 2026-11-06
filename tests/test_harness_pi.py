@@ -126,6 +126,24 @@ class TestUsageFromPi:
         assert usage.reasoning_output_tokens == 4
         assert usage.estimated_cost_usd == pytest.approx(0.0009)
 
+    @pytest.mark.parametrize("digits", [400, 5000])
+    def test_collector_does_not_raise_for_a_cost_above_the_float_range(self, digits):
+        """A record through ``feed_line`` (the path of the real run): damaged usage, no exception, no cost of 0."""
+        events = _events_tool_run()
+        line_of = lambda event: json.dumps(event).encode() + b"\n"  # noqa: E731
+        collector = _PiEventCollector()
+        for event in events:
+            line = line_of(event)
+            if event.get("type") == "message_end" and event["message"].get("role") == "assistant":
+                line = line.replace(b'"total": 0.005', b'"total": 1' + b"0" * digits)
+            collector.feed_line(line)  # Must not raise.
+        result = collector.result(model=MODEL, returncode=0, stderr_tail="")
+        assert result.error is not None
+        # (400 digits: a record that is damaged usage; 5000 digits: Python cannot even parse it, a malformed record.)
+        assert "damaged token usage" in str(result.error) or "malformed JSONL" in str(result.error)
+        # The record is not counted: the cost is not replaced by 0 for a call that holds a cost.
+        assert collector.usage.estimated_cost_usd == pytest.approx(0.001)
+
     def test_cost_above_the_float_range_is_damaged_and_does_not_raise(self):
         usage = {"input": 1, "output": 1, "cost": {"total": 10**400}}
         assert not is_valid_pi_usage(usage)
