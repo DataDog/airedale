@@ -237,6 +237,9 @@ class TestPerRunWorkspaces:
         # Experiments can compare scenarios against each other.
         assert captured_experiment_kwargs["tags"]["prompt_version"] == "s1"
         assert captured_experiment_kwargs["config"]["prompt_version"] == "s1"
+        # The harness (native / pi) is part of the experiment data.
+        assert captured_experiment_kwargs["tags"]["harness"] == "native"
+        assert captured_experiment_kwargs["config"]["harness"] == "native"
 
         assert workspace_entries == runs
         assert len(constructed_cwds) == runs

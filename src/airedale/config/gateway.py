@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -24,6 +25,12 @@ class ProviderGatewayConfig:
     credentials_helper: str | None = None
     api_key_env: str | None = None
     headers: dict[str, str] | None = None
+    #: Extra pi model definitions for this provider (pi ``models.json``
+    #: ``models`` entries, passed through as-is). Pi already knows the details
+    #: (context window, output limit, cost, ...) of the models in its built-in
+    #: catalog; use this only for a model the catalog does not have, or to
+    #: replace a catalog entry. Only the pi harness reads it.
+    pi_models: tuple[dict[str, Any], ...] = ()
 
     def __post_init__(self) -> None:
         """Validate that headers is not None."""
@@ -42,6 +49,58 @@ class GatewayConfig:
         return self.providers.get(provider)
 
 
+def _parse_pi_models(provider: str, raw: Any) -> tuple[dict[str, Any], ...]:
+    """Validate ``pi_models``: a list of tables, each with a non-empty string ``id``."""
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise ConfigError(
+            f"Provider '{provider}' 'pi_models' must be an array of tables ([[providers.{provider}.pi_models]])"
+        )
+    models: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            raise ConfigError(f"Provider '{provider}' 'pi_models[{index}]' must be a table")
+        model_id = entry.get("id")
+        if not isinstance(model_id, str) or not model_id.strip():
+            raise ConfigError(f"Provider '{provider}' 'pi_models[{index}]' must set a non-empty string 'id'")
+        if model_id in seen:
+            raise ConfigError(f"Provider '{provider}' 'pi_models' defines model '{model_id}' more than once")
+        seen.add(model_id)
+        _check_json_value(entry, f"Provider '{provider}' 'pi_models[{index}]'")
+        models.append(dict(entry))
+    return tuple(models)
+
+
+def _check_json_value(value: Any, where: str) -> None:
+    """Raise :class:`ConfigError` unless ``value`` is made only of values that JSON can hold.
+
+    A ``pi_models`` entry is written as it is to the ``models.json`` of pi. TOML also has dates and times, which
+    JSON has not (and ``inf`` and ``nan``, which are not valid JSON).
+    """
+    stack: list[tuple[Any, str]] = [(value, where)]
+    while stack:
+        item, path = stack.pop()
+        if isinstance(item, bool | str | int):
+            continue
+        if isinstance(item, float):
+            if not math.isfinite(item):
+                raise ConfigError(f"{path} must be a finite number for JSON, not {item!r}")
+        elif isinstance(item, dict):
+            for key, child in item.items():
+                if not isinstance(key, str):
+                    raise ConfigError(f"{path} has a key that is not a string: {key!r}")
+                stack.append((child, f"{path}.{key}"))
+        elif isinstance(item, list):
+            stack.extend((child, f"{path}[{index}]") for index, child in enumerate(item))
+        else:
+            raise ConfigError(
+                f"{path} has a {type(item).__name__} value, which JSON cannot hold "
+                "(TOML dates and times are not allowed here); use a string or a number"
+            )
+
+
 def _parse_provider(name: str, config: dict[str, Any]) -> ProviderGatewayConfig:
     """Parse provider gateway config from TOML data."""
     return ProviderGatewayConfig(
@@ -50,6 +109,7 @@ def _parse_provider(name: str, config: dict[str, Any]) -> ProviderGatewayConfig:
         credentials_helper=config.get("credentials_helper"),
         api_key_env=config.get("api_key_env"),
         headers=config.get("headers") or {},
+        pi_models=_parse_pi_models(name, config.get("pi_models")),
     )
 
 
@@ -67,7 +127,7 @@ def load_gateway(path: str | Path) -> GatewayConfig:
     if "providers" in data:
         for provider_name, provider_config in data["providers"].items():
             # Check for unknown provider keys
-            known_provider_keys = {"base_url", "credentials_helper", "api_key_env", "headers"}
+            known_provider_keys = {"base_url", "credentials_helper", "api_key_env", "headers", "pi_models"}
             unknown_provider_keys = set(provider_config.keys()) - known_provider_keys
             if unknown_provider_keys:
                 raise ConfigError(

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import textwrap
 from pathlib import Path
 
@@ -144,3 +145,73 @@ class TestProviderGatewayConfig:
     def test_headers_none_becomes_empty_dict(self):
         p = ProviderGatewayConfig(provider="anthropic", headers=None)
         assert p.headers == {}
+
+
+class TestPiModels:
+    def test_pi_models_parsed(self, tmp_path):
+        config = load_gateway(
+            write_toml(
+                tmp_path,
+                """
+                [providers.anthropic]
+                base_url = "https://gw"
+
+                [[providers.anthropic.pi_models]]
+                id = "claude-next"
+                contextWindow = 200000
+                cost = { input = 3, output = 15, cacheRead = 0.3, cacheWrite = 3.75 }
+                """,
+            )
+        )
+        anthropic = config.get("anthropic")
+        assert anthropic is not None
+        (model,) = anthropic.pi_models
+        assert model["id"] == "claude-next"
+        assert model["contextWindow"] == 200000
+        assert anthropic.pi_models
+
+    def test_json_values_of_every_kind_are_accepted(self, tmp_path):
+        config = load_gateway(
+            write_toml(
+                tmp_path,
+                """
+                [[providers.openai.pi_models]]
+                id = "a"
+                reasoning = true
+                contextWindow = 1000
+                cost = { input = 1.5, output = 2 }
+                input = ["text", "image"]
+                compat = { nested = { list = [1, "x", false] } }
+                """,
+            )
+        )
+        provider = config.get("openai")
+        assert provider is not None
+        json.dumps(provider.pi_models)  # JSON can hold the whole entry.
+
+    def test_default_is_empty(self, tmp_path):
+        config = load_gateway(write_toml(tmp_path, '[providers.openai]\nbase_url = "https://gw"\n'))
+        openai = config.get("openai")
+        assert openai is not None
+        assert openai.pi_models == ()
+
+    @pytest.mark.parametrize(
+        ("body", "message"),
+        [
+            ('pi_models = "x"', "array of tables"),
+            ("pi_models = [1]", "must be a table"),
+            ("[[providers.openai.pi_models]]\nname = 'no id'", "non-empty string 'id'"),
+            ("[[providers.openai.pi_models]]\nid = 'a'\n[[providers.openai.pi_models]]\nid = 'a'", "more than once"),
+            # TOML dates and times, anywhere in the entry, and numbers that JSON does not have.
+            ("[[providers.openai.pi_models]]\nid = 'a'\nreleased = 2026-01-02", "date value"),
+            ("[[providers.openai.pi_models]]\nid = 'a'\nat = 07:30:00", "time value"),
+            ("[[providers.openai.pi_models]]\nid = 'a'\nat = 2026-01-02T07:30:00Z", "datetime value"),
+            ("[[providers.openai.pi_models]]\nid = 'a'\ncost = { input = 1, when = 2026-01-02 }", r"cost\.when"),
+            ("[[providers.openai.pi_models]]\nid = 'a'\nlist = [1, [2026-01-02]]", r"list\[1\]\[0\]"),
+            ("[[providers.openai.pi_models]]\nid = 'a'\ncost = { input = inf }", "finite number"),
+            ("[[providers.openai.pi_models]]\nid = 'a'\ncost = { input = nan }", "finite number"),
+        ],
+    )
+    def test_invalid_pi_models(self, tmp_path, body, message):
+        with pytest.raises(ConfigError, match=message):
+            load_gateway(write_toml(tmp_path, "[providers.openai]\n" + body + "\n"))

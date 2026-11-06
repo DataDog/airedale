@@ -27,6 +27,7 @@ dependencies = [
     "mcp==1.30.0",
     "httpx==0.28.1",
     "rich==15.0.0",
+    "ruamel-yaml==0.18.15",
 ]
 
 [dependency-groups]

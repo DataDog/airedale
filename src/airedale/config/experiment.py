@@ -29,6 +29,14 @@ def _is_localhost_url(url: str) -> bool:
         return False
 
 
+#: Scenario ``harness`` values. ``native`` selects the engine from the model
+#: provider (Claude Agent SDK for ``anthropic``, Codex for ``openai``); ``pi``
+#: runs every model of the scenario through the pi coding agent.
+HARNESS_NATIVE = "native"
+HARNESS_PI = "pi"
+HARNESSES = (HARNESS_NATIVE, HARNESS_PI)
+
+
 @dataclass(frozen=True)
 class McpServerConfig:
     """Configuration for an MCP server in a scenario.
@@ -165,6 +173,7 @@ class ScenarioConfig:
     effort: str | None = None
     mcp_servers: tuple[McpServerConfig, ...] = ()
     workdir: WorkdirConfig | None = None
+    harness: str = HARNESS_NATIVE
 
 
 @dataclass(frozen=True)
@@ -232,6 +241,7 @@ class ExperimentConfig:
 
 
 _SCENARIO_KEYS = {
+    "harness",
     "description",
     "system_prompt",
     "skills",
@@ -242,6 +252,7 @@ _SCENARIO_KEYS = {
     "workdir",
 }
 _DEFAULTS_KEYS = {
+    "harness",
     "max_turns",
     "effort",
     "system_prompt",
@@ -501,6 +512,10 @@ def _parse_scenario(
     max_turns = config.get("max_turns") or defaults.get("max_turns")
     effort = config.get("effort") or defaults.get("effort")
 
+    harness = config["harness"] if "harness" in config else defaults.get("harness", HARNESS_NATIVE)
+    if harness not in HARNESSES:
+        raise ConfigError(f"{where} has unknown harness {harness!r}; expected one of: {', '.join(HARNESSES)}")
+
     # Scenario workdir wins entirely over the [defaults] workdir (no merge).
     workdir_raw = config["workdir"] if "workdir" in config else defaults.get("workdir")
     workdir = _parse_workdir(name, workdir_raw, config_dir=config_dir) if workdir_raw is not None else None
@@ -515,6 +530,7 @@ def _parse_scenario(
         effort=effort,
         mcp_servers=mcp_servers,
         workdir=workdir,
+        harness=harness,
     )
 
 

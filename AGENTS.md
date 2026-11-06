@@ -39,13 +39,31 @@ The model provider selects the execution engine:
 | `anthropic` | `claude-agent-sdk` (Claude Code)        |
 | `openai`    | `openai-codex` (Codex)                  |
 
+A scenario can set `harness = "pi"` (default `"native"`, which is the table
+above). Then every model of that scenario runs through the **pi** coding agent
+(`pi --mode json` subprocess, `harness/pi.py`), for both providers. Pi has no
+Python API and no ddtrace integration. It gets the same outer `@agent` span as
+Codex, but its children are more detailed: the pi JSON stream shows each step
+while it runs, so `harness/pi_spans.py` makes one `llm` span for each model
+call, one `tool` span for each tool execution (nested tool calls are children
+of the tool that made them) and one `task` span for each compaction, all with
+their real start and end times. When LLMObs is enabled, pi also loads the
+collector extension `harness/pi_llmobs_extension.ts` (`-e`). It adds the
+request time, the time to the first response byte, the HTTP status, the request
+ID and the pi messages of each model request to the stream (as
+`entry_appended` records; limits in the `pi_spans.py` docstring). The extension
+does not make spans and does not send data out of pi: Python makes all the
+spans. Its data comes from the pi process (repo code can write the same
+entries), so it is validated, limited, and used for telemetry only.
+
 MCP servers and skills are passed **natively** to these SDKs — we do NOT
 reimplement a tool-calling loop. This is what enables:
 
 - **Skills & subagents** support (both SDKs consume the open SKILL.md format).
 - **Native LLMObs spans** for Claude (the ddtrace integration owns its spans);
-  **decorator spans** (`@agent` / `@llm`) for Codex, which has no native
-  integration.
+  **decorator spans** (`@agent` / `@llm`) for Codex and pi, which have no native
+  integration (shared in `harness/base.py` `DecoratorSpanAgentRunner`; pi
+  overrides `_run_model_calls` to make one `llm` span per model call).
 - **Distributed tracing for complete token counting:** before each run we call
   `LLMObs.inject_distributed_headers(...)` and merge the resulting headers into
   the HTTP headers sent to MCP servers. When the MCP server is itself
@@ -129,6 +147,7 @@ effort = "medium"       # reasoning effort hint passed to the SDKs
 # reference shared skills / MCP servers BY NAME (no inline definitions).
 [scenarios.fat-mcp]
 description = "Full MCP orchestrator tool"
+# harness = "pi"                      # optional; "native" (default) | "pi" (pi coding agent for every model)
 system_prompt = "..."                 # optional; appended to the base system prompt
 skills = ["apm"]                      # optional; names from the [skills] registry
 # allowed_builtin_tools omitted -> ALL built-in tools allowed.
@@ -177,7 +196,9 @@ Notes:
   copy-paste. A scenario naming a skill/server absent from the registry is a
   `ConfigError`. Inline `[scenarios.<name>.mcp_servers.<x>]` tables and raw skill
   paths inside a scenario are rejected.
-- `[defaults]` may set `max_turns`, `effort`, `system_prompt`, `skills`,
+- `harness` (scenario or `[defaults]`): `"native"` (default; engine selected
+  from the model provider) or `"pi"`. Any other value is a `ConfigError`.
+- `[defaults]` may set `harness`, `max_turns`, `effort`, `system_prompt`, `skills`,
   `allowed_builtin_tools`, and `mcp_servers`. When a scenario sets one of these,
   its value replaces the default **entirely** — lists/tables are never merged.
 - `system_prompt` is optional on both scenarios and `[defaults]`; when present it
@@ -191,7 +212,13 @@ Notes:
   In code this is the `None`-vs-`()`-vs-tuple distinction on
   `ScenarioConfig.allowed_builtin_tools`. For Claude (`dontAsk` permission mode)
   the "all" case pre-approves the full `CLAUDE_BUILTIN_TOOLS` set; for Codex the
-  field is informational only (Codex does not gate built-ins on it).
+  field is informational only (Codex does not gate built-ins on it). For pi the
+  list becomes `--tools` (Claude names such as `Read`/`Glob` are mapped to the pi
+  tools `read`/`find`; "all" = `PI_BUILTIN_TOOLS`), plus `mcp__*` when any MCP
+  server exists, because pi declares an MCP tool only when `--tools` matches it.
+  `mcp__*` matches pi's real names (pi shortens long names and adds a hash on
+  collisions); the scenario `tool_names` allow-list is enforced by
+  `toolExposure` (`hidden` + `direct`) in the generated `mcp.json`.
 - A scenario need not reference any MCP server — scenarios with no MCP servers
   are valid (model answers from skills/builtins only).
 - `type` is optional; when omitted it is inferred ("http" if `url` is set,
@@ -236,6 +263,121 @@ Notes:
     keeps working without inheriting the global `config.toml`. A repo-scoped
     `<cwd>/.codex/config.toml` is **not** read by Codex for MCP servers
     (verified), so there is no Codex project MCP discovery.
+  - **Pi hermeticity.** Pi reads all user-level config (settings, packages,
+    extensions, `mcp.json`, `models.json`, skills, `AGENTS.md`, `auth.json`)
+    from its agent dir (default `~/.pi/agent`). `PiRunner` **always** sets
+    `PI_CODING_AGENT_DIR` to a fresh private temp dir **outside** `cwd`
+    (removed after the run; a temp parent inside `cwd`, for example from
+    `TMPDIR`/`TEMP`/`TMP`, also through a symlink or another letter case, is
+    skipped for the system
+    temp dirs or the home dir, else the run fails) that holds only the generated `settings.json`,
+    `models.json`, `mcp.json`, the appended system prompt and — only without
+    gateway/env auth — a **copy** of the operator's pi `auth.json`. Pi runs with
+    `--no-session`, `--no-skills` (blocks `~/.agents/skills` and `.agents/skills` above
+    `cwd`; passed with `--skill`, in pi's precedence order: scenario skills,
+    the `skills` paths of `<cwd>/.pi/settings.json`, the `<cwd>/.pi/skills`
+    root (pi's directory loader has the rules of its discovery), then the
+    skill files that pi's discovery finds in `<cwd>/.agents/skills`
+    (`airedale.skills._pi_skill_entries`); collisions use the frontmatter
+    `name`, as pi does. The frontmatter is cut and parsed as pi does it
+    (`airedale.pi_frontmatter`): YAML 1.2 (`ruamel.yaml` for the syntax, with the
+    core-schema scalar rules of the `yaml` package that pi uses, so `yes`, `1_000` and
+    dates are strings and `0xff` is a number), checked over the whole document:
+    a repeated key at any depth, `!!set` with a value that is not null, and `!!omap` /
+    `!!pairs` with a bad item make pi skip the skill (an alias item in `!!omap` / `!!pairs` makes `pi_skill_dirs` raise
+    `UnsupportedFrontmatterError`: the reader does not copy how the package reads it); numbers are keys of the same value
+    when JavaScript says so. Skill discovery follows directory symlinks as pi does (checked in 1.4.0 and 1.5.0), loads a file once by its real path (a link to a skill already loaded is not a collision) and does not enter a directory that is above it. `tests/test_pi_skills.py` compares this with the installed
+    pi releases. A tab is read exactly or not at all: tabs after `:`, before a
+    comment or `:`, at the end of a line, and after a `-` or `?` that the scanner reads as an indicator are
+    white space and are placed (not in the continuation line of a plain value); any
+    other tab that the parser rejects (inside a plain value, as indentation) makes
+    `pi_skill_dirs` raise `UnsupportedFrontmatterError`, because a tab that is read as a space could
+    hide a name collision. Not reproduced: ignore files in `.agents/skills`, and
+    the `!`/`+`/`-` filters of the settings `skills` list),
+    `--approve` (project `.pi/` files are honored), `--no-context-files` (pi
+    would read `AGENTS.md`/`CLAUDE.md` of every parent dir of `cwd`; the
+    `cwd` file, chosen in pi's order with `AGENTS.override.md` first, is
+    appended to the system prompt in pi's `project_context` format) and
+    `PI_OFFLINE=1`. Parent
+    `PI_*` session variables are removed from the env. Pi does not read
+    `.mcp.json`; it reads `<cwd>/.pi/mcp.json` itself and merges it over the
+    scenario servers. `airedale.pi_mcp_config` translates this merge and pi's validation of
+    each entry (pi 1.4.0 and 1.5.0; `tests/test_pi_mcp.py` compares both with
+    the installed pi releases when they are there). A run raises when the repo
+    file would replace or change a scenario server (a definition, an override
+    such as `"enabled": false`, a BOM is allowed); an entry that pi rejects
+    (invalid, or a name that differs only in `-`/`_`) is no collision, and `{}`
+    is a no-op override. The guard **fails closed**: the scenario entries it
+    compares with are the ones written for pi, with the trace headers of the
+    run (a repo entry that repeats a server replaces it, and drops the
+    headers); an explicit `"type": null` is not a missing type; the URLs are read
+    like JavaScript's `URL` (`airedale.whatwg_url`: tabs and newlines removed,
+    `127.1` is `127.0.0.1`), and a host that the reader cannot decide in every
+    detail (any non-ASCII host: IDNA removes and maps characters, odd IPv6) counts as accepted by pi, whatever else
+    fails in it (only an ASCII character that no mapping removes, such as a space, is a sure failure).
+    Two scenario servers whose names differ only in `-`/`_` also raise (pi
+    would run only one). `allowed_builtin_tools` is the complete `--tools`
+    list for pi (plus `mcp__*` and pi's MCP resource tools when MCP servers are present; the resources of a server with a `tool_names` allow-list stay unavailable, as it is `hidden`; on Windows the all-tools default also has `powershell`): a repo extension tool is declared only when
+    the scenario names it. Nested tool calls (`parentToolCallId`, for example
+    from `codemode`) are in `tool_calls` after the model call that made them,
+    in start order (each one after its own parent), with `parent_tool_id`; `usage` session entries (`entry_appended`, for example
+    cache warming) count in the run usage. A run fails when any model call (assistant message) has no
+    usable `usage` record (`airedale.types.is_valid_pi_usage`: an object with `input`
+    and `output`, counts that are finite whole numbers >= 0, a `cost.total` that
+    is there, finite and >= 0; pi 1.4.0 and 1.5.0 always write it, 0 for a model with an unknown price), even if the run total is not zero. A `usage` that is
+    present in a tool result or a compaction result must be usable too (a
+    compaction result or a tool result can have none); a `usage` entry must have a
+    usable `usage`. A `message_end` record without a `message` object, or whose message has no non-empty string `role` (pi always writes both; custom role names are fine), is malformed too. The stderr tail of pi goes into errors, logs and spans only after the known credentials are removed (the gateway token and key and the provider key variables, whatever their length; the value of any variable with a name like KEY, TOKEN, SECRET, PASSWORD, CREDENTIAL or AUTH, from 6 characters; `Bearer <token>` of any length, and a secret cut by the window (only when the window really dropped the start of the output, and a complete secret at the start wins over a cut match that is not longer), also inside a UTF-8 character, matched before any value is replaced; all of it on the raw bytes, before any decoding or stripping, and never raising (a secret with an unpaired surrogate or a non-UTF-8 environment byte is matched in every form: UTF-8, surrogate-passed, original bytes, U+FFFD, JSON `\\uXXXX`), so a PEM key keeps its final newline when it is matched; also the header values of the gateway and of the scenario MCP servers and the environment values of those servers (under a name like a secret: any length; others: from 8 characters), and every long string, and every string under a key like key, token, access or refresh, in the copied `auth.json` and in the file it came from; `_redact_secrets`). A `tool_execution_start` or `tool_execution_end` record whose `toolCallId` or `toolName` is not a string, whose `parentToolCallId` (when there) is not a string, or whose `isError` is not a boolean (required on an end record: a failed tool must not read as a success), or whose `durationMs` (when there) has the wrong type, is malformed (it is not read as the empty id, as no parent or as a success) and is not given to the spans. An `agent_settled` record whose `aborted` is missing or not a boolean (pi always writes a boolean) is malformed and does not settle the run. A stdout record is parsed like `JSON.parse` (`airedale.js_json`): `NaN` and `Infinity` make it malformed, and an integer is the nearest double (`9007199254740993` is `9007199254740992`), and above the range of a double it is `Infinity`. A stdout record that is not valid UTF-8 counts as a malformed record (it is not decoded with replacement characters) and fails the run. An assistant message whose `content` is not a list (`null`, no field, a string), or has a block that is not a text (`text` string), thinking (`thinking` string) or toolCall (`id` and `name` strings, `arguments` object) block of pi-ai, is damaged and fails the run; `content: []` is a valid response. A final response with no text is valid and gives an empty answer (the diagnostic text is only for a run with no final message). `total_tokens` is always the sum of the parts (`input`, `output`, `cacheRead`, `cacheWrite`), whatever the `totalTokens` of pi says: pi writes it in other ways for other APIs (the provider's total for OpenAI Responses and Google, no cache for Bedrock), and a different value is not an error; the field must only be a valid count. A zero record is data: a run whose records are all valid and all zero succeeds (pi has no generic check of the total). Parallel calls of one turn with the same id (even "") are open together and pi ends them in the order of completion, so their results can not be matched: the run fails. Pi can reuse a `toolCallId` (even
+    ""): the collector keeps each execution, binds the n-th transcript call
+    with an id to the n-th top-level execution (no `parentToolCallId`) with that id, and gives a nested call to
+    the latest execution with the parent id at its start if that one is still open; if it has ended, the call waits for the next execution with that id, and
+    only at the end of the run takes the ended one (the span recorder does the same: `close()`). A call of a response with
+    `stopReason` `error` or `aborted` (pi runs no tool for it, and may retry with the same
+    ids) takes no execution and shows "tool did not run".
+    A reported URL has only scheme, host and port (read with `airedale.whatwg_url`); when the reader is not sure about the host (non-ASCII, odd IPv6) or cannot read the URL, it is reported as `<redacted>`. Project `.pi/mcp.json` servers that pi loads (valid, not `enabled: false`; read once at the start of the run, so a task that edits the file changes nothing) are also listed in
+    the span metadata and the agent manifest (`PiRunner._reported_mcp_servers`),
+    but they are not probed for tools, and they get no distributed-trace
+    headers: pi reads the repo file as it is, and a project entry replaces a
+    user-level entry with the same name, so the runner cannot add headers
+    without changing the evaluated repo (Codex does not use project servers
+    at all). Pi names MCP tools with a hash suffix
+    when long or when names of one server collide after sanitizing;
+    `pi_mcp_tool_names` reproduces this from the server's complete tool list
+    (the metadata probe keeps every tool for this), with JavaScript's UTF-16
+    rules (a character outside the BMP is two `_`). Tools of two servers can also
+    get the same name (`mcp__a__b__c` from server `a` / `b__c` and server `a__b` / `c`):
+    pi hashes the tool of the server that connects second, which the runner cannot
+    know. The local checks (a scenario server that pi rejects, which cannot be written or fails pi's own validation, or has a URL that the reader cannot decide exactly (strict: `validate_server_config(exact=True)`; the guard for repo entries keeps its fail-closed meaning); a repo entry that replaces a scenario server; tool names that can collide; a scenario skill whose name collides with a project skill) run before the metadata probe, which starts the stdio servers and calls the HTTP ones (`_check_before_probe`). A scenario with `tool_names` lists that can collide fails before pi starts
+    ("possible" collision: a list is an allow-list, hidden tools can change the
+    result; the check runs pi's registration loop for every connection order (`pi_registered_tool_names`), hash-suffixed names included, which pi does not check again; `pi_possible_tool_name_collisions`); for the probed tools of servers
+    without a list, `_mcp_tool_definitions` logs a warning and keeps the names.
+    Project `.pi/mcp.json` servers stay in the `--tools` selection
+    (`mcp__*`); their `codemode`-exposed tools need `codemode` in
+    `allowed_builtin_tools` (never added implicitly: it can call other models). `--approve` lets repo `.pi/extensions` run in-process with
+    the harness env — the same trust as Claude project hooks; evaluate only
+    trusted repos. The prompt is sent on **stdin** (pi reads `@path` argv
+    entries as files, even after `--`). A run fails unless pi settles and the
+    final assistant message has `stopReason == "stop"`; malformed JSONL also
+    fails it. The pi process group is always stopped and reaped (also on
+    cancellation — also a second one during cleanup — and when pi exits while a
+    child keeps stdout open; exit is detected from `returncode`, not
+    `process.wait()`, which can wait for the pipes). On Windows (no process
+    groups, no `os.killpg`) the runner stops the pi process tree with
+    `taskkill /PID <pid> /T /F`, then `TerminateProcess` if pi still runs.
+    Limit on Windows: when pi already exited, its children are not found and
+    keep running (a Job Object would be necessary).
+    The private agent dir is outside `cwd`, but pi's tools (`bash`, `read`
+    with an absolute path) run as the same OS user, and the pi env has
+    `PI_CODING_AGENT_DIR`, so a model command can read `models.json` /
+    `auth.json`. The other harnesses are at the same level: Claude's `Bash`
+    gets `ANTHROPIC_API_KEY` (airedale does not set
+    `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`) or can run the `apiKeyHelper`
+    command; Codex copies `auth.json` into `cwd` and its read-only sandbox
+    allows reads. Only an OS sandbox around tool execution blocks this. So
+    trust covers the model's commands too, not only the repo code.
+    Pi has no turn limit: the runner counts `turn_start` events and stops the
+    pi process group above `max_turns`. `effort` becomes `--thinking` when it
+    is a pi thinking level.
   - Filesystem paths in the config (`[skills]` entries, workdir local `repo`
     paths, `write.source`) resolve relative to `experiment.toml`'s directory.
     Command-style values (MCP `command`/`args`, gateway `credentials_helper`) are
@@ -260,6 +402,12 @@ headers = { source = "evals", "org-id" = "2", provider = "anthropic" }
 base_url = "https://ai-gateway.example.com/v1"
 credentials_helper = "mytool auth token --datacenter us1"
 headers = { source = "evals" }
+
+# Optional, pi harness only: extra pi model definitions (pi models.json
+# `models` entries, passed as-is) for a model not in pi's built-in catalog.
+# [[providers.openai.pi_models]]
+# id = "gpt-next"
+# contextWindow = 400000
 ```
 
 Resolution rules (`gateway.py`):
@@ -272,6 +420,20 @@ Resolution rules (`gateway.py`):
   settings (the SDK runs the helper itself with a TTL). For Codex, through config
   overrides (base URL + headers + bearer). For the judge (direct SDK clients), we
   run the helper ourselves and set `base_url` / `api_key` / `default_headers`.
+- For pi, the generated `models.json` changes pi's **built-in** provider of the
+  model (`baseUrl`, `headers`, `apiKey`; `authHeader = true` for a helper token
+  so it is sent as `Authorization: Bearer`). Pi's built-in catalog supplies the
+  model details (API, context window, output limit, cost), so no hardcoded model
+  list is needed; `pi_models` covers models outside the catalog (an entry must be made of values that JSON can hold: a TOML date or time, `inf` or `nan` is a `ConfigError` at load). Values are
+  escaped (`$$` / `$!`) because pi interpolates `$NAME` and runs `!command`. The
+  token is written to that private file, not to the pi env, and the
+  `api_key_env` variables of all gateway providers are removed from the pi env
+  (the native key variable of the evaluated provider, `ANTHROPIC_API_KEY` or
+  `OPENAI_API_KEY`, stays when there is no `base_url`: pi reads it to
+  authenticate). The key variable of the other provider is always removed,
+  and the one of the evaluated provider too when `models.json` has the
+  token (`PiRunner._dropped_provider_key_envs`). The runner fails
+  the run when pi reports a provider/model other than the requested one.
 
 ---
 
@@ -297,6 +459,11 @@ src/airedale/
   mcp.py                 McpServerSpec (from McpServerConfig); HTTP/stdio rendering for both SDKs;
                          merged_headers (static + trace); managed-server start/health;
                          tools/list metadata catalog; discover_claude_project_mcp_servers (.mcp.json)
+  js_json.py             JSON.parse rules for the files pi reads (huge integers are Infinity, NaN is an error)
+  pi_mcp_config.py       translation of pi's MCP config loader/validator (MIT, Mario Zechner: pi's notice, no Datadog header)
+  whatwg_url.py          reads URLs like JavaScript's URL (for the pi MCP guard; undecidable hosts count as accepted)
+  pi_mcp.py              uses it: which scenario servers a repo .pi/mcp.json changes, which servers it adds
+  pi_frontmatter.py      reads the YAML frontmatter of pi skills like pi does (core schema, unique keys, tabs exact or refused)
   skills.py              cross-provider skill staging (Claude + Codex) + collision guard;
                          discover_claude_skill_names (project skills allow-list)
   workdir.py             WorkspaceManager: clone-cache + git-worktree per-run workspaces;
@@ -305,9 +472,15 @@ src/airedale/
   harness/
     __init__.py          create_runner(model, *, scenario, gateway, cwd) -> AgentRunner;
                          merges scenario + project-discovered MCP servers (scenario wins)
-    base.py              AgentRunner protocol; AgentRunResult; AgentToolCall
+    base.py              AgentRunner protocol; AgentRunResult; AgentToolCall;
+                         DecoratorSpanAgentRunner (manual agent/llm/tool spans for Codex + pi)
     claude.py            claude-agent-sdk runner (native LLMObs; skills; MCP; gateway)
     codex.py             openai-codex runner (decorator spans; skills; MCP; gateway)
+    pi.py                pi coding-agent runner (`pi --mode json` subprocess; decorator spans;
+                         isolated agent dir; skills; MCP; gateway via built-in provider override)
+    pi_spans.py          PiSpanRecorder: pi events -> llm/tool/task spans with real times
+    pi_llmobs_extension.ts  pi extension (loaded with -e): request times, response
+                         details and request messages as `entry_appended` records
 
   scoring/
     __init__.py
@@ -407,8 +580,12 @@ def slugify(value: str) -> str: ...
 - **Prefer native integrations** (`integrations_enabled=True`); only add manual
   spans where a provider has no native integration. Concretely: Claude runs emit
   no synthetic agent/LLM/tool spans (the SDK integration owns them); Codex runs
-  are wrapped in `@agent` + `@llm` decorator spans and annotated with usage,
-  tool definitions, and I/O.
+  are wrapped in `@agent` + `@llm` decorator spans (plus one `tool` span per tool
+  call) and annotated with usage, tool definitions, and I/O. Pi runs get the
+  `@agent` span, then one `llm` span per model call, one `tool` span per tool
+  execution and one `task` span per compaction, sent after the run with the
+  times recorded while it ran (`span.start_ns` + `finish(finish_time=...)`).
+- The experiment `config` and tags also carry `harness` (`native` / `pi`).
 - Always `LLMObs.annotate(metrics=usage.to_llmobs_metrics(), ...)` on the active
   experiment span so token totals are complete even when the harness sees usage
   the integration didn't.
@@ -434,7 +611,12 @@ into each engine's discoverable location:
   so Codex discovers them by scope, and enable/approve via the thread `config`
   (`skill_approval`) so the non-interactive run may invoke them.
 
-Both engines consume the same SKILL.md package format, so a single configured
+- **Pi:** nothing is staged. `skills.pi_skill_dirs()` returns the scenario skill
+  dirs plus the project skills in `<cwd>/.pi/skills` and `<cwd>/.agents/skills`;
+  each is passed with `--skill` (pi runs with `--no-skills`). A scenario/project
+  name collision raises, as for the other engines.
+
+All engines consume the same SKILL.md package format, so a single configured
 directory is staged for whichever engine the model uses. Keep staging idempotent
 and confined to the per-run temp `cwd`.
 
@@ -489,6 +671,8 @@ here, including:
   real provider/LLMObs calls. Mock SDK clients and `LLMObs`. Cover: config TOML
   parsing & validation, gateway resolution, MCP spec rendering (Claude config &
   Codex overrides), `ModelSpec`/`UsageMetrics`, judge JSON parsing, skill staging.
+  Tests that compare airedale with pi use the answers recorded in
+  `tests/fixtures/pi_reference/` (live check when pi is installed; see `CONTRIBUTING.md`).
 - **Type hints:** everywhere; `from __future__ import annotations` at the top of
   every module. Prefer dataclasses for value objects.
 - **License headers:** every source file should begin with the Apache-2.0

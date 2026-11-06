@@ -127,5 +127,18 @@
       "license": ["MIT"],
       "copyright": ["Datadog, Inc."]
     }
+  },
+  {
+    "override_type": "add",
+    "target": {
+      "origin": "https://github.com/DataDog/airedale"
+    },
+    "replacement": {
+      "name": "ruamel.yaml.clib",
+      "origin": "https://sourceforge.net/p/ruamel-yaml-clib/code/ci/default/tree/",
+      "version": "0.2.15",
+      "license": ["MIT"],
+      "copyright": ["Anthon van der Neut"]
+    }
   }
 ]

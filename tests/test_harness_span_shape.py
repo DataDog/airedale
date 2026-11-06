@@ -294,3 +294,96 @@ def test_span_helpers_are_noops_when_llmobs_disabled(monkeypatch):
         mcp_servers=[],
         segments=[_tool_call()],
     )
+
+
+# --------------------------------------------------------------------------- #
+# Default run path (Codex): one llm span, then the tool spans
+# --------------------------------------------------------------------------- #
+class _ScriptedRunner(base.DecoratorSpanAgentRunner):
+    sdk_name = "scripted"
+
+    def __init__(self, result: base.AgentRunResult, **kwargs: Any) -> None:
+        super().__init__(cwd="/tmp", **kwargs)
+        self.result = result
+
+    async def _run_agent(self, **kwargs: Any) -> base.AgentRunResult:
+        return self.result
+
+
+@pytest.fixture
+def span_tree(monkeypatch, llmobs):
+    """Record the decorator spans and the tool spans, with their parents."""
+    events: list[tuple[str, str | None]] = []
+    active: list[str] = []
+
+    def _decorator(kind):
+        def factory(**kwargs):
+            def wrap(func):
+                async def inner(*args, **kw):
+                    events.append((kind, active[-1] if active else None))
+                    active.append(kind)
+                    try:
+                        return await func(*args, **kw)
+                    finally:
+                        active.pop()
+
+                return inner
+
+            return wrap
+
+        return factory
+
+    @contextlib.contextmanager
+    def tool(*, name: str):
+        events.append((f"tool:{name}", active[-1] if active else None))
+        yield object()
+
+    async def _no_catalog(servers, headers):
+        return {}
+
+    monkeypatch.setattr(base, "agent", _decorator("agent"))
+    monkeypatch.setattr(base, "llm", _decorator("llm"))
+    monkeypatch.setattr(llmobs, "tool", tool)
+    monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _no_catalog)
+    return events
+
+
+class TestDefaultRunPath:
+    def test_single_llm_span_then_tool_spans(self, span_tree, llmobs):
+        import asyncio
+
+        result = base.AgentRunResult(
+            answer="done",
+            usage=UsageMetrics(input_tokens=1, output_tokens=2, total_tokens=3),
+            tool_calls=[_tool_call()],
+        )
+        harness_result = asyncio.run(
+            _ScriptedRunner(result).run(
+                model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"
+            )
+        )
+        assert harness_result.answer == "done"
+        assert span_tree == [("agent", None), ("llm", "agent"), ("tool:mcp.apm.search", "agent")]
+        assert sum(1 for annotation in llmobs.annotations if "tool_definitions" in annotation) == 1
+
+    def test_missing_usage_still_raises(self, span_tree):
+        import asyncio
+
+        result = base.AgentRunResult(answer="done", usage=UsageMetrics(), tool_calls=[])
+        with pytest.raises(RuntimeError, match="without reporting token usage"):
+            asyncio.run(
+                _ScriptedRunner(result).run(
+                    model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"
+                )
+            )
+
+    def test_run_error_wins_over_missing_usage(self, span_tree):
+        import asyncio
+
+        result = base.AgentRunResult(answer="", usage=UsageMetrics(), tool_calls=[], error=RuntimeError("boom"))
+        with pytest.raises(RuntimeError, match="boom"):
+            asyncio.run(
+                _ScriptedRunner(result).run(
+                    model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"
+                )
+            )
