@@ -2,11 +2,13 @@
 #
 # This product includes software developed at Datadog (https://www.datadoghq.com/) Copyright 2026-present Datadog, Inc.
 
-"""Parse JSON like ``JSON.parse`` of JavaScript does, for the files that pi reads (``mcp.json``, ``settings.json``).
+"""Parse JSON like ``JSON.parse`` of JavaScript does, for what pi writes and reads (its stdout records, ``mcp.json``,
+``settings.json``).
 
-Python's parser differs in two ways that matter for a guard that has to read what pi reads:
+Python's parser differs in three ways that matter for a guard that has to read what pi reads:
 
 * it accepts ``NaN`` and ``Infinity``, which are not JSON (``JSON.parse`` rejects them);
+* it keeps an integer exactly where ``JSON.parse`` gives the nearest double;
 * it raises ``ValueError`` for an integer of more than 4,300 digits (a limit on the conversion of a string), where
   ``JSON.parse`` returns a number (``Infinity``, as the value is above the range of a double). A file with such a
   number would be taken for an unreadable file, which pi reads without a problem.
@@ -34,8 +36,9 @@ def _reject_constant(name: str) -> Any:
 
 
 def _parse_int(text: str) -> int | float:
+    """An integer token as ``JSON.parse`` reads it: the nearest double (9007199254740993 is 9007199254740992)."""
     if len(text.lstrip("-")) <= _MAX_INT_DIGITS:
         value = int(text)
         if abs(value) <= sys.float_info.max:
-            return value
+            return int(float(value))  # float() of an int rounds to the nearest double, as JavaScript does.
     return -math.inf if text.startswith("-") else math.inf

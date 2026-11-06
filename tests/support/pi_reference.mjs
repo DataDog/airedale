@@ -70,6 +70,20 @@ if (request.action === "mcp") {
     }
   }
   console.log(JSON.stringify(result));
+} else if (request.action === "json") {
+  // What JSON.parse makes of each text: the string of a number, or "error".
+  console.log(
+    JSON.stringify(
+      request.texts.map((text) => {
+        try {
+          const value = JSON.parse(text);
+          return typeof value === "number" ? String(value) : "other";
+        } catch {
+          return "error";
+        }
+      }),
+    ),
+  );
 } else if (request.action === "urls") {
   // What JavaScript's URL (the one pi calls) makes of each string.
   console.log(
