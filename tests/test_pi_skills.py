@@ -137,6 +137,13 @@ FILES = [
     ("mutually recursive aliases", "---\nname: alpha\ndescription: d\na: &a {b: &b {a: *a, b: *b}}\n---\n"),
     ("alias to a collection of its own parent", "---\n&r {name: alpha, description: d, me: *r}\n---\n"),
     ("alias used before its anchor ends", "---\nname: alpha\ndescription: d\nm: &m [*m, *m]\n---\n"),
+    ("alias key replaces the description with null", "---\nname: alpha\n&k description: d\n*k : null\n---\n"),
+    ("alias key replaces the name with null", "---\n&k name: alpha\n*k : null\ndescription: d\n---\n"),
+    ("alias key replaces the name with a list", "---\n&k name: alpha\n*k : [x]\ndescription: d\n---\n"),
+    ("alias key replaces the name with a string", "---\n&k name: alpha\n*k : beta\ndescription: d\n---\n"),
+    ("alias key replaces the name with a number", "---\n&k name: alpha\n*k : 5\ndescription: d\n---\n"),
+    ("alias key with the same string value", "---\n&k name: alpha\n*k : alpha\ndescription: d\n---\n"),
+    ("alias key of another key", "---\n&k other: x\n*k : y\nname: alpha\ndescription: d\n---\n"),
     ("non-ascii", "---\nname: alphä\ndescription: d\n---\n"),
     ("long key", "---\n? " + "k" * 2000 + "\n: v\nname: alpha\ndescription: d\n---\n"),
 ]
@@ -317,4 +324,23 @@ def test_recursive_alias_in_a_project_skill_still_collides(tmp_path, metadata):
             tmp_path,
             "---\nname: alpha\ndescription: d\n---\n",
             f"---\nname: alpha\ndescription: d\nmetadata: {metadata}\n---\n",
+        )
+
+
+def test_alias_key_that_nulls_the_description_is_not_a_collision(tmp_path):
+    # Pi reads description null and skips the skill, so there is no collision.
+    assert _collision(
+        tmp_path,
+        "---\nname: alpha\ndescription: d\n---\n",
+        "---\nname: alpha\n&k description: d\n*k : null\n---\n",
+    )
+
+
+def test_alias_key_that_nulls_the_name_gives_the_directory_name(tmp_path):
+    # Pi names the skill "other" (its directory), so it collides with a scenario skill of that name.
+    with pytest.raises(ValueError, match="'other'"):
+        _collision(
+            tmp_path,
+            "---\nname: other\ndescription: d\n---\n",
+            "---\n&k name: alpha\n*k : null\ndescription: d\n---\n",
         )

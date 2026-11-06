@@ -259,8 +259,13 @@ def _add_child(frame: _Frame, node: Node, *, is_alias: bool = False) -> None:
     frame.pairs += 1
     if node[0] != "null":
         frame.all_values_null = False
-    if key[0] == "str" and node[0] == "str":
-        frame.strings[key[1]] = node[1]
+    if key[0] == "str":
+        # A later pair with the same key (an alias key is not a repeated key for pi) replaces the earlier one,
+        # also with a value that is not a string.
+        if node[0] == "str":
+            frame.strings[key[1]] = node[1]
+        else:
+            frame.strings.pop(key[1], None)
 
 
 def _finish_collection(frame: _Frame) -> Node:
