@@ -492,6 +492,48 @@ class TestEventCollector:
             _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
         assert probed == []
 
+    @pytest.mark.parametrize(
+        ("servers", "skills", "message"),
+        [
+            ([McpServerSpec(name="bad.name", command="DO_NOT_START")], False, "not valid for pi"),
+            ([McpServerSpec(name="docs", command="DO_NOT_START", tool_names=("*",))], False, "exact tool names"),
+            ([McpServerSpec(name="docs", command="DO_NOT_START")], True, "collides"),
+        ],
+        ids=["invalid server name", "wildcard tool name", "skill name collision"],
+    )
+    def test_every_local_refusal_comes_before_the_probe(
+        self, tmp_path, monkeypatch, fake_span_llmobs, servers, skills, message
+    ):
+        """The three refusals of the review, LLMObs on: the probe never starts a server."""
+        import airedale.harness.base as base
+
+        probed: list[object] = []
+
+        async def _catalog(servers, headers):
+            probed.append(servers)
+            return {}
+
+        monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
+        monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _catalog)
+        scenario_skills = []
+        if skills:
+            scenario = tmp_path / "scenario"
+            scenario.mkdir()
+            (scenario / "SKILL.md").write_text("---\nname: alpha\ndescription: d\n---\n")
+            project = tmp_path / ".pi" / "skills" / "project"
+            project.mkdir(parents=True)
+            (project / "SKILL.md").write_text("---\nname: alpha\ndescription: d\n---\n")
+            scenario_skills = [str(scenario)]
+        runner = PiRunner(
+            cwd=tmp_path,
+            skills=scenario_skills,
+            mcp_servers=servers,
+            pi_command=[sys.executable, "-c", "raise AssertionError('Unexpected subprocess')"],
+        )
+        with pytest.raises(ValueError, match=message):
+            _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
+        assert probed == []
+
     def test_accepted_run_probes_the_mcp_servers(self, tmp_path, fake_pi, monkeypatch, fake_span_llmobs):
         import airedale.harness.base as base
 

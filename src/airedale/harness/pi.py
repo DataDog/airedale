@@ -516,6 +516,8 @@ class PiRunner(DecoratorSpanAgentRunner):
         """Run the local checks of the run before any MCP server is probed (the probe starts them)."""
         self._check_project_mcp_collisions(trace_headers)
         self._check_tool_name_collisions()
+        # A skill name that collides (scenario skill and project skill) refuses the run too.
+        pi_skill_dirs(self.skills, self.cwd)
 
     def _check_tool_name_collisions(self) -> None:
         """Raise when tools of two servers with a ``tool_names`` list can get the same pi name.

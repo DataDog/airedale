@@ -347,7 +347,7 @@ Notes:
     rules (a character outside the BMP is two `_`). Tools of two servers can also
     get the same name (`mcp__a__b__c` from server `a` / `b__c` and server `a__b` / `c`):
     pi hashes the tool of the server that connects second, which the runner cannot
-    know. The local checks (a scenario server that pi rejects, which cannot be written or fails pi's own validation; a repo entry that replaces a scenario server; tool names that can collide) run before the metadata probe, which starts the stdio servers and calls the HTTP ones (`_check_before_probe`). A scenario with `tool_names` lists that can collide fails before pi starts
+    know. The local checks (a scenario server that pi rejects, which cannot be written or fails pi's own validation; a repo entry that replaces a scenario server; tool names that can collide; a scenario skill whose name collides with a project skill) run before the metadata probe, which starts the stdio servers and calls the HTTP ones (`_check_before_probe`). A scenario with `tool_names` lists that can collide fails before pi starts
     ("possible" collision: a list is an allow-list, hidden tools can change the
     result; the check runs pi's registration loop for every connection order (`pi_registered_tool_names`), hash-suffixed names included, which pi does not check again; `pi_possible_tool_name_collisions`); for the probed tools of servers
     without a list, `_mcp_tool_definitions` logs a warning and keeps the names.
