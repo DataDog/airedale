@@ -1230,6 +1230,8 @@ class _PiEventCollector:
     #: Where pi gave a ``usage`` record that is missing or damaged (see
     #: :func:`is_valid_pi_usage`), one entry for each record. Their tokens are not counted.
     damaged_usage: list[str] = field(default_factory=list)
+    #: Number of assistant messages whose ``content`` is not a list (or a string).
+    calls_without_content: int = 0
 
     @property
     def stop_requested(self) -> bool:
@@ -1293,6 +1295,10 @@ class _PiEventCollector:
                 return None
             if message.get("role") == "assistant":
                 self.assistant_messages.append(message)
+                if not isinstance(message.get("content"), list | str):
+                    # Pi writes ``content`` as a list (empty for a response with no content). ``null`` or no field
+                    # is damage, not an empty response.
+                    self.calls_without_content += 1
                 # A model call must have usage.
                 self._add_usage(message.get("usage"), "model call")
             elif message.get("role") == "toolResult" and "usage" in message:
@@ -1452,6 +1458,11 @@ class _PiEventCollector:
             return RuntimeError(
                 f"pi emitted {self.invalid_lines} malformed JSONL record(s) for {model.label}; "
                 "usage or tool data can be missing"
+            )
+        if self.calls_without_content:
+            return RuntimeError(
+                f"pi wrote {self.calls_without_content} assistant message(s) without a content list for "
+                f"{model.label}; the answer or the tool calls can be missing"
             )
         if self.damaged_usage:
             sources = ", ".join(f"{count} {source}" for source, count in Counter(self.damaged_usage).items())
