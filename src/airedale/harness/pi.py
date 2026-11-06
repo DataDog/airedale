@@ -1391,10 +1391,12 @@ class _PiEventCollector:
             [segment for segment in segments if isinstance(segment, AgentToolCall)], model_executions
         )
         final = self.assistant_messages[-1] if self.assistant_messages else None
-        answer = _message_text(final) if final is not None else ""
+        # The text of the final message, also when it is empty (a valid response can have no text). The placeholder
+        # is only for a run that has no final message: it is not model output.
+        answer = _message_text(final) if final is not None else "pi did not produce a final response."
         error = self._error(model=model, final=final, returncode=returncode, stderr_tail=stderr_tail)
         return AgentRunResult(
-            answer=answer or "pi did not produce a final response.",
+            answer=answer,
             usage=self.usage,
             tool_calls=tool_calls,
             segments=segments,

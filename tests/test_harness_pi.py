@@ -241,6 +241,24 @@ class TestEventCollector:
         assert "no assistant message" in str(result.error)
         assert result.answer == "pi did not produce a final response."
 
+    @pytest.mark.parametrize(
+        "content",
+        [
+            [],
+            [{"type": "thinking", "thinking": "hmm"}],
+            [{"type": "text", "text": ""}],
+            [{"type": "text", "text": "  "}],
+        ],
+    )
+    def test_valid_empty_final_response_is_kept_empty(self, content):
+        # A response with no text is valid: the answer is empty, it is not the diagnostic text.
+        events = _events_tool_run()
+        events[-4]["message"]["content"] = content
+        result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
+        assert result.error is None
+        assert result.answer.strip() == ""
+        assert "did not produce" not in result.answer
+
     def test_max_turns_requests_stop(self):
         collector = _collect(_events_tool_run(), max_turns=1)
         assert collector.stop_requested
@@ -274,6 +292,16 @@ class TestEventCollector:
         error = _collect(events).result(model=MODEL, returncode=0, stderr_tail="").error
         assert error is not None
         assert "1 usage entry" in str(error)
+
+    def test_empty_final_response_through_a_run(self, tmp_path, fake_pi):
+        events = _events_tool_run()
+        events[-4]["message"]["content"] = []
+        command, _ = fake_pi(events)
+        runner = PiRunner(cwd=tmp_path, pi_command=command)
+        result = _bounded(
+            runner.run(model=MODEL, system_prompt="SYS", user_prompt="Q", prompt_version="v", harness="pi-s")
+        )
+        assert result.answer == ""
 
     def test_all_zero_usage_is_not_a_missing_usage_error(self, tmp_path, fake_pi):
         # Every record is valid and zero (no tokens, or a price of zero): that is data, not missing usage.
