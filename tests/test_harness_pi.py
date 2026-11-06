@@ -858,6 +858,27 @@ class TestEventCollector:
         assert error is not None
         assert "malformed JSONL" in str(error)
 
+    @pytest.mark.parametrize("message", ["missing", None, "text", [], 5])
+    def test_message_end_without_a_message_object_fails_the_run(self, message):
+        # The record of a model call has no message: its usage is lost, a later valid call must not hide that.
+        events = _events_tool_run()
+        if message == "missing":
+            del events[4]["message"]
+        else:
+            events[4]["message"] = message
+        collector = _collect(events)
+        assert collector.invalid_lines == 1
+        error = collector.result(model=MODEL, returncode=0, stderr_tail="").error
+        assert error is not None
+        assert "malformed JSONL" in str(error)
+
+    def test_message_end_records_of_pi_agent_loop_all_have_a_message(self, pi_reference):
+        """Pi's real loop (recorded): every message_end has a message object."""
+        for version, events in pi_reference({"action": "parallel"}).items():
+            ends = [event for event in events if event["type"] == "message_end"]
+            assert ends and all(isinstance(event.get("message"), dict) for event in ends), version
+            assert _collect(events).invalid_lines == 0, version
+
     def test_valid_utf8_and_escaped_surrogates_are_accepted(self):
         collector = _PiEventCollector()
         line = b'{"type": "session", "id": "caf\\u00e9 \\ud83d\\ude00 \xc3\xa9 \\ud800"}\n'

@@ -1281,6 +1281,9 @@ class _PiEventCollector:
         if event_type == "message_end":
             message = event.get("message")
             if not isinstance(message, dict):
+                # Pi always writes the message (agent-loop.js, 1.4.0 and 1.5.0). A record without it can be the
+                # model call that holds the usage: the run must not succeed with a total that is too low.
+                self.invalid_lines += 1
                 return None
             if message.get("role") == "assistant":
                 self.assistant_messages.append(message)
