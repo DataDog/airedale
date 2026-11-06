@@ -155,7 +155,8 @@ if (request.action === "mcp") {
   console.log(JSON.stringify(events));
 } else if (request.action === "parallel") {
   // The events of pi's agent loop (mock model) for one turn with two parallel tool calls that both have
-  // the id "": the first call is slower, so the end records come in the other order.
+  // the id "": the first call (slow) waits until the loop has emitted the end record of the second call (fast),
+  // so the end records come in the other order. A gate, not a timer: no scheduling delay changes the order.
   Date.now = () => 1_700_000_000_000;
   const modules = `${base}/../`;
   const { agentLoop } = await import(pathToFileURL(`${modules}pi-agent-core/dist/agent-loop.js`).href);
@@ -181,17 +182,21 @@ if (request.action === "mcp") {
     usage,
     timestamp: Date.now(),
   });
-  const tool = (name, delay) => ({
+  let openGate;
+  const gate = new Promise((resolve) => {
+    openGate = resolve;
+  });
+  const tool = (name, wait) => ({
     name,
     label: name,
     description: "test",
     parameters: { type: "object", properties: {} },
     execute: async () => {
-      await new Promise((resolve) => setTimeout(resolve, delay));
+      if (wait) await wait;
       return { content: [{ type: "text", text: `${name} result` }], details: {} };
     },
   });
-  const context = { messages: [], tools: [tool("slow", 60), tool("fast", 0)] };
+  const context = { messages: [], tools: [tool("slow", gate), tool("fast", null)] };
   const responses = [
     message(
       [
@@ -212,6 +217,7 @@ if (request.action === "mcp") {
   const prompt = [{ role: "user", content: "run", timestamp: Date.now() }];
   for await (const event of agentLoop(prompt, context, { model, convertToLlm: (m) => m }, undefined, streamFn)) {
     events.push(event);
+    if (event.type === "tool_execution_end" && event.toolName === "fast") openGate();
   }
   events.push({ type: "agent_settled", aborted: false });
   // The duration of a tool depends on the machine: the same events on every run.
