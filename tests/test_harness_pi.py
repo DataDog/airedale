@@ -126,6 +126,14 @@ class TestUsageFromPi:
         assert usage.reasoning_output_tokens == 4
         assert usage.estimated_cost_usd == pytest.approx(0.0009)
 
+    def test_huge_integers_do_not_raise(self):
+        # An integer above the range of a float: it is finite, and it must not abort the run with OverflowError.
+        usage = {"input": 10**400, "output": 1, "cost": {"total": 0}}
+        assert is_valid_pi_usage(usage)
+        assert not is_valid_pi_usage({**usage, "cost": {"total": -(10**400)}})
+        assert not is_valid_pi_usage({"input": -(10**400), "output": 1, "cost": {"total": 0}})
+        assert UsageMetrics.from_pi(usage).output_tokens == 1
+
     @pytest.mark.parametrize(
         ("label", "usage", "total"),
         [

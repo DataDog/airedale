@@ -617,7 +617,71 @@
     ]
    }
   },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiaHR0cHM6Ly9lLnRlc3QiLCAib2F1dGgiOiB7ImNhbGxiYWNrUG9ydCI6IC0xMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMH19fX0=\"}": {
+   "1.4.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   }
+  },
   "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiaHR0cHM6Ly9lLnRlc3QiLCAib2F1dGgiOiB7ImNhbGxiYWNrUG9ydCI6IDB9fX19\"}": {
+   "1.4.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiaHR0cHM6Ly9lLnRlc3QiLCAib2F1dGgiOiB7ImNhbGxiYWNrUG9ydCI6IDEwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwfX19fQ==\"}": {
    "1.4.0": {
     "error_count": 1,
     "servers": [
@@ -677,6 +741,38 @@
       },
       "name": "same",
       "scope": "project"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiaHR0cHM6Ly9lLnRlc3QiLCAib2F1dGgiOiB7ImNhbGxiYWNrUG9ydCI6IEluZmluaXR5fX19fQ==\"}": {
+   "1.4.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
      }
     ]
    }
@@ -1295,6 +1391,34 @@
       },
       "name": "same",
       "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJjb21tYW5kIjogIngiLCAidGltZW91dCI6IDEwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwfX19\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "command": "x",
+       "timeout": null
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "command": "x",
+       "timeout": null
+      },
+      "name": "same",
+      "scope": "project"
      }
     ]
    }

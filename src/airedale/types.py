@@ -225,11 +225,14 @@ def is_valid_pi_usage(usage: Any) -> bool:
 
 
 def _is_finite_number(value: Any) -> bool:
-    return isinstance(value, int | float) and not isinstance(value, bool) and math.isfinite(value) and value >= 0
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return False
+    # (``math.isfinite`` converts to a float: an integer above 1.8e308 raises OverflowError, and it is finite.)
+    return value >= 0 if isinstance(value, int) else math.isfinite(value) and value >= 0
 
 
 def _is_count(value: Any) -> bool:
-    return _is_finite_number(value) and float(value).is_integer()
+    return _is_finite_number(value) and (isinstance(value, int) or value.is_integer())
 
 
 @dataclass

@@ -142,6 +142,30 @@ CASES: list[tuple[str, dict, str, Any, bool, list[str]]] = [
         False,
         ["same"],
     ),
+    (
+        "oauth port above the range of a float",
+        SCENARIO,
+        "same",
+        {"url": "https://e.test", "oauth": {"callbackPort": 10**400}},
+        False,
+        [],
+    ),
+    (
+        "oauth port, a float that is infinity",
+        SCENARIO,
+        "same",
+        {"url": "https://e.test", "oauth": {"callbackPort": 1e999}},
+        False,
+        [],
+    ),
+    (
+        "oauth port, a negative huge integer",
+        SCENARIO,
+        "same",
+        {"url": "https://e.test", "oauth": {"callbackPort": -(10**400)}},
+        False,
+        [],
+    ),
     ("identical definition", SCENARIO, "same", SCENARIO["same"], False, ["same"]),
 ]
 

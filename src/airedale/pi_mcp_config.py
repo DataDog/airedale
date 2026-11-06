@@ -239,7 +239,7 @@ def _validate_oauth(value: Any, present: bool) -> str | None:
     if "clientSecret" in value and not isinstance(value["clientSecret"], str):
         return "oauth.clientSecret must be a string"
     port: Any = value.get("callbackPort")
-    if "callbackPort" in value and not (_is_integer(port) and 1 <= float(port) <= 65535):
+    if "callbackPort" in value and not (_is_integer(port) and 1 <= port <= 65535):
         return "oauth.callbackPort must be a port number"
     if "callbackUrl" in value:
         callback = value["callbackUrl"]
@@ -304,7 +304,9 @@ def _is_number(value: Any) -> bool:
 
 def _is_integer(value: Any) -> bool:
     """``Number.isInteger``: ``1.0`` is an integer, ``true`` is not a number."""
-    return _is_number(value) and float(value).is_integer()
+    # (An integer that a JavaScript number cannot hold is Infinity there, which is not an integer for
+    # ``Number.isInteger``; here a Python integer is compared as it is, and is never converted to a float.)
+    return _is_number(value) and (isinstance(value, int) or value.is_integer())
 
 
 def _is_loopback_redirect_uri(value: str) -> bool:
