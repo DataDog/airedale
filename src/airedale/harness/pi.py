@@ -144,7 +144,7 @@ from airedale.harness.pi_spans import (
     tool_result_text,
 )
 from airedale.mcp import pi_literal, pi_possible_tool_name_collisions
-from airedale.pi_mcp import discover_pi_project_mcp_servers, merge_project_mcp_config
+from airedale.pi_mcp import discover_pi_project_mcp_servers, merge_project_mcp_config, validate_server_config
 from airedale.skills import pi_skill_dirs
 from airedale.types import ModelSpec, UsageMetrics, is_valid_pi_usage
 
@@ -504,7 +504,7 @@ class PiRunner(DecoratorSpanAgentRunner):
                 "difference between '-' and '_') and pi would run only one of them. Rename the server(s)."
             )
         project_file = Path(self.cwd) / ".pi" / "mcp.json"
-        changed = merge_project_mcp_config(project_file, self._scenario_pi_configs(trace_headers)).changed
+        changed = merge_project_mcp_config(project_file, self._scenario_pi_configs(trace_headers, strict=True)).changed
         if changed:
             raise ValueError(
                 f"Project MCP config {project_file} defines server(s) {', '.join(changed)} with the same name as "
@@ -546,18 +546,31 @@ class PiRunner(DecoratorSpanAgentRunner):
             "collision is possible, not sure. Rename a server or change 'tool_names'."
         )
 
-    def _scenario_pi_configs(self, trace_headers: Mapping[str, str] | None = None) -> dict[str, dict[str, Any]]:
+    def _scenario_pi_configs(
+        self, trace_headers: Mapping[str, str] | None = None, *, strict: bool = False
+    ) -> dict[str, dict[str, Any]]:
         """Return the ``mcp.json`` entry of each scenario server, as it is written for pi (the global servers).
 
         The entries have the headers of the distributed trace of the run: a repo
         entry that repeats the static settings of a server, but not these
         headers, would replace the entry and remove them.
+
+        ``strict``: raise :class:`ValueError` when a server cannot be written for pi (a name with a character that
+        pi does not accept, a ``*`` in ``tool_names``) or when pi would reject the entry. The run is refused then,
+        before any server is probed. Not strict (the reports): an empty result.
         """
         try:
-            return {server.name: server.to_pi_config(trace_headers or {}) for server in self.mcp_servers}
+            configs = {server.name: server.to_pi_config(trace_headers or {}) for server in self.mcp_servers}
         except ValueError:
-            # The run fails when the configuration is written, with a clear message.
+            if strict:
+                raise
             return {}
+        if strict:
+            for name, config in configs.items():
+                problem = validate_server_config(name, config)
+                if isinstance(problem, str):
+                    raise ValueError(f"Scenario MCP server {name!r} is not valid for pi: {problem}")
+        return configs
 
     def _project_mcp_server_names(self) -> list[str]:
         """Return the names of the servers that pi loads and starts from the repo ``<cwd>/.pi/mcp.json``.

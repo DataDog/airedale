@@ -462,6 +462,36 @@ class TestEventCollector:
             _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
         assert probed == []
 
+    @pytest.mark.parametrize(
+        ("server", "message"),
+        [
+            (McpServerSpec(name="a.b", command="x"), "not valid for pi"),
+            (McpServerSpec(name="ok", command="x", tool_names=("get_*",)), "must be exact tool names"),
+            (McpServerSpec(name="ok", url="ftp://example.test/mcp"), "not valid for pi"),
+            (McpServerSpec(name="ok", type="sse", url="https://example.test/mcp"), "unsupported type|not valid for pi"),
+            (McpServerSpec(name="ok", type="stdio"), "no 'command'|not valid for pi"),
+        ],
+        ids=["name", "wildcard", "url scheme", "sse", "no command"],
+    )
+    def test_scenario_server_that_pi_rejects_is_refused_before_the_probe(
+        self, tmp_path, monkeypatch, fake_span_llmobs, server, message
+    ):
+        """An invalid scenario server turned into an empty config and the probe started or called it (LLMObs on)."""
+        import airedale.harness.base as base
+
+        probed: list[object] = []
+
+        async def _catalog(servers, headers):
+            probed.append(servers)
+            return {}
+
+        monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
+        monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _catalog)
+        runner = PiRunner(cwd=tmp_path, mcp_servers=[server])
+        with pytest.raises(ValueError, match=message):
+            _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
+        assert probed == []
+
     def test_accepted_run_probes_the_mcp_servers(self, tmp_path, fake_pi, monkeypatch, fake_span_llmobs):
         import airedale.harness.base as base
 
