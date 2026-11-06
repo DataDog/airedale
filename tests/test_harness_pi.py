@@ -381,6 +381,49 @@ class TestEventCollector:
         assert error is not None
         assert "without a content list" in str(error)
 
+    @pytest.mark.parametrize("case", ["project replaces a server", "tool names collide"])
+    def test_refused_run_does_not_probe_the_mcp_servers(self, tmp_path, monkeypatch, fake_span_llmobs, case):
+        """With LLMObs on, the metadata probe starts stdio servers: the local checks come first."""
+        import airedale.harness.base as base
+
+        probed: list[object] = []
+
+        async def _catalog(servers, headers):
+            probed.append(servers)
+            return {}
+
+        monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
+        monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _catalog)
+        if case == "project replaces a server":
+            (tmp_path / ".pi").mkdir()
+            (tmp_path / ".pi" / "mcp.json").write_text(json.dumps({"mcpServers": {"same": {"command": "project"}}}))
+            servers = [McpServerSpec(name="same", command="scenario")]
+        else:
+            servers = [
+                McpServerSpec(name="a", command="x", tool_names=("b__c",)),
+                McpServerSpec(name="a__b", command="y", tool_names=("c",)),
+            ]
+        runner = PiRunner(cwd=tmp_path, mcp_servers=servers)
+        with pytest.raises(ValueError, match=r"same|Possible"):
+            _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
+        assert probed == []
+
+    def test_accepted_run_probes_the_mcp_servers(self, tmp_path, fake_pi, monkeypatch, fake_span_llmobs):
+        import airedale.harness.base as base
+
+        probed: list[object] = []
+
+        async def _catalog(servers, headers):
+            probed.append(servers)
+            return {}
+
+        monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
+        monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _catalog)
+        command, _ = fake_pi(_events_tool_run())
+        runner = PiRunner(cwd=tmp_path, pi_command=command, mcp_servers=[McpServerSpec(name="docs", command="x")])
+        _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
+        assert len(probed) == 1
+
     def test_empty_final_response_through_a_run(self, tmp_path, fake_pi):
         events = _events_tool_run()
         events[-4]["message"]["content"] = []

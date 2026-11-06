@@ -511,6 +511,11 @@ class PiRunner(DecoratorSpanAgentRunner):
                 '"enabled": false). Rename or remove the project entry.'
             )
 
+    def _check_before_probe(self, trace_headers: Mapping[str, str]) -> None:
+        """Run the local checks of the run before any MCP server is probed (the probe starts them)."""
+        self._check_project_mcp_collisions(trace_headers)
+        self._check_tool_name_collisions()
+
     def _check_tool_name_collisions(self) -> None:
         """Raise when tools of two servers with a ``tool_names`` list can get the same pi name.
 

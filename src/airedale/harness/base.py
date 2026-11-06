@@ -747,8 +747,14 @@ class DecoratorSpanAgentRunner(AgentRunner):
     async def _span_context(self) -> tuple[dict[str, str], Mapping[tuple[str, str], McpToolMetadata]]:
         """Return the trace headers for MCP servers and the MCP tool catalog."""
         trace_headers = current_trace_headers()
+        # Local checks first: the probe starts the stdio servers and calls the HTTP ones, which a run that is
+        # refused must not do.
+        self._check_before_probe(trace_headers)
         mcp_tool_metadata = await _mcp_tool_metadata_catalog(self.mcp_servers, trace_headers) if LLMObs.enabled else {}
         return trace_headers, mcp_tool_metadata
+
+    def _check_before_probe(self, trace_headers: Mapping[str, str]) -> None:
+        """Raise when the run is refused for a reason that needs no MCP server (nothing is started yet). Default: none."""
 
     def _missing_usage_error(self, run_result: AgentRunResult, model: ModelSpec) -> RuntimeError | None:
         """Return the error for a successful run without token usage, else ``None``."""
