@@ -2039,6 +2039,28 @@ class TestPiToolNames:
         assert reported[0]["args"] == ["<redacted>", "<redacted>"]
         assert reported[1]["url"] == "https://example.test:8443"
 
+    @pytest.mark.parametrize(
+        ("url", "reported"),
+        [
+            ("http://host\\s\\TOKEN/mcp", "http://host"),  # backslash is a path separator for pi
+            ("http://host:8080\\s\\TOKEN/mcp", "http://host:8080"),
+            ("https://user:pw@host/s/TOKEN/mcp?k=TOKEN#TOKEN", "https://host"),
+            ("https://user:pw@host\\TOKEN@x/", "https://host"),
+            ("ht\ttps://ho\nst/TOKEN", "https://host"),  # tab and newline are removed
+            ("https:\\\\host\\TOKEN", "https://host"),
+            ("https://[::1]:9/TOKEN", "https://[::1]:9"),
+            ("https://example.test:443/TOKEN", "https://example.test"),
+            ("not a url TOKEN", "<redacted>"),
+            ("https:///host/TOKEN", "https://host"),  # slashes are skipped, as for pi
+            ("https://", "<redacted>"),
+        ],
+    )
+    def test_reported_url_has_only_scheme_host_and_port(self, url, reported):
+        from airedale.mcp import url_without_secrets
+
+        assert url_without_secrets(url) == reported
+        assert "TOKEN" not in (url_without_secrets(url) or "")
+
     def test_long_tool_names_collide_after_shortening(self):
         from airedale.mcp import pi_mcp_tool_name, pi_mcp_tool_names
 

@@ -221,20 +221,19 @@ REDACTED = "<redacted>"
 
 def url_without_secrets(url: str | None) -> str | None:
     """Keep only the scheme, host and port of ``url``: the user info, path, query
-    and fragment can hold tokens (for example ``/s/<token>/mcp``)."""
+    and fragment can hold tokens (for example ``/s/<token>/mcp``).
+
+    The URL is read like pi reads it (``airedale.whatwg_url``): ``\\`` ends the host as ``/`` does, and tabs and
+    newlines inside the URL are ignored. A URL that cannot be read is replaced by ``<redacted>``.
+    """
     if not url:
         return url
-    from urllib.parse import urlsplit, urlunsplit
+    from airedale.whatwg_url import parse_url
 
-    try:
-        parts = urlsplit(url)
-        host = parts.hostname or ""
-        if ":" in host:
-            host = f"[{host}]"
-        netloc = f"{host}:{parts.port}" if parts.port else host
-    except ValueError:
+    parsed = parse_url(url)
+    if parsed is None or not parsed.hostname:
         return REDACTED
-    return urlunsplit((parts.scheme, netloc, "", "", ""))
+    return f"{parsed.scheme}://{parsed.hostname}" + (f":{parsed.port}" if parsed.port else "")
 
 
 def _parse_mcp_json(path: Path) -> list[McpServerSpec]:
