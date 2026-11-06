@@ -995,11 +995,43 @@ def _redact_bytes(data: bytes, secrets: Iterable[str]) -> bytes:
     in the middle of one of its UTF-8 characters. The start is matched with the end of every secret *first*, before
     any secret is replaced: a shorter secret inside the cut part would otherwise change the start.
     """
-    encoded = sorted({secret.encode() for secret in secrets if secret}, key=len, reverse=True)
+    encoded = sorted({form for secret in secrets if secret for form in _byte_forms(secret)}, key=len, reverse=True)
     data = _drop_cut_secret(data, encoded)
     for secret in encoded:
         data = data.replace(secret, _REDACTED.encode())
     return data
+
+
+def _byte_forms(secret: str) -> set[bytes]:
+    """Return the byte strings in which ``secret`` can be printed. Never raises, never skips a value.
+
+    A secret can hold characters that UTF-8 cannot encode: an unpaired surrogate (a JSON string such as
+    ``"\\ud800"``), or the byte of an environment variable that the system could not decode (POSIX gives it as
+    ``\\udcXX``, from the original byte). The forms: UTF-8 with the surrogates passed through, the original bytes of
+    the environment (``os.fsencode``), what Node prints for an unpaired surrogate (U+FFFD), and the ASCII spelling of
+    JSON (``\\uXXXX``).
+    """
+    forms: set[bytes] = set()
+    encoders = (
+        lambda text: text.encode("utf-8"),
+        lambda text: text.encode("utf-8", "surrogatepass"),
+        lambda text: os.fsencode(text),
+        lambda text: _replace_surrogates(text).encode("utf-8"),
+        lambda text: json.dumps(text, ensure_ascii=True)[1:-1].encode("ascii"),
+    )
+    for encode in encoders:
+        try:
+            form = encode(secret)
+        except (UnicodeError, ValueError):
+            continue
+        if form:
+            forms.add(form)
+    return forms
+
+
+def _replace_surrogates(text: str) -> str:
+    """Replace each unpaired surrogate by U+FFFD, as Node does when it prints one."""
+    return "".join("\ufffd" if "\ud800" <= char <= "\udfff" else char for char in text)
 
 
 #: A start of the tail is taken for the cut end of a secret from this many bytes.

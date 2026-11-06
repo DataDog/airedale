@@ -758,6 +758,69 @@ class TestEventCollector:
         assert "TOKEN-FRAGMENT-0123456789" not in str(error.value)
         assert "pi stderr (tail)" in str(error.value)
 
+    def test_unused_auth_json_credential_with_an_unpaired_surrogate_does_not_crash_a_good_run(
+        self, tmp_path, fake_pi, monkeypatch
+    ):
+        """json.loads gives a str with a lone surrogate for "\\ud800": .encode() raised and crashed a run that succeeded."""
+        operator = tmp_path / "operator"
+        operator.mkdir()
+        (operator / "auth.json").write_text('{"openai": {"type": "api_key", "key": "sk-lone-\\ud800-surrogate-0123"}}')
+        monkeypatch.setenv("PI_CODING_AGENT_DIR", str(operator))
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        command, _ = fake_pi(_events_tool_run())
+        runner = PiRunner(cwd=tmp_path, pi_command=command)
+        result = _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
+        assert result.answer == "The directory is empty."
+
+    def test_surrogate_credential_is_removed_in_every_spelling_it_can_have(self, tmp_path, fake_pi, monkeypatch):
+        operator = tmp_path / "operator"
+        operator.mkdir()
+        (operator / "auth.json").write_text('{"openai": {"type": "api_key", "key": "sk-lone-\\ud800-surrogate-0123"}}')
+        monkeypatch.setenv("PI_CODING_AGENT_DIR", str(operator))
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        command, _ = fake_pi(
+            [{"type": "agent_start"}, {"type": "agent_settled", "aborted": False}],
+            # As Node prints it (U+FFFD), as JSON spells it, and passed through as bytes.
+            FAKE_PI_STDERR="fixture failure a=sk-lone-\ufffd-surrogate-0123 b=sk-lone-\\ud800-surrogate-0123\n",
+            FAKE_PI_EXIT="3",
+        )
+        runner = PiRunner(cwd=tmp_path, pi_command=command)
+        with pytest.raises(RuntimeError) as error:
+            _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
+        assert "fixture failure" in str(error.value)
+        assert "surrogate-0123" not in str(error.value)
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX environment bytes")
+    def test_inherited_env_token_with_a_non_utf8_byte_does_not_crash_and_is_removed(self, tmp_path, fake_pi):
+        """os.environ decodes the byte with surrogateescape (\\udcff): UnicodeEncodeError crashed a good run."""
+        name, raw = b"DEMO_REVIEW_TOKEN", b"tok-\xff\xfe-0123456789"
+        os.environb[name] = raw
+        try:
+            command, _ = fake_pi(_events_tool_run())
+            runner = PiRunner(cwd=tmp_path, pi_command=command)
+            result = _bounded(
+                runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h")
+            )
+            assert result.answer == "The directory is empty."
+            program = (
+                "import os, sys\nsys.stdin.read()\n"
+                "sys.stderr.buffer.write(b'fixture failure ' + os.environb[b'DEMO_REVIEW_TOKEN'] + b' end\\n')\n"
+                'print(\'{"type": "agent_settled", "aborted": false}\', flush=True)\nsys.exit(3)\n'
+            )
+            failing = PiRunner(cwd=tmp_path, pi_command=[sys.executable, "-c", program])
+            with pytest.raises(RuntimeError) as error:
+                _bounded(failing.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
+            assert "fixture failure" in str(error.value)
+            assert "0123456789" not in str(error.value)
+        finally:
+            del os.environb[name]
+
+    def test_byte_forms_never_raise(self):
+        from airedale.harness.pi import _byte_forms
+
+        for secret in ["plain", "\ud800", "x\udcffy", "é", "😀", "a\udfffb\ud800"]:
+            assert _byte_forms(secret)  # No exception, at least one form.
+
     def test_run_without_a_copy_of_auth_json_hides_nothing_of_the_file(self, tmp_path, monkeypatch):
         operator = tmp_path / "operator"
         operator.mkdir()
