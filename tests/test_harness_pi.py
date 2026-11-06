@@ -652,6 +652,68 @@ class TestEventCollector:
             assert value not in text
         assert '"ab"' not in text  # An access token of two characters, under a credential key.
 
+    @pytest.mark.parametrize(
+        ("label", "options", "secret"),
+        [
+            ("gateway header", {"gateway_headers": {"X-Api-Key": "gk-1"}}, "gk-1"),
+            (
+                "gateway authorization",
+                {"gateway_headers": {"Authorization": "Basic dXNlcjpwYXNz"}},
+                "Basic dXNlcjpwYXNz",
+            ),
+            (
+                "gateway header, other name, long",
+                {"gateway_headers": {"X-Custom": "custom-0123456789abcdef"}},
+                "custom-0123456789abcdef",
+            ),
+            (
+                "mcp header",
+                {"mcp_servers": [McpServerSpec(name="demo", url="https://mcp.invalid", headers={"X-Api-Key": "m1"})]},
+                "m1",
+            ),
+            (
+                "mcp env",
+                {"mcp_servers": [McpServerSpec(name="demo", command="x", env={"DEMO_API_KEY": "e5"})]},
+                "e5",
+            ),
+            (
+                "mcp env, other name, long",
+                {"mcp_servers": [McpServerSpec(name="demo", command="x", env={"DEMO": "value-0123456789-abcdef"})]},
+                "value-0123456789-abcdef",
+            ),
+        ],
+        ids=lambda value: value if isinstance(value, str) and " " in value else None,
+    )
+    def test_credentials_of_the_run_config_are_removed_from_stderr(
+        self, tmp_path, fake_pi, monkeypatch, label, options, secret
+    ):
+        """Header and environment values that Airedale writes into models.json and mcp.json, at any length."""
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        command, _ = fake_pi(
+            [{"type": "agent_start"}, {"type": "agent_settled", "aborted": False}],
+            FAKE_PI_STDERR=f"fixture failure value={secret} end\n",
+            FAKE_PI_EXIT="3",
+        )
+        options = {"gateway_base_url": "https://gw.example", **options}
+        runner = PiRunner(cwd=tmp_path, pi_command=command, **options)
+        with pytest.raises(RuntimeError) as error:
+            _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
+        text = str(error.value)
+        assert "fixture failure" in text, label
+        assert secret not in text, label
+
+    def test_short_ordinary_header_values_are_not_hidden(self, tmp_path):
+        runner = PiRunner(cwd=tmp_path, gateway_headers={"source": "evals", "provider": "openai", "org-id": "42"})
+        assert runner._configured_secrets() == []
+
+    def test_configured_secrets_of_headers_and_environment(self, tmp_path):
+        servers = [
+            McpServerSpec(name="a", url="https://x.invalid", headers={"Authorization": "t", "Accept": "json"}),
+            McpServerSpec(name="b", command="x", env={"GITHUB_TOKEN": "g", "LANG": "C.UTF-8"}),
+        ]
+        runner = PiRunner(cwd=tmp_path, gateway_headers={"X-Api-Key": "k"}, mcp_servers=servers)
+        assert sorted(runner._configured_secrets()) == ["g", "k", "t"]
+
     def test_run_without_a_copy_of_auth_json_hides_nothing_of_the_file(self, tmp_path, monkeypatch):
         operator = tmp_path / "operator"
         operator.mkdir()

@@ -662,6 +662,7 @@ class PiRunner(DecoratorSpanAgentRunner):
         values = [self.gateway_bearer_token, self.gateway_api_key]
         values.extend(value for name in names for value in [os.environ.get(name), env.get(name)])
         values.extend(self._auth_file_secrets(env))
+        values.extend(self._configured_secrets())
         # Variables that only have a name like a secret: a short value (a flag such as ``1``) is more likely not one.
         values.extend(
             value
@@ -669,6 +670,26 @@ class PiRunner(DecoratorSpanAgentRunner):
             if _SECRET_ENV_NAME_RE.search(name) and len(value) >= _MIN_SECRET_LENGTH
         )
         return [value for value in dict.fromkeys(values) if value]
+
+    def _configured_secrets(self) -> list[str]:
+        """Return the credentials that Airedale writes into the private config of the run besides the token and the key.
+
+        The gateway headers (``models.json``) and the headers and environment of the scenario MCP servers (``mcp.json``)
+        can hold a credential (``X-Api-Key``, ``Authorization``, a ``*_TOKEN`` variable...), and pi, a server or a
+        child process can print them. A value under a name like a secret is removed whatever its length; another value
+        is removed from 8 characters (a short word such as ``evals`` is not a credential, and would hide itself in
+        messages).
+        """
+        mappings: list[Mapping[str, str]] = [self.gateway_headers]
+        for server in self.mcp_servers:
+            mappings.extend([server.headers, server.env])
+        values: list[str] = []
+        for mapping in mappings:
+            for name, value in mapping.items():
+                text = str(value)
+                if text and (_SECRET_ENV_NAME_RE.search(str(name)) or len(text) >= _MIN_CONFIG_VALUE_LENGTH):
+                    values.append(text)
+        return values
 
     def _auth_file_secrets(self, env: Mapping[str, str]) -> list[str]:
         """Return the secret values of the ``auth.json`` that was copied into the agent directory of the run.
@@ -917,6 +938,8 @@ async def _read_events(
 
 #: Names of environment variables that hold a credential.
 _SECRET_ENV_NAME_RE = re.compile(r"(?i)(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH)")
+#: A header or environment value of the run config under another name is removed from this many characters.
+_MIN_CONFIG_VALUE_LENGTH = 8
 #: Keys of a credentials file (``auth.json``) whose value is a credential.
 _SECRET_KEY_NAME_RE = re.compile(r"(?i)(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH|ACCESS|REFRESH)")
 #: A value shorter than this is not taken for a credential (it would also hide ordinary words in a message).
