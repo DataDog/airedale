@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from airedale.pi_frontmatter import UnsupportedFrontmatterError
@@ -417,3 +419,15 @@ def test_literal_items_of_an_ordered_map_keep_the_rules(tmp_path):
             "---\nname: alpha\ndescription: d\n---\n",
             "---\nname: alpha\ndescription: d\no: !!omap [{x: 1}, {y: 2}]\n---\n",
         )
+
+
+@pytest.mark.parametrize("bom", [b"", b"\xef\xbb\xbf"])
+def test_settings_json_with_a_byte_order_mark_lists_skills(tmp_path, bom):
+    # Pi removes a BOM from .pi/settings.json before it parses it.
+    cwd = tmp_path / "cwd"
+    skill = cwd / "tools" / "extra"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\nname: extra\ndescription: d\n---\n")
+    (cwd / ".pi").mkdir()
+    (cwd / ".pi" / "settings.json").write_bytes(bom + json.dumps({"skills": ["../tools/extra"]}).encode())
+    assert pi_skill_dirs([], str(cwd)) == [str(cwd / ".pi" / ".." / "tools" / "extra")]

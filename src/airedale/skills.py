@@ -218,7 +218,8 @@ def _pi_settings_skill_paths(workspace: Path) -> list[Path]:
     if not settings_file.is_file():
         return []
     try:
-        data = json.loads(settings_file.read_text(encoding="utf-8"))
+        # As pi: invalid UTF-8 bytes become U+FFFD, and a UTF-8 byte order mark is removed before the JSON is parsed.
+        data = json.loads(settings_file.read_bytes().decode("utf-8", errors="replace").removeprefix("\ufeff"))
     except (OSError, ValueError):
         logger.warning("Unable to parse project pi settings %s", settings_file, exc_info=True)
         return []
