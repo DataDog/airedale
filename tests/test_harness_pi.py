@@ -924,6 +924,7 @@ class TestEventCollector:
             {"type": "tool_execution_start", "toolCallId": "/1", "toolName": "read", "parentToolCallId": ""},
             {
                 "type": "tool_execution_end",
+                "isError": False,
                 "toolCallId": "/1",
                 "toolName": "read",
                 "parentToolCallId": "",
@@ -978,10 +979,10 @@ class TestEventCollector:
         events[5:7] = [
             {"type": "tool_execution_start", "toolCallId": "", "toolName": "first"},
             {"type": "tool_execution_start", "toolCallId": "/1", "toolName": "child1", "parentToolCallId": ""},
-            {"type": "tool_execution_end", "toolCallId": "", "toolName": "first", "result": {}},
+            {"type": "tool_execution_end", "isError": False, "toolCallId": "", "toolName": "first", "result": {}},
             {"type": "tool_execution_start", "toolCallId": "", "toolName": "second"},
             {"type": "tool_execution_start", "toolCallId": "/1", "toolName": "child2", "parentToolCallId": ""},
-            {"type": "tool_execution_end", "toolCallId": "", "toolName": "second", "result": {}},
+            {"type": "tool_execution_end", "isError": False, "toolCallId": "", "toolName": "second", "result": {}},
         ]
         result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
         # Each nested call follows the execution that it started under.
@@ -1037,6 +1038,7 @@ class TestEventCollector:
             {"type": "tool_execution_start", "toolCallId": "", "toolName": "t0"},
             {
                 "type": "tool_execution_end",
+                "isError": False,
                 "toolCallId": "",
                 "toolName": "t0",
                 "result": {"content": [{"type": "text", "text": "r0"}]},
@@ -1044,6 +1046,7 @@ class TestEventCollector:
             {"type": "tool_execution_start", "toolCallId": "", "toolName": "t1"},
             {
                 "type": "tool_execution_end",
+                "isError": False,
                 "toolCallId": "",
                 "toolName": "t1",
                 "result": {"content": [{"type": "text", "text": "r1"}]},
@@ -1092,6 +1095,7 @@ class TestEventCollector:
             {"type": "tool_execution_start", "toolCallId": "", "toolName": "inner", "parentToolCallId": "outer"},
             {
                 "type": "tool_execution_end",
+                "isError": False,
                 "toolCallId": "",
                 "toolName": "inner",
                 "parentToolCallId": "outer",
@@ -1101,6 +1105,7 @@ class TestEventCollector:
             {"type": "tool_execution_start", "toolCallId": "", "toolName": "ls", "args": {"path": "."}},
             {
                 "type": "tool_execution_end",
+                "isError": False,
                 "toolCallId": "",
                 "toolName": "ls",
                 "result": {"content": [{"type": "text", "text": "top"}]},
@@ -1451,6 +1456,37 @@ class TestEventCollector:
         events[6][field] = value
         collector = _collect(events)
         assert collector.invalid_lines == 1
+
+    def test_tool_end_without_is_error_is_malformed_not_a_success(self):
+        # A failed tool whose end record lost isError used to become a call with no error.
+        events = _events_tool_run()
+        del events[6]["isError"]
+        events[6]["result"] = {"content": [{"type": "text", "text": "boom"}]}
+        collector = _collect(events)
+        assert collector.invalid_lines == 1
+        result = collector.result(model=MODEL, returncode=0, stderr_tail="")
+        assert result.error is not None
+        assert "malformed JSONL" in str(result.error)
+        assert result.tool_calls[0].error == "tool did not run"  # Not a success.
+
+    def test_failed_tool_is_reported_with_its_error(self):
+        events = _events_tool_run()
+        events[6]["isError"] = True
+        events[6]["result"] = {"content": [{"type": "text", "text": "boom"}]}
+        collector = _collect(events)
+        assert collector.invalid_lines == 0
+        assert collector.result(model=MODEL, returncode=0, stderr_tail="").tool_calls[0].error == "boom"
+
+    def test_duration_is_optional_on_a_tool_end(self):
+        events = _events_tool_run()
+        events[6].pop("durationMs", None)
+        assert _collect(events).invalid_lines == 0
+
+    def test_every_tool_end_of_pi_agent_loop_has_a_boolean_is_error(self, pi_reference):
+        for action in ("retry", "parallel"):
+            for version, events in pi_reference({"action": action}).items():
+                ends = [event for event in events if event["type"] == "tool_execution_end"]
+                assert ends and all(isinstance(event.get("isError"), bool) for event in ends), (action, version)
 
     def test_end_with_a_null_id_does_not_close_an_empty_id_execution(self):
         # The execution with the empty id stays open: the bad record is ignored and counted.
@@ -3050,7 +3086,14 @@ class TestPiSpans:
             {"type": "message_end", "message": first, "__now_ms": -300},
             {"type": "tool_execution_start", "toolCallId": "call_1", "toolName": "ls", "args": {}},
             {"__sleep": 0.4},
-            {"type": "tool_execution_end", "toolCallId": "call_1", "toolName": "ls", "result": "x", "durationMs": 250},
+            {
+                "type": "tool_execution_end",
+                "isError": False,
+                "toolCallId": "call_1",
+                "toolName": "ls",
+                "result": "x",
+                "durationMs": 250,
+            },
             {"type": "turn_start"},
             {"type": "compaction_start", "reason": "threshold"},
             {"__sleep": 0.2},

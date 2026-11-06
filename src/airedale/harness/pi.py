@@ -1866,7 +1866,7 @@ def _tool_event_problem(event: dict[str, Any]) -> str | None:
     """Return what is wrong with a ``tool_execution_start`` or ``tool_execution_end`` record, or ``None``.
 
     Pi writes ``toolCallId`` and ``toolName`` as strings (the id can be empty), ``parentToolCallId`` (only for a nested
-    call) as a string, ``isError`` as a boolean and ``durationMs`` as a number. Reading ``null``, a missing id or a
+    call) as a string, ``isError`` (required) as a boolean and ``durationMs`` (optional) as a number. Reading ``null``, a missing id or a
     number as the empty id (or as no parent, or as success) would close the execution of another call, or hide that
     a call failed.
     """
@@ -1879,7 +1879,9 @@ def _tool_event_problem(event: dict[str, Any]) -> str | None:
     if "parentToolCallId" in event and not isinstance(event["parentToolCallId"], str):
         return "parentToolCallId is not a string"
     if event_type == "tool_execution_end":
-        if "isError" in event and not isinstance(event["isError"], bool):
+        # Required: a missing flag would read as a success, and a failed tool would pass (the agent loop of pi 1.4.0 and
+        # 1.5.0 writes a boolean in every end record).
+        if not isinstance(event.get("isError"), bool):
             return "isError is not a boolean"
         duration = event.get("durationMs")
         if "durationMs" in event and (
