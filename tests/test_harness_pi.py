@@ -714,6 +714,50 @@ class TestEventCollector:
         runner = PiRunner(cwd=tmp_path, gateway_headers={"X-Api-Key": "k"}, mcp_servers=servers)
         assert sorted(runner._configured_secrets()) == ["g", "k", "t"]
 
+    def test_multiline_secret_that_ends_the_output_is_removed_with_its_newline(self, tmp_path, monkeypatch):
+        """A PEM key ends with a newline; the tail was stripped before the key was looked for, and the key stayed."""
+        pem = "-----BEGIN PRIVATE KEY-----\nDUMMY-KEY-MATERIAL-0123456789\n-----END PRIVATE KEY-----\n"
+        monkeypatch.setenv("DEMO_PRIVATE_KEY", pem)
+        program = (
+            "import os, sys\nsys.stdin.read()\n"
+            "sys.stderr.write('client diagnostic key=' + os.environ['DEMO_PRIVATE_KEY'])\n"  # The key ends the output.
+            'print(\'{"type": "agent_settled", "aborted": false}\', flush=True)\nsys.exit(3)\n'
+        )
+        runner = PiRunner(cwd=tmp_path, pi_command=[sys.executable, "-c", program])
+        with pytest.raises(RuntimeError) as error:
+            _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
+        text = str(error.value)
+        assert "client diagnostic key=" in text
+        assert "DUMMY-KEY-MATERIAL" not in text
+        assert "BEGIN PRIVATE KEY" not in text
+
+    @pytest.mark.parametrize(
+        "secret", ["éTOKEN-FRAGMENT-0123456789", "€TOKEN-FRAGMENT-0123456789", "😀TOKEN-FRAGMENT-0123456789"]
+    )
+    def test_window_inside_the_first_utf8_character_of_a_secret_through_a_public_run(
+        self, tmp_path, monkeypatch, secret
+    ):
+        from airedale.harness.pi import PI_STDERR_TAIL_BYTES
+
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        program = (
+            "import sys\nsys.stdin.read()\n"
+            f"raw = {secret!r}.encode()\n"
+            # The tail starts one byte after the first byte of the secret: inside its first character.
+            f"sys.stderr.buffer.write(b'prefix:' + raw + b'.' * ({PI_STDERR_TAIL_BYTES} + 1 - len(raw)))\n"
+            'print(\'{"type": "agent_settled", "aborted": false}\', flush=True)\nsys.exit(3)\n'
+        )
+        runner = PiRunner(
+            cwd=tmp_path,
+            pi_command=[sys.executable, "-c", program],
+            gateway_base_url="https://gw.example",
+            gateway_api_key=secret,
+        )
+        with pytest.raises(RuntimeError) as error:
+            _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
+        assert "TOKEN-FRAGMENT-0123456789" not in str(error.value)
+        assert "pi stderr (tail)" in str(error.value)
+
     def test_run_without_a_copy_of_auth_json_hides_nothing_of_the_file(self, tmp_path, monkeypatch):
         operator = tmp_path / "operator"
         operator.mkdir()
@@ -3486,9 +3530,7 @@ class TestRedactSecrets:
     def test_bearer_token_is_removed_even_when_unknown(self):
         from airedale.harness.pi import _redact_secrets
 
-        assert (
-            _redact_secrets("Authorization: Bearer abcdef0123456789xyz\n", []) == "Authorization: Bearer <redacted>\n"
-        )
+        assert _redact_secrets("Authorization: Bearer abcdef0123456789xyz\n", []) == "Authorization: Bearer <redacted>"
         assert _redact_secrets("Authorization: Bearer abc1234", []) == "Authorization: Bearer <redacted>"  # Any length.
 
     @pytest.mark.parametrize("secret", ["a1b2c", "x", "ab", "tok-12", "a" * 3])
@@ -3550,7 +3592,7 @@ class TestRedactSecrets:
     )
     @pytest.mark.parametrize("cut", [1, 2, 3])
     def test_window_that_starts_inside_a_utf8_character(self, secret, cut):
-        from airedale.harness.pi import _redact_secrets, _TailBuffer
+        from airedale.harness.pi import _TailBuffer
 
         payload = secret.encode() + b" rest"
         first_character = len(secret[0].encode())
@@ -3558,25 +3600,25 @@ class TestRedactSecrets:
             pytest.skip("the cut must be inside the first character")
         buffer = _TailBuffer(len(payload) - cut)
         buffer.append(payload)  # The tail starts inside the first character of the secret.
-        redacted = _redact_secrets(buffer.text(), [secret])
+        redacted = buffer.redacted_text([secret])
         assert secret[1:] not in redacted
         assert secret[2:] not in redacted
         assert "0123456789" not in redacted
         assert redacted.endswith("rest")
 
     def test_cut_secret_through_the_tail_buffer_with_overlapping_values(self):
-        from airedale.harness.pi import _redact_secrets, _TailBuffer
+        from airedale.harness.pi import _TailBuffer
 
         long_secret = "tok-0123456789-abcdefghijklmnopqrstuvwx"
         inner = "abcdefghijkl"  # A known value inside the long one.
         payload = b"noise " * 20 + long_secret.encode() + b" end"
         buffer = _TailBuffer(len(long_secret) - 5 + 4)
         buffer.append(payload)
-        redacted = _redact_secrets(buffer.text(), [inner, long_secret])
+        redacted = buffer.redacted_text([inner, long_secret])
         assert "mnopqrstuvwx" not in redacted
         assert "end" in redacted
 
     def test_text_without_secret_is_unchanged(self):
         from airedale.harness.pi import _redact_secrets
 
-        assert _redact_secrets("pi: model not found\n", ["tok-0123456789"]) == "pi: model not found\n"
+        assert _redact_secrets("pi: model not found\n", ["tok-0123456789"]) == "pi: model not found"

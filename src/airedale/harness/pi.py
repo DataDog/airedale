@@ -857,7 +857,7 @@ class PiRunner(DecoratorSpanAgentRunner):
         finally:
             await _finish_cleanup(_cleanup_process(process, tasks))
         # The tail goes into the error of the run, the logs and the spans: no credential in it.
-        return process.returncode, _redact_secrets(stderr_tail.text(), self._secret_values(env))
+        return process.returncode, stderr_tail.redacted_text(self._secret_values(env))
 
 
 async def _cleanup_process(process: asyncio.subprocess.Process, tasks: list[asyncio.Task[Any]]) -> None:
@@ -977,34 +977,44 @@ _AUTH_LONG_VALUE = 20
 
 
 def _redact_secrets(text: str, secrets: Iterable[str]) -> str:
-    """Return ``text`` without the secrets (the longest first), without bearer tokens, and without a cut secret.
+    """Return ``text`` without the secrets (see :func:`_redact_bytes`) and without bearer tokens."""
+    return _finish_redaction(_redact_bytes(text.encode(), secrets))
 
-    Every non-empty secret is removed, whatever its length. The stderr tail is a window on the end of the output: it
-    can start in the middle of a secret, or in the middle of a UTF-8 character of one (the cut bytes give U+FFFD). The
-    start is matched with the end of every secret *first*, before any secret is replaced: a shorter secret inside the
-    cut part would otherwise change the start and hide the cut secret.
+
+def _finish_redaction(data: bytes) -> str:
+    """Decode redacted bytes (replacement characters for what is not UTF-8), strip them, remove bearer tokens."""
+    return _BEARER_RE.sub(r"\1" + _REDACTED, data.decode("utf-8", errors="replace").strip())
+
+
+def _redact_bytes(data: bytes, secrets: Iterable[str]) -> bytes:
+    """Return ``data`` without the secrets (the longest first, whatever their length) and without a cut secret.
+
+    The work is done on the bytes, before any decoding or stripping: a decoding with replacement characters would change
+    a secret (a window that starts inside a UTF-8 character), and stripping would remove the newline that ends a
+    secret (a PEM key). The stderr tail is a window on the end of the output: it can start in the middle of a secret,
+    in the middle of one of its UTF-8 characters. The start is matched with the end of every secret *first*, before
+    any secret is replaced: a shorter secret inside the cut part would otherwise change the start.
     """
-    ordered = sorted({secret for secret in secrets if secret}, key=len, reverse=True)
-    text = _drop_cut_secret(text, ordered)
-    for secret in ordered:
-        text = text.replace(secret, _REDACTED)
-    return _BEARER_RE.sub(r"\1" + _REDACTED, text)
+    encoded = sorted({secret.encode() for secret in secrets if secret}, key=len, reverse=True)
+    data = _drop_cut_secret(data, encoded)
+    for secret in encoded:
+        data = data.replace(secret, _REDACTED.encode())
+    return data
 
 
-#: A start of the tail is taken for the cut end of a secret from this many characters.
+#: A start of the tail is taken for the cut end of a secret from this many bytes.
 _MIN_CUT_SECRET = 4
 
 
-def _drop_cut_secret(text: str, secrets: list[str]) -> str:
-    """Remove the start of ``text`` when it is the end of a secret that the window cut."""
-    body = text.lstrip("\ufffd")  # The bytes of a character that the window cut.
+def _drop_cut_secret(data: bytes, secrets: list[bytes]) -> bytes:
+    """Remove the start of ``data`` when it is the end of a secret that the window cut."""
     best = 0
     for secret in secrets:
-        for size in range(min(len(secret) - 1, len(body)), _MIN_CUT_SECRET - 1, -1):
-            if body.startswith(secret[-size:]):
-                best = max(best, size)
+        for size in range(min(len(secret) - 1, len(data)), max(_MIN_CUT_SECRET, best + 1) - 1, -1):
+            if data.startswith(secret[-size:]):
+                best = size
                 break
-    return _REDACTED + body[best:] if best else text
+    return _REDACTED.encode() + data[best:] if best else data
 
 
 def _collector_extension_failed(collector: _PiEventCollector, returncode: int | None, stderr_tail: str) -> bool:
@@ -1236,6 +1246,10 @@ class _TailBuffer:
 
     def text(self) -> str:
         return self._data.decode("utf-8", errors="replace").strip()
+
+    def redacted_text(self, secrets: Iterable[str]) -> str:
+        """Return the tail without the secrets: they are removed from the raw bytes, then the text is made."""
+        return _finish_redaction(_redact_bytes(bytes(self._data), secrets))
 
 
 async def _drain(stream: asyncio.StreamReader | None, buffer: _TailBuffer) -> None:
