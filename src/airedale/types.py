@@ -177,7 +177,7 @@ class UsageMetrics:
         effective_input = input_tokens + cache_write + cache_read
         # The total is the sum of the parts. The ``totalTokens`` that pi writes is not always that sum: Anthropic
         # (the sum), OpenAI Responses (the total of the provider), Bedrock (without the cache) and Google (the
-        # total of the provider, with the thinking tokens) differ. A damaged value must not change the total,
+        # total of the provider; its thinking tokens are already in ``output``) differ. A damaged value must not change the total,
         # and a different value is not an error, so the field is not used (``is_valid_pi_usage`` checks its form).
         total_tokens = effective_input + output_tokens
         cost = usage_dict.get("cost")

@@ -137,8 +137,15 @@ class TestUsageFromPi:
             ("openai responses", {"input": 4, "output": 5, "cacheRead": 6, "totalTokens": 15}, 15),
             # Bedrock: pi writes the total of the provider, or input + output (no cache).
             ("bedrock", {"input": 10, "output": 5, "cacheRead": 100, "totalTokens": 15}, 115),
-            # Google: the total of the provider has the thinking tokens, which are not in the parts.
-            ("google", {"input": 10, "output": 5, "reasoning": 3, "totalTokens": 18}, 15),
+            # Google, the shape pi writes: output is candidates (5) + thinking (3), reasoning is the 3 thinking tokens
+            # (a subset of output), and the total of the provider is the sum.
+            ("google", {"input": 10, "output": 8, "reasoning": 3, "totalTokens": 18}, 18),
+            # Google, a provider total that is more than the parts (for example tool-use prompt tokens): synthetic.
+            (
+                "google, provider total above the parts",
+                {"input": 10, "output": 8, "reasoning": 3, "totalTokens": 25},
+                18,
+            ),
             ("no total", {"input": 10, "output": 5}, 15),
             ("total zero", {"input": 10, "output": 5, "totalTokens": 0}, 15),
             ("total too high", {"input": 1, "output": 1, "totalTokens": 1_000_000}, 2),
