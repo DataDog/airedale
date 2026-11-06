@@ -339,7 +339,7 @@ class TestEventCollector:
         assert error is not None
         assert "1 usage entry" in str(error)
 
-    @pytest.mark.parametrize("content", ["missing", None, 5, {}, True])
+    @pytest.mark.parametrize("content", ["missing", None, 5, {}, True, "text", ""])
     def test_assistant_message_without_a_content_list_fails_the_run(self, content):
         # content [] is a valid empty response; null, no field or another type is damage.
         events = _events_tool_run()

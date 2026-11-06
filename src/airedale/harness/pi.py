@@ -1298,9 +1298,10 @@ class _PiEventCollector:
                 return None
             if message.get("role") == "assistant":
                 self.assistant_messages.append(message)
-                if not isinstance(message.get("content"), list | str):
-                    # Pi writes ``content`` as a list (empty for a response with no content). ``null`` or no field
-                    # is damage, not an empty response.
+                if not isinstance(message.get("content"), list):
+                    # Pi writes ``content`` of an assistant message as a list of blocks (an empty list for a
+                    # response with no content; every provider of pi 1.4.0 and 1.5.0 does, also the test provider).
+                    # ``null``, no field or a string is damage, not an empty response.
                     self.calls_without_content += 1
                 # A model call must have usage.
                 self._add_usage(message.get("usage"), "model call")
