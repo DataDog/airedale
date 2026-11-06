@@ -28,7 +28,7 @@ from airedale.harness.base import AgentThought, AgentToolCall
 from airedale.harness.pi import PI_BUILTIN_TOOLS, PiRunner, _PiEventCollector
 from airedale.mcp import McpServerSpec, pi_literal, pi_mcp_tool_name, provider_mcp_tool_name
 from airedale.skills import pi_skill_dirs
-from airedale.types import ModelSpec, UsageMetrics
+from airedale.types import ModelSpec, UsageMetrics, is_valid_pi_usage
 
 MODEL = ModelSpec.parse("anthropic/claude-sonnet-4-6")
 
@@ -125,6 +125,37 @@ class TestUsageFromPi:
         assert usage.cache_write_input_tokens == 90
         assert usage.reasoning_output_tokens == 4
         assert usage.estimated_cost_usd == pytest.approx(0.0009)
+
+    @pytest.mark.parametrize(
+        ("label", "usage", "total"),
+        [
+            # The example of the review: the total says 1, the parts are 115.
+            ("inconsistent", {"input": 100, "output": 10, "cacheRead": 5, "totalTokens": 1}, 115),
+            # Anthropic: pi writes input + output + cacheRead + cacheWrite.
+            ("anthropic", {"input": 10, "output": 5, "cacheRead": 100, "cacheWrite": 20, "totalTokens": 135}, 135),
+            # OpenAI Responses: pi writes the total of the provider (input and output, cache inside the input).
+            ("openai responses", {"input": 4, "output": 5, "cacheRead": 6, "totalTokens": 15}, 15),
+            # Bedrock: pi writes the total of the provider, or input + output (no cache).
+            ("bedrock", {"input": 10, "output": 5, "cacheRead": 100, "totalTokens": 15}, 115),
+            # Google: the total of the provider has the thinking tokens, which are not in the parts.
+            ("google", {"input": 10, "output": 5, "reasoning": 3, "totalTokens": 18}, 15),
+            ("no total", {"input": 10, "output": 5}, 15),
+            ("total zero", {"input": 10, "output": 5, "totalTokens": 0}, 15),
+            ("total too high", {"input": 1, "output": 1, "totalTokens": 1_000_000}, 2),
+        ],
+    )
+    def test_total_is_the_sum_of_the_parts(self, label, usage, total):
+        usage = {**usage, "cost": {"total": 0.0}}
+        assert UsageMetrics.from_pi(usage).total_tokens == total, label
+        assert is_valid_pi_usage(usage)  # A different total is not an error.
+
+    def test_run_with_a_different_total_succeeds_with_the_sum(self):
+        events = _events_tool_run()
+        events[4]["message"]["usage"]["totalTokens"] = 1
+        collector = _collect(events)
+        result = collector.result(model=MODEL, returncode=0, stderr_tail="")
+        assert result.error is None
+        assert result.usage.total_tokens == 3 + 8 + 1447 + 1 + 12 + 1447 + 90  # the parts of both calls
 
     def test_missing_or_bad_values_are_zero(self):
         usage = UsageMetrics.from_pi({"input": "x", "cost": "bad"})

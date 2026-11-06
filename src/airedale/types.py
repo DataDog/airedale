@@ -166,7 +166,8 @@ class UsageMetrics:
         Pi reports ``input`` without the cached tokens (for every provider API),
         so the effective input is ``input + cacheRead + cacheWrite``, as for the
         Claude Agent SDK. ``reasoning`` is a subset of ``output``. ``cost.total``
-        is the cost pi computes from its model catalog.
+        is the cost pi computes from its model catalog. ``total_tokens`` is the sum
+        of the parts, whatever ``totalTokens`` says.
         """
         usage_dict = usage if isinstance(usage, dict) else {}
         input_tokens = coerce_int(usage_dict.get("input"))
@@ -174,7 +175,11 @@ class UsageMetrics:
         cache_write = coerce_int(usage_dict.get("cacheWrite"))
         cache_read = coerce_int(usage_dict.get("cacheRead"))
         effective_input = input_tokens + cache_write + cache_read
-        total_tokens = coerce_int(usage_dict.get("totalTokens")) or effective_input + output_tokens
+        # The total is the sum of the parts. The ``totalTokens`` that pi writes is not always that sum: Anthropic
+        # (the sum), OpenAI Responses (the total of the provider), Bedrock (without the cache) and Google (the
+        # total of the provider, with the thinking tokens) differ. A damaged value must not change the total,
+        # and a different value is not an error, so the field is not used (``is_valid_pi_usage`` checks its form).
+        total_tokens = effective_input + output_tokens
         cost = usage_dict.get("cost")
         try:
             cost_total = float(cost.get("total") or 0.0) if isinstance(cost, dict) else 0.0
