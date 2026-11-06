@@ -126,6 +126,11 @@ class TestUsageFromPi:
         assert usage.reasoning_output_tokens == 4
         assert usage.estimated_cost_usd == pytest.approx(0.0009)
 
+    def test_cost_above_the_float_range_is_damaged_and_does_not_raise(self):
+        usage = {"input": 1, "output": 1, "cost": {"total": 10**400}}
+        assert not is_valid_pi_usage(usage)
+        assert UsageMetrics.from_pi(usage).estimated_cost_usd == 0.0  # No exception for a record that is not checked.
+
     def test_huge_integers_do_not_raise(self):
         # An integer above the range of a float: it is finite, and it must not abort the run with OverflowError.
         usage = {"input": 10**400, "output": 1, "cost": {"total": 0}}
@@ -805,6 +810,7 @@ class TestEventCollector:
             {"input": 1, "output": 1, "cost": 5},
             {"input": 1, "output": 1, "cost": {"total": "Infinity"}},
             {"input": 1, "output": 1, "cost": {"total": float("inf")}},
+            {"input": 1, "output": 1, "cost": {"total": 10**400}},  # An integer that a float cannot hold.
             {"input": 1, "output": 1, "cost": {"total": -1}},
             {"input": 1, "output": 1, "cost": {"total": None}},
             {"input": float("nan"), "output": 1},

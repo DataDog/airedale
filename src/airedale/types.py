@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 import re
+import sys
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -183,7 +184,7 @@ class UsageMetrics:
         cost = usage_dict.get("cost")
         try:
             cost_total = float(cost.get("total") or 0.0) if isinstance(cost, dict) else 0.0
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             cost_total = 0.0
         if not math.isfinite(cost_total):
             cost_total = 0.0  # "Infinity" or "NaN": not a cost, and not valid JSON in the metrics.
@@ -221,7 +222,7 @@ def is_valid_pi_usage(usage: Any) -> bool:
     if not all(key not in usage or _is_count(usage[key]) for key in PI_USAGE_COUNT_KEYS):
         return False
     cost = usage.get("cost")
-    return isinstance(cost, dict) and _is_finite_number(cost.get("total"))
+    return isinstance(cost, dict) and _is_cost(cost.get("total"))
 
 
 def _is_finite_number(value: Any) -> bool:
@@ -229,6 +230,11 @@ def _is_finite_number(value: Any) -> bool:
         return False
     # (``math.isfinite`` converts to a float: an integer above 1.8e308 raises OverflowError, and it is finite.)
     return value >= 0 if isinstance(value, int) else math.isfinite(value) and value >= 0
+
+
+def _is_cost(value: Any) -> bool:
+    """A cost total: a finite number >= 0 that a float can hold (``float()`` of a bigger integer raises)."""
+    return _is_finite_number(value) and value <= sys.float_info.max
 
 
 def _is_count(value: Any) -> bool:
