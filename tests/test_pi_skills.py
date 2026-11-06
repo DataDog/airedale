@@ -463,3 +463,38 @@ def test_a_long_integer_in_a_project_skill_still_collides(tmp_path):
             "---\nname: alpha\ndescription: d\n---\n",
             "---\nname: alpha\ndescription: d\nx: " + "9" * 5000 + "\n---\n",
         )
+
+
+def _settings(tmp_path, entries):
+    cwd = tmp_path / "cwd"
+    (cwd / ".pi").mkdir(parents=True)
+    (cwd / ".pi" / "settings.json").write_text(json.dumps({"skills": entries}))
+    return cwd
+
+
+def test_tilde_user_in_settings_is_an_ordinary_relative_path(tmp_path):
+    # Pi expands only "~" and "~/...": "~name" is a path below .pi. Path.expanduser raised RuntimeError for it.
+    from airedale.skills import _pi_settings_skill_paths
+
+    cwd = _settings(tmp_path, ["~user-that-does-not-exist/skills", "~root/skills", "~x"])
+    assert _pi_settings_skill_paths(cwd) == [
+        cwd / ".pi" / "~user-that-does-not-exist" / "skills",
+        cwd / ".pi" / "~root" / "skills",
+        cwd / ".pi" / "~x",
+    ]
+
+
+def test_tilde_and_tilde_slash_are_the_home_directory(tmp_path, monkeypatch):
+    from airedale.skills import _pi_settings_skill_paths
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    cwd = _settings(tmp_path, ["~", "~/skills/extra"])
+    assert _pi_settings_skill_paths(cwd) == [home, home / "skills" / "extra"]
+
+
+def test_skill_dirs_do_not_raise_for_a_tilde_user_entry(tmp_path):
+    cwd = _settings(tmp_path, ["~user-that-does-not-exist/skills"])
+    assert pi_skill_dirs([], str(cwd)) == []  # The path does not exist: it is left out.

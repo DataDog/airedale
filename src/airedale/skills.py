@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 from pathlib import Path
 
@@ -230,9 +231,22 @@ def _pi_settings_skill_paths(workspace: Path) -> list[Path]:
     for entry in entries:
         if not isinstance(entry, str) or not entry.strip() or entry.startswith(("!", "+", "-")):
             continue
-        path = Path(entry.strip()).expanduser()
+        path = _expand_pi_home(entry.strip())
         paths.append(path if path.is_absolute() else (workspace / ".pi" / path))
     return paths
+
+
+def _expand_pi_home(entry: str) -> Path:
+    """Expand a leading ``~`` as pi does (``normalizePath`` of pi): only ``~`` and ``~/...`` (also ``~\\`` on Windows).
+
+    ``Path.expanduser`` also looks up ``~name`` in the user database, and raises ``RuntimeError`` when it cannot: pi
+    keeps ``~name/...`` as an ordinary relative path.
+    """
+    if entry == "~":
+        return Path.home()
+    if entry.startswith("~/") or (os.name == "nt" and entry.startswith("~\\")):
+        return Path.home() / entry[2:]
+    return Path(entry)
 
 
 def _pi_skill_entries(directory: Path, mode: str, root: Path | None = None) -> list[Path]:
