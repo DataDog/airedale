@@ -114,6 +114,7 @@ import heapq
 import json
 import logging
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -635,6 +636,18 @@ class PiRunner(DecoratorSpanAgentRunner):
         env["PI_TELEMETRY"] = "0"
         return env
 
+    def _secret_values(self, env: Mapping[str, str]) -> list[str]:
+        """Return the credentials that the run can hold: the gateway token and key, the provider key variables, and the
+        value of any variable of the child environment that has a name like a secret (pi, an extension or a child
+        process can print any of them to stderr)."""
+        names = [*PI_PROVIDER_API_KEY_ENVS.values(), *self.other_gateway_api_key_envs]
+        if self.gateway_api_key_env:
+            names.append(self.gateway_api_key_env)
+        values = [self.gateway_bearer_token, self.gateway_api_key]
+        values.extend(value for name in names for value in [os.environ.get(name), env.get(name)])
+        values.extend(value for name, value in env.items() if _SECRET_ENV_NAME_RE.search(name))
+        return [value for value in dict.fromkeys(values) if value and len(value) >= _MIN_SECRET_LENGTH]
+
     # ------------------------------------------------------------------ #
     # Command line
     # ------------------------------------------------------------------ #
@@ -781,7 +794,8 @@ class PiRunner(DecoratorSpanAgentRunner):
                 raise reader.exception()  # type: ignore[misc]
         finally:
             await _finish_cleanup(_cleanup_process(process, tasks))
-        return process.returncode, stderr_tail.text()
+        # The tail goes into the error of the run, the logs and the spans: no credential in it.
+        return process.returncode, _redact_secrets(stderr_tail.text(), self._secret_values(env))
 
 
 async def _cleanup_process(process: asyncio.subprocess.Process, tasks: list[asyncio.Task[Any]]) -> None:
@@ -858,6 +872,33 @@ async def _read_events(
             await _notify(progress, f"{SDK_NAME}/{model.label}: {message}")
         if collector.stop_requested or collector.settled:
             return
+
+
+#: Names of environment variables that hold a credential.
+_SECRET_ENV_NAME_RE = re.compile(r"(?i)(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH)")
+#: A value shorter than this is not taken for a credential (it would also hide ordinary words in a message).
+_MIN_SECRET_LENGTH = 6
+#: ``Authorization: Bearer <token>`` or ``Bearer <token>``: the token is removed even when it is not a known value.
+_BEARER_RE = re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]{8,}")
+_REDACTED = "<redacted>"
+
+
+def _redact_secrets(text: str, secrets: Iterable[str]) -> str:
+    """Return ``text`` without the secrets (the longest first), without bearer tokens, and without a cut secret.
+
+    The stderr tail is a window on the end of the output: it can start in the middle of a secret. A start that is the
+    end of a secret (of at least 8 characters) is removed too.
+    """
+    ordered = sorted(set(secrets), key=len, reverse=True)
+    for secret in ordered:
+        text = text.replace(secret, _REDACTED)
+    text = _BEARER_RE.sub(r"\1" + _REDACTED, text)
+    for secret in ordered:
+        for size in range(len(secret) - 1, 7, -1):
+            if text.startswith(secret[-size:]):
+                text = _REDACTED + text[size:]
+                break
+    return text
 
 
 def _collector_extension_failed(collector: _PiEventCollector, returncode: int | None, stderr_tail: str) -> bool:

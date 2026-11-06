@@ -424,6 +424,35 @@ class TestEventCollector:
         _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
         assert len(probed) == 1
 
+    def test_stderr_tail_of_a_failed_run_has_no_credential(self, tmp_path, fake_pi, monkeypatch):
+        """Pi, an extension or a child can print the gateway token to stderr: the error must not have it."""
+        token = "tok-GATEWAY-secret-0123456789"
+        key = "sk-GATEWAY-key-abcdef0123456789"
+        other = "provider-NATIVE-key-ABCDEF123456"
+        monkeypatch.setenv("ANTHROPIC_API_KEY", other)
+        monkeypatch.setenv("MY_CUSTOM_TOKEN", "custom-TOKEN-value-123456")
+        events = [{"type": "agent_start"}, {"type": "agent_settled", "aborted": False}]
+        command, _ = fake_pi(
+            events,
+            FAKE_PI_STDERR=f"boom {token} and {key} and {other} and custom-TOKEN-value-123456\n"
+            f"Authorization: Bearer unknown-bearer-value-9999\n",
+            FAKE_PI_EXIT="3",
+        )
+        runner = PiRunner(
+            cwd=tmp_path,
+            pi_command=command,
+            gateway_base_url="https://gw.example",
+            gateway_bearer_token=token,
+            gateway_api_key=key,
+        )
+        with pytest.raises(RuntimeError) as error:
+            _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
+        text = str(error.value)
+        assert "boom" in text  # The rest of the message is kept.
+        for secret in (token, key, other, "custom-TOKEN-value-123456", "unknown-bearer-value-9999"):
+            assert secret not in text
+        assert text.count("<redacted>") >= 5
+
     def test_empty_final_response_through_a_run(self, tmp_path, fake_pi):
         events = _events_tool_run()
         events[-4]["message"]["content"] = []
@@ -3070,3 +3099,33 @@ class TestPiCommandEnv:
         monkeypatch.setattr(pi_module, "_is_windows", lambda: False)
         monkeypatch.setenv("AIREDALE_PI_COMMAND", "[tools]/pi --x")
         assert pi_module._default_pi_command() == ["[tools]/pi", "--x"]
+
+
+class TestRedactSecrets:
+    def test_secrets_are_replaced_longest_first(self):
+        from airedale.harness.pi import _redact_secrets
+
+        assert _redact_secrets("a SECRET-LONG-VALUE b SECRET-LONG c", ["SECRET-LONG", "SECRET-LONG-VALUE"]) == (
+            "a <redacted> b <redacted> c"
+        )
+
+    def test_bearer_token_is_removed_even_when_unknown(self):
+        from airedale.harness.pi import _redact_secrets
+
+        assert (
+            _redact_secrets("Authorization: Bearer abcdef0123456789xyz\n", []) == "Authorization: Bearer <redacted>\n"
+        )
+        assert _redact_secrets("bearer short", []) == "bearer short"  # Too short to be a token.
+
+    def test_a_secret_cut_by_the_window_is_removed(self):
+        from airedale.harness.pi import _redact_secrets
+
+        secret = "tok-0123456789-abcdefghij"
+        tail = secret[10:] + " rest of the line"  # The tail starts in the middle of the secret.
+        assert _redact_secrets(tail, [secret]) == "<redacted> rest of the line"
+        assert _redact_secrets("short", [secret]) == "short"
+
+    def test_text_without_secret_is_unchanged(self):
+        from airedale.harness.pi import _redact_secrets
+
+        assert _redact_secrets("pi: model not found\n", ["tok-0123456789"]) == "pi: model not found\n"
