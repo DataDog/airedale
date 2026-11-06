@@ -1244,7 +1244,13 @@ class _PiEventCollector:
 
         ``received_ns`` is the time (epoch ns) when the record arrived.
         """
-        text = line.decode("utf-8", errors="replace").rstrip("\r\n")
+        try:
+            # Strict: a replaced byte would change an answer or a tool result without a sign.
+            text = line.decode("utf-8").rstrip("\r\n")
+        except UnicodeDecodeError:
+            self.invalid_lines += 1
+            logger.debug("Ignoring a pi stdout line that is not UTF-8: %r", line[:200])
+            return None
         if not text.strip():
             return None
         try:

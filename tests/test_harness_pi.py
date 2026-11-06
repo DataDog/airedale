@@ -813,6 +813,27 @@ class TestEventCollector:
         events[4]["message"]["usage"] = _usage(0, 0)
         assert _collect(events).result(model=MODEL, returncode=0, stderr_tail="").error is None
 
+    def test_invalid_utf8_in_a_record_fails_the_run(self):
+        # A byte that is not UTF-8 inside a JSON string: it must not be replaced by U+FFFD and accepted.
+        events = _events_tool_run()
+        collector = _PiEventCollector()
+        for event in events:
+            line = (json.dumps(event, ensure_ascii=False) + "\n").encode()
+            if event.get("type") == "message_end" and event["message"].get("role") == "user":
+                line = line.replace(b'"hi"', b'"h\xffi"')
+            collector.feed_line(line)
+        assert collector.invalid_lines == 1
+        error = collector.result(model=MODEL, returncode=0, stderr_tail="").error
+        assert error is not None
+        assert "malformed JSONL" in str(error)
+
+    def test_valid_utf8_and_escaped_surrogates_are_accepted(self):
+        collector = _PiEventCollector()
+        line = b'{"type": "session", "id": "caf\\u00e9 \\ud83d\\ude00 \xc3\xa9 \\ud800"}\n'
+        collector.feed_line(line)
+        assert collector.invalid_lines == 0
+        assert collector.session_id is not None
+
     def test_non_json_lines_are_counted(self):
         collector = _PiEventCollector()
         assert collector.feed_line(b"not json\n") is None
