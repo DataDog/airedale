@@ -374,6 +374,60 @@ class TestEventCollector:
         assert error is not None
         assert "without a content list" in str(error)
 
+    @pytest.mark.parametrize(
+        "block",
+        [
+            "answer",
+            None,
+            5,
+            ["text"],
+            {},
+            {"type": "text"},
+            {"type": "text", "text": None},
+            {"type": "text", "text": {"a": 1}},
+            {"type": "text", "text": 5},
+            {"type": "text", "text": ["x"]},
+            {"type": "thinking"},
+            {"type": "thinking", "thinking": {"a": 1}},
+            {"type": "toolCall", "name": "ls", "arguments": {}},
+            {"type": "toolCall", "id": 5, "name": "ls", "arguments": {}},
+            {"type": "toolCall", "id": "x", "arguments": {}},
+            {"type": "toolCall", "id": "x", "name": ["ls"], "arguments": {}},
+            {"type": "toolCall", "id": "x", "name": "ls"},
+            {"type": "toolCall", "id": "x", "name": "ls", "arguments": "{}"},
+            {"type": "toolCall", "id": "x", "name": "ls", "arguments": [1]},
+            {"type": "image", "data": "x"},
+            {"type": "unknown", "text": "x"},
+            {"type": 5, "text": "x"},
+        ],
+        ids=repr,
+    )
+    def test_damaged_block_in_the_final_response_fails_the_run(self, block):
+        # The answer would be made without the block (or from a stringified object) and scored.
+        events = _events_tool_run()
+        events[-4]["message"]["content"] = [{"type": "text", "text": "The directory is empty."}, block]
+        error = _collect(events).result(model=MODEL, returncode=0, stderr_tail="").error
+        assert error is not None
+        assert "damaged block" in str(error)
+
+    def test_valid_blocks_of_every_kind_are_accepted(self):
+        events = _events_tool_run()
+        events[-4]["message"]["content"] = [
+            {"type": "thinking", "thinking": "hmm", "thinkingSignature": "sig"},
+            {"type": "text", "text": "The directory is empty.", "textSignature": "sig"},
+            {"type": "toolCall", "id": "", "name": "ls", "arguments": {}, "thoughtSignature": "sig"},
+            {"type": "text", "text": ""},
+        ]
+        result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
+        assert result.error is None
+
+    def test_blocks_of_the_recorded_events_of_pi_agent_loop_are_valid(self, pi_reference):
+        for action in ("retry", "parallel"):
+            for version, events in pi_reference({"action": action}).items():
+                collector = _collect(events)
+                assert collector.calls_without_content == 0, (action, version)
+                assert collector.assistant_messages, (action, version)
+
     def test_content_of_a_tool_call_message_must_be_a_list_too(self):
         events = _events_tool_run()
         events[4]["message"]["content"] = None

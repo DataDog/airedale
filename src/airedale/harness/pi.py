@@ -1347,10 +1347,11 @@ class _PiEventCollector:
                 return None
             if message.get("role") == "assistant":
                 self.assistant_messages.append(message)
-                if not isinstance(message.get("content"), list):
+                if not _valid_assistant_content(message.get("content")):
                     # Pi writes ``content`` of an assistant message as a list of blocks (an empty list for a
-                    # response with no content; every provider of pi 1.4.0 and 1.5.0 does, also the test provider).
-                    # ``null``, no field or a string is damage, not an empty response.
+                    # response with no content; every provider of pi 1.4.0 and 1.5.0 does, also the test provider),
+                    # and each block is a text, thinking or toolCall block. ``null``, no field, a string, or a
+                    # block that is not one of these is damage, not an empty or a partial response.
                     self.calls_without_content += 1
                 # A model call must have usage.
                 self._add_usage(message.get("usage"), "model call")
@@ -1523,8 +1524,8 @@ class _PiEventCollector:
             )
         if self.calls_without_content:
             return RuntimeError(
-                f"pi wrote {self.calls_without_content} assistant message(s) without a content list for "
-                f"{model.label}; the answer or the tool calls can be missing"
+                f"pi wrote {self.calls_without_content} assistant message(s) without a content list or with a damaged "
+                f"block for {model.label}; the answer or the tool calls can be missing"
             )
         if self.damaged_usage:
             sources = ", ".join(f"{count} {source}" for source, count in Counter(self.damaged_usage).items())
@@ -1691,6 +1692,37 @@ class _PiEventCollector:
                 "duration_ms": execution.duration_ms if execution is not None else None,
             },
         )
+
+
+def _valid_assistant_content(content: Any) -> bool:
+    """Return True when ``content`` is a list of the blocks that pi writes in an assistant message.
+
+    ``TextContent`` (``text`` is a string), ``ThinkingContent`` (``thinking`` is a string) and ``ToolCall`` (``id`` and
+    ``name`` are strings, ``arguments`` is an object), as in ``AssistantMessage`` of pi-ai 1.4.0 and 1.5.0. An empty
+    list is valid. Any other block, or a field of another type, would be dropped or turned into text when the answer
+    is made, so it is damage.
+    """
+    if not isinstance(content, list):
+        return False
+    for block in content:
+        if not isinstance(block, dict):
+            return False
+        block_type = block.get("type")
+        if block_type == "text":
+            valid = isinstance(block.get("text"), str)
+        elif block_type == "thinking":
+            valid = isinstance(block.get("thinking"), str)
+        elif block_type == "toolCall":
+            valid = (
+                isinstance(block.get("id"), str)
+                and isinstance(block.get("name"), str)
+                and isinstance(block.get("arguments"), dict)
+            )
+        else:
+            valid = False
+        if not valid:
+            return False
+    return True
 
 
 #: ``stopReason`` of an assistant message whose tool calls pi does not run.
