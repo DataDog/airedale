@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 import math
-import sys
 from typing import Any
 
 #: Longer integers are above 1.8e308 (a double has at most 309 digits): ``Infinity`` for JavaScript, and no
@@ -36,9 +35,14 @@ def _reject_constant(name: str) -> Any:
 
 
 def _parse_int(text: str) -> int | float:
-    """An integer token as ``JSON.parse`` reads it: the nearest double (9007199254740993 is 9007199254740992)."""
+    """An integer token as ``JSON.parse`` reads it: the nearest double (9007199254740993 is 9007199254740992).
+
+    The rounding comes first, then the decision if the result is finite: ``2**1024 - 2**970 - 1`` and the largest
+    double plus 1 round to the largest double, and only a value that rounds above it is ``Infinity``.
+    """
     if len(text.lstrip("-")) <= _MAX_INT_DIGITS:
-        value = int(text)
-        if abs(value) <= sys.float_info.max:
-            return int(float(value))  # float() of an int rounds to the nearest double, as JavaScript does.
+        try:
+            return int(float(int(text)))  # float() of an int rounds to the nearest double, as JavaScript does.
+        except OverflowError:
+            pass
     return -math.inf if text.startswith("-") else math.inf

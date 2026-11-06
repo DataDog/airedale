@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import math
+import sys
 
 import pytest
 
@@ -31,10 +32,14 @@ def test_text_that_javascript_rejects_raises_value_error(text):
         js_json.loads(text)
 
 
+MAX_DOUBLE = int(sys.float_info.max)
 NUMBERS = [
     "0", "7", "-7", "123456789", "9007199254740991", "9007199254740992", "9007199254740993", "9007199254740995",
     "-9007199254740993", "1000000000000000100", "123456789012345678901", "99999999999999999999999",
     "1" + "0" * 308, "1" + "0" * 309, "9" * 400, "9" * 5000, "-" + "9" * 5000,
+    str(MAX_DOUBLE), str(MAX_DOUBLE + 1), str(-MAX_DOUBLE), str(-MAX_DOUBLE - 1),
+    str(2**1024 - 2**970 - 1), str(2**1024 - 2**970), str(2**1024 - 2**970 + 1),
+    str(-(2**1024 - 2**970)), str(-(2**1024 - 2**970) - 1),
     "NaN", "Infinity", "-Infinity", "1.5", "1e3", "1E400", "[1]", "{",
 ]  # fmt: skip
 
@@ -70,3 +75,11 @@ def test_numbers_are_read_like_json_parse(pi_reference):
 def test_integers_are_the_nearest_double(text, value):
     assert js_json.loads(text) == value
     assert isinstance(js_json.loads(text), int)
+
+
+def test_the_largest_double_plus_one_is_not_infinity():
+    largest = int(sys.float_info.max)
+    assert js_json.loads(str(largest + 1)) == largest
+    assert js_json.loads(str(-largest - 1)) == -largest
+    assert js_json.loads(str(2**1024 - 2**970)) == math.inf  # Rounds above the largest double.
+    assert js_json.loads(str(-(2**1024 - 2**970))) == -math.inf
