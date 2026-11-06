@@ -311,7 +311,8 @@ Notes:
     headers); an explicit `"type": null` is not a missing type; the URLs are read
     like JavaScript's `URL` (`airedale.whatwg_url`: tabs and newlines removed,
     `127.1` is `127.0.0.1`), and a host that the reader cannot decide in every
-    detail (IDNA, odd IPv6) counts as accepted by pi.
+    detail (any non-ASCII host: IDNA removes and maps characters, odd IPv6) counts as accepted by pi, whatever else
+    fails in it (only an ASCII character that no mapping removes, such as a space, is a sure failure).
     Two scenario servers whose names differ only in `-`/`_` also raise (pi
     would run only one). `allowed_builtin_tools` is the complete `--tools`
     list for pi (plus `mcp__*` and pi's MCP resource tools when MCP servers are present; the resources of a server with a `tool_names` allow-list stay unavailable, as it is `hidden`; on Windows the all-tools default also has `powershell`): a repo extension tool is declared only when

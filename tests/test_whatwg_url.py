@@ -11,6 +11,16 @@ import pytest
 from airedale.whatwg_url import is_loopback_host, parse_url
 
 URLS = [
+    "https://%C2%AD127.1/mcp",
+    "https://\u00ad127.1/mcp",
+    "https://127\u200b.1/mcp",
+    "http://127.\u200b1/",
+    "http://\u200b/",
+    "http://\u00ad.\u00ad/",
+    "http://1\u00ad.2.3.4/",
+    "http://999\u00ad.1/",
+    "http://%C2%AD/",
+    "http://a\u00ad b/",
     "https://example.test/mcp",
     "http://localhost:80/x?y#z",
     "ht\ttps://example.invalid/mcp",
@@ -161,3 +171,19 @@ def test_control_characters_are_removed(value):
 )
 def test_urls_that_fail(value):
     assert parse_url(value) is None
+
+
+@pytest.mark.parametrize(
+    "value", ["https://%C2%AD127.1/mcp", "https://\u00ad127.1/mcp", "https://127\u200b.1/mcp", "http://999\u00ad.1/"]
+)
+def test_a_host_with_characters_that_idna_removes_is_never_a_sure_failure(value):
+    # Pi removes these characters from the host (127.1 is then 127.0.0.1): the reader does not copy that step,
+    # so it must not say that the URL fails.
+    url = parse_url(value)
+    assert url is not None
+    assert not url.exact
+    assert is_loopback_host(url, ("127.0.0.1",))
+
+
+def test_an_ascii_forbidden_character_is_still_a_sure_failure():
+    assert parse_url("http://a\u00ad b/") is None

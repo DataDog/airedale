@@ -173,16 +173,21 @@ def _parse_host(text: str) -> tuple[str, bool] | None:
             return text.lower(), False
         return f"[{_serialize_ipv6(address)}]", True
     decoded = unquote_to_bytes(text).decode("utf-8", errors="replace")
-    exact = decoded.isascii()
-    # UTS #46 mapping is close to NFKC and lowercase. (Punycode and the validity rules of IDNA are not read.)
-    domain = unicodedata.normalize("NFKC", decoded).lower() if not exact else decoded.lower()
-    domain = domain.replace("\u3002", ".").replace("\uff0e", ".").replace("\uff61", ".")
+    if not decoded.isascii():
+        # IDNA processing (UTS #46) maps and removes characters (U+00AD, U+200B, full-width forms...), and this module
+        # does not copy it. What the host is after that, and if the URL fails, is not known. Only the characters that
+        # no mapping removes decide a failure; any other outcome counts as accepted by pi (fail closed).
+        if any(char in _FORBIDDEN_HOST_CHARS for char in decoded if char.isascii()):
+            return None
+        mapped = unicodedata.normalize("NFKC", decoded).lower()
+        return mapped, False
+    domain = decoded.lower()
     if not domain or any(char in _FORBIDDEN_HOST_CHARS for char in domain):
         return None
     if _ends_in_number(domain):
         address_text = _parse_ipv4(domain)
         return (address_text, True) if address_text is not None else None
-    return domain, exact
+    return domain, True
 
 
 def _serialize_ipv6(address: ipaddress.IPv6Address) -> str:

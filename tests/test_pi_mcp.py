@@ -131,6 +131,17 @@ CASES: list[tuple[str, dict, str, Any, bool, list[str]]] = [
         ["same"],
     ),
     ("type stdio with url", SCENARIO, "same", {"url": "https://e.test/mcp", "type": "stdio"}, False, []),
+    ("url, soft hyphen before IPv4", SCENARIO, "same", {"url": "https://\u00ad127.1/mcp"}, False, ["same"]),
+    ("url, encoded soft hyphen before IPv4", SCENARIO, "same", {"url": "https://%C2%AD127.1/mcp"}, False, ["same"]),
+    ("url, zero-width space in IPv4", SCENARIO, "same", {"url": "https://127\u200b.1/mcp"}, False, ["same"]),
+    (
+        "oauth metadata url, soft hyphen before 127.1",
+        SCENARIO,
+        "same",
+        {"url": "https://example.invalid/mcp", "oauth": {"authServerMetadataUrl": "http://\u00ad127.1/meta"}},
+        False,
+        ["same"],
+    ),
     ("identical definition", SCENARIO, "same", SCENARIO["same"], False, ["same"]),
 ]
 
@@ -180,6 +191,13 @@ class TestRunnerCheck:
         runner = self._runner(
             tmp_path, [McpServerSpec(name="same", command="scenario")], "same", {"command": "project"}, bom=True
         )
+        with pytest.raises(ValueError, match="same"):
+            runner._check_project_mcp_collisions()
+
+    @pytest.mark.parametrize("url", ["https://%C2%AD127.1/mcp", "https://127\u200b.1/mcp"])
+    def test_uncertain_host_of_a_same_name_entry_stops_the_run(self, tmp_path, url):
+        # Pi removes the soft hyphen and the zero-width space from the host: the entry replaces the server.
+        runner = self._runner(tmp_path, [McpServerSpec(name="same", command="scenario")], "same", {"url": url})
         with pytest.raises(ValueError, match="same"):
             runner._check_project_mcp_collisions()
 

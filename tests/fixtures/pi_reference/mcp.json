@@ -539,6 +539,84 @@
     ]
    }
   },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiaHR0cHM6Ly8lQzIlQUQxMjcuMS9tY3AifX19\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "url": "https://%C2%AD127.1/mcp"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "url": "https://%C2%AD127.1/mcp"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiaHR0cHM6Ly8xMjdcdTIwMGIuMS9tY3AifX19\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "url": "https://127\u200b.1/mcp"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "url": "https://127\u200b.1/mcp"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiaHR0cHM6Ly9cdTAwYWQxMjcuMS9tY3AifX19\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "url": "https://\u00ad127.1/mcp"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "url": "https://\u00ad127.1/mcp"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   }
+  },
   "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiaHR0cHM6Ly9lLnRlc3QiLCAib2F1dGgiOiB7ImNhbGxiYWNrUG9ydCI6IDB9fX19\"}": {
    "1.4.0": {
     "error_count": 1,
@@ -817,6 +895,38 @@
       },
       "name": "same",
       "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiaHR0cHM6Ly9leGFtcGxlLmludmFsaWQvbWNwIiwgIm9hdXRoIjogeyJhdXRoU2VydmVyTWV0YWRhdGFVcmwiOiAiaHR0cDovL1x1MDBhZDEyNy4xL21ldGEifX19fQ==\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "oauth": {
+        "authServerMetadataUrl": "http://\u00ad127.1/meta"
+       },
+       "url": "https://example.invalid/mcp"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "oauth": {
+        "authServerMetadataUrl": "http://\u00ad127.1/meta"
+       },
+       "url": "https://example.invalid/mcp"
+      },
+      "name": "same",
+      "scope": "project"
      }
     ]
    }
