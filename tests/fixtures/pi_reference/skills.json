@@ -1053,7 +1053,175 @@
     ]
    }
   },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nm: &a {x: 1, y: 2}\\no: !!omap [*a, *a]\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nm: &a {x: 1, y: 2}\\no: !!omap [*a]\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nm: &a {x: 1, y: 2}\\no: !!pairs [*a, *a]\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nm: &a {x: 1, y: 2}\\no: !!pairs [*a]\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nm: &a {x: 1}\\nn: &b {x: 2}\\no: !!omap [*a, *b]\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nm: &a {x: 1}\\nn: &b {x: 2}\\no: !!pairs [*a, *b]\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nm: &a {x: 1}\\no: !!omap [*a, *a]\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nm: &a {x: 1}\\no: !!omap [*a, {y: 2}]\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
   "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nm: &a {x: 1}\\no: !!omap [*a]\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nm: &a {x: 1}\\no: !!pairs [*a, *a]\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nm: &a {x: 1}\\no: !!pairs [*a, {y: 2}]\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nm: &a {x: 1}\\no: !!pairs [*a]\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nm: &a {}\\no: !!omap [*a, *a]\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nm: &a {}\\no: !!omap [*a]\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nm: &a {}\\no: !!pairs [*a, *a]\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nm: &a {}\\no: !!pairs [*a]\\n---\\n\"}": {
    "1.4.0": {
     "names": [
      "alpha"
@@ -1205,6 +1373,26 @@
     "names": []
    }
   },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\no: !!omap [{x: 1}, {x: 2}]\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\no: !!pairs [{x: 1}, {x: 2}]\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
   "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\np: !!pairs [a: 1, a: 2]\\n---\\n\"}": {
    "1.4.0": {
     "names": [
@@ -1255,6 +1443,30 @@
    },
    "1.5.0": {
     "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\ns: &k x\\no: !!omap [*k]\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\ns: &k x\\no: !!pairs [*k]\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
    }
   },
   "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nx:\\n  -\\ta\\n---\\n\"}": {

@@ -284,7 +284,8 @@ Notes:
     core-schema scalar rules of the `yaml` package that pi uses, so `yes`, `1_000` and
     dates are strings and `0xff` is a number), checked over the whole document:
     a repeated key at any depth, `!!set` with a value that is not null, and `!!omap` /
-    `!!pairs` with a bad item make pi skip the skill; numbers are keys of the same value
+    `!!pairs` with a bad item make pi skip the skill (an alias item in `!!omap` / `!!pairs` makes `pi_skill_dirs` raise
+    `UnsupportedFrontmatterError`: the reader does not copy how the package reads it); numbers are keys of the same value
     when JavaScript says so. `tests/test_pi_skills.py` compares this with the installed
     pi releases. A tab is read exactly or not at all: tabs after `:`, before a
     comment or `:`, at the end of a line, and after a `-` or `?` that the scanner reads as an indicator are

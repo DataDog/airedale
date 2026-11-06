@@ -185,6 +185,8 @@ class _Frame:
     first_key: Node | None = None
     all_values_null: bool = True
     items: list[Node] = field(default_factory=list)
+    #: True when an item of the sequence is an alias.
+    has_alias_item: bool = False
     strings: dict[str, str] = field(default_factory=dict)
 
 
@@ -244,6 +246,7 @@ def _top_level_strings(text: str) -> dict[str, str]:
 def _add_child(frame: _Frame, node: Node, *, is_alias: bool = False) -> None:
     if frame.kind == "sequence":
         frame.items.append(node)
+        frame.has_alias_item = frame.has_alias_item or is_alias
         return
     if frame.pending_key is None:
         # (An alias is a node of its own in the ``yaml`` package: it is never the same key as another node.)
@@ -279,14 +282,15 @@ def _finish_collection(frame: _Frame) -> Node:
             raise YAMLError("Set items must all have null values")
         return ("mapping", (frame.pairs, frame.first_key))
     if frame.tag in (_OMAP_TAG, _PAIRS_TAG):
+        if frame.has_alias_item:
+            # The ``yaml`` package turns the pairs of the aliased node itself: the result (also the check of repeated
+            # keys) is not what the items look like here. The reader does not copy that, so it does not guess.
+            raise UnsupportedFrontmatterError("an ordered map or pairs list holds an alias")
         seen: set[Any] = set()
         for item in frame.items:
             key: Node | None = item
             if item[0] == "mapping":
                 pairs, first_key = item[1]
-                if pairs == _UNFINISHED:
-                    # An alias to a mapping that is still open (``&a {o: !!omap [*a]}``): its pairs are not known yet.
-                    raise UnsupportedFrontmatterError("an ordered map or pairs list holds an alias to an open mapping")
                 if pairs > 1:
                     raise YAMLError("Each pair must have its own sequence indicator")
                 key = first_key if first_key is not None else ("null", None)

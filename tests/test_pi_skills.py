@@ -157,6 +157,32 @@ FILES = [
 ]
 
 
+def _alias_cases() -> list[tuple[str, str]]:
+    """``!!omap`` and ``!!pairs`` with aliases to a finished mapping: 0, 1 and 2 pairs, one or two aliases."""
+    cases = []
+    for tag in ("omap", "pairs"):
+        for mapping, label in (("{}", "0 pairs"), ("{x: 1}", "1 pair"), ("{x: 1, y: 2}", "2 pairs")):
+            for aliases, count in (("*a", "one alias"), ("*a, *a", "two aliases of one mapping")):
+                body = f"m: &a {mapping}\no: !!{tag} [{aliases}]"
+                cases.append(
+                    (f"{tag} of {count} to a mapping with {label}", f"---\nname: alpha\ndescription: d\n{body}\n---\n")
+                )
+        # Two different finished mappings with the same key, and an alias next to a literal item.
+        body = f"m: &a {{x: 1}}\nn: &b {{x: 2}}\no: !!{tag} [*a, *b]"
+        cases.append((f"{tag} of two aliases with the same key", f"---\nname: alpha\ndescription: d\n{body}\n---\n"))
+        body = f"m: &a {{x: 1}}\no: !!{tag} [*a, {{y: 2}}]"
+        cases.append((f"{tag} of an alias and a literal item", f"---\nname: alpha\ndescription: d\n{body}\n---\n"))
+        body = f"s: &k x\no: !!{tag} [*k]"
+        cases.append((f"{tag} of an alias to a scalar", f"---\nname: alpha\ndescription: d\n{body}\n---\n"))
+        body = f"o: !!{tag} [{{x: 1}}, {{x: 2}}]"
+        cases.append((f"{tag} of literal items", f"---\nname: alpha\ndescription: d\n{body}\n---\n"))
+    return cases
+
+
+ALIAS_CASES = _alias_cases()
+FILES += ALIAS_CASES
+
+
 def _write(tmp_path, content):
     skill = tmp_path / "project" / "SKILL.md"
     skill.parent.mkdir(exist_ok=True)
@@ -166,6 +192,9 @@ def _write(tmp_path, content):
 
 #: Files with a tab that the reader can not place: it refuses to read them (see ``UnsupportedFrontmatterError``).
 UNSUPPORTED = {
+    *(label for label, _ in ALIAS_CASES if "alias" in label),
+    "omap of an alias to a finished mapping",
+    "omap of an alias to an open sequence",
     "tab as indentation",
     "plain value with a tab",
     "tab in a continuation line, after a dash",
@@ -359,9 +388,32 @@ def test_alias_key_that_nulls_the_name_gives_the_directory_name(tmp_path):
 
 def test_omap_of_open_mappings_stops_the_run(tmp_path):
     # Pi loads this skill as "alpha". The reader can not tell if the ordered map is valid, so it does not skip the skill.
-    with pytest.raises(UnsupportedFrontmatterError, match="open mapping"):
+    with pytest.raises(UnsupportedFrontmatterError, match="alias"):
         _collision(
             tmp_path,
             "---\nname: alpha\ndescription: d\n---\n",
             "---\nname: alpha\ndescription: d\nmetadata: &a {b: &b {o: !!omap [*a, *b]}}\n---\n",
+        )
+
+
+@pytest.mark.parametrize("tag", ["omap", "pairs"])
+@pytest.mark.parametrize("pairs", ["{}", "{x: 1}", "{x: 1, y: 2}"])
+def test_alias_item_in_an_ordered_map_stops_the_run(tmp_path, tag, pairs):
+    # Pi loads this skill as "alpha" (a collision with the scenario skill). The reader does not copy how the package
+    # turns the pairs of an aliased node, so it stops: it never skips the skill.
+    with pytest.raises(UnsupportedFrontmatterError, match="alias"):
+        _collision(
+            tmp_path,
+            "---\nname: alpha\ndescription: d\n---\n",
+            f"---\nname: alpha\ndescription: d\nm: &a {pairs}\no: !!{tag} [*a]\n---\n",
+        )
+
+
+def test_literal_items_of_an_ordered_map_keep_the_rules(tmp_path):
+    # No alias: pi loads the skill, so the collision is found.
+    with pytest.raises(ValueError, match="'alpha'"):
+        _collision(
+            tmp_path,
+            "---\nname: alpha\ndescription: d\n---\n",
+            "---\nname: alpha\ndescription: d\no: !!omap [{x: 1}, {y: 2}]\n---\n",
         )
