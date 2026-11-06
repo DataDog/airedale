@@ -319,6 +319,15 @@ class PiRunner(DecoratorSpanAgentRunner):
         run_result.mcp_tool_metadata = mcp_tool_metadata
         return run_result, self._missing_usage_error(run_result, model)
 
+    def _missing_usage_error(self, run_result: AgentRunResult, model: ModelSpec) -> RuntimeError | None:
+        """No generic check for pi: the collector validates each usage record.
+
+        The generic check fails a run whose total is zero. For pi, a record of
+        zeros is data (a model that produced no tokens, or a price of zero), and
+        a missing or damaged record already fails the run in the collector.
+        """
+        return None
+
     async def _run_agent(
         self,
         *,

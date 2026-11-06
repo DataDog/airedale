@@ -275,6 +275,20 @@ class TestEventCollector:
         assert error is not None
         assert "1 usage entry" in str(error)
 
+    def test_all_zero_usage_is_not_a_missing_usage_error(self, tmp_path, fake_pi):
+        # Every record is valid and zero (no tokens, or a price of zero): that is data, not missing usage.
+        events = _events_tool_run()
+        for event in events:
+            if event.get("type") == "message_end" and event["message"].get("role") == "assistant":
+                event["message"]["usage"] = _usage(0, 0)
+        command, _ = fake_pi(events)
+        runner = PiRunner(cwd=tmp_path, pi_command=command)
+        result = _bounded(
+            runner.run(model=MODEL, system_prompt="SYS", user_prompt="Q", prompt_version="v", harness="pi-s")
+        )
+        assert result.answer == "The directory is empty."
+        assert result.usage.total_tokens == 0
+
     def test_nested_tool_calls_follow_their_parent(self):
         events = _events_tool_run()
         nested = [
