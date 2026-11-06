@@ -51,7 +51,6 @@
       ]
     }
   },
-
   {
     "override_type": "replace",
     "target": {
@@ -76,8 +75,13 @@
     "replacement": {
       "name": "bytecode",
       "origin": "https://github.com/MatthieuDartiailh/bytecode",
-      "license": ["MIT"],
-      "copyright": ["MatthieuDartiailh", "Contributors to the bytecode project"]
+      "license": [
+        "MIT"
+      ],
+      "copyright": [
+        "MatthieuDartiailh",
+        "Contributors to the bytecode project"
+      ]
     }
   },
   {
@@ -88,8 +92,12 @@
     "replacement": {
       "name": "distro",
       "origin": "https://github.com/python-distro/distro",
-      "license": ["Apache-2.0"],
-      "copyright": ["Nir Cohen"]
+      "license": [
+        "Apache-2.0"
+      ],
+      "copyright": [
+        "Nir Cohen"
+      ]
     }
   },
   {
@@ -100,8 +108,12 @@
     "replacement": {
       "name": "ddtrace",
       "origin": "https://github.com/DataDog/dd-trace-py",
-      "license": ["BSD-3-Clause"],
-      "copyright": ["Datadog, Inc."]
+      "license": [
+        "BSD-3-Clause"
+      ],
+      "copyright": [
+        "Datadog, Inc."
+      ]
     }
   },
   {
@@ -112,8 +124,12 @@
     "replacement": {
       "name": "ddtrace-internal",
       "origin": "https://github.com/DataDog/dd-trace-py",
-      "license": ["BSD-3-Clause"],
-      "copyright": ["Datadog, Inc."]
+      "license": [
+        "BSD-3-Clause"
+      ],
+      "copyright": [
+        "Datadog, Inc."
+      ]
     }
   },
   {
@@ -124,8 +140,29 @@
     "replacement": {
       "name": "envier",
       "origin": "https://github.com/DataDog/envier",
-      "license": ["MIT"],
-      "copyright": ["Datadog, Inc."]
+      "license": [
+        "MIT"
+      ],
+      "copyright": [
+        "Datadog, Inc."
+      ]
+    }
+  },
+  {
+    "override_type": "add",
+    "target": {
+      "origin": "https://github.com/DataDog/airedale"
+    },
+    "replacement": {
+      "name": "ruamel.yaml.clib",
+      "origin": "https://sourceforge.net/p/ruamel-yaml-clib/code/ci/default/tree/",
+      "version": "0.2.15",
+      "license": [
+        "MIT"
+      ],
+      "copyright": [
+        "Anthon van der Neut"
+      ]
     }
   }
 ]
