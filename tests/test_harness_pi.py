@@ -3326,7 +3326,42 @@ class TestRedactSecrets:
         assert (
             _redact_secrets("Authorization: Bearer abcdef0123456789xyz\n", []) == "Authorization: Bearer <redacted>\n"
         )
-        assert _redact_secrets("bearer short", []) == "bearer short"  # Too short to be a token.
+        assert _redact_secrets("Authorization: Bearer abc1234", []) == "Authorization: Bearer <redacted>"  # Any length.
+
+    @pytest.mark.parametrize("secret", ["a1b2c", "x", "ab", "tok-12", "a" * 3])
+    def test_a_short_known_credential_is_removed(self, secret):
+        from airedale.harness.pi import _redact_secrets
+
+        assert _redact_secrets(f"key={secret} end", [secret]) == "key=<redacted> end"
+
+    def test_empty_secrets_are_ignored(self):
+        from airedale.harness.pi import _redact_secrets
+
+        assert _redact_secrets("unchanged text", ["", ""]) == "unchanged text"
+
+    def test_short_gateway_token_and_bearer_through_a_failed_run(self, tmp_path, fake_pi, monkeypatch):
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        command, _ = fake_pi(
+            [{"type": "agent_start"}, {"type": "agent_settled", "aborted": False}],
+            FAKE_PI_STDERR="fixture failure token=a1b2c Authorization: Bearer abc1234\n",
+            FAKE_PI_EXIT="3",
+        )
+        runner = PiRunner(
+            cwd=tmp_path, pi_command=command, gateway_base_url="https://gw.example", gateway_bearer_token="a1b2c"
+        )
+        with pytest.raises(RuntimeError) as error:
+            _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
+        text = str(error.value)
+        assert "fixture failure" in text
+        assert "a1b2c" not in text
+        assert "abc1234" not in text
+
+    def test_a_short_value_of_a_variable_with_a_secret_name_is_not_hidden(self, tmp_path, monkeypatch):
+        # Only a *name* like a secret: a flag such as "1" would hide every "1" of a message.
+        monkeypatch.setenv("NO_AUTH", "1")
+        values = PiRunner(cwd=tmp_path)._secret_values({"NO_AUTH": "1", "MY_TOKEN": "tok-123456"})
+        assert "1" not in values
+        assert "tok-123456" in values
 
     def test_a_secret_cut_by_the_window_is_removed(self):
         from airedale.harness.pi import _redact_secrets

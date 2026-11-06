@@ -656,11 +656,17 @@ class PiRunner(DecoratorSpanAgentRunner):
         names = [*PI_PROVIDER_API_KEY_ENVS.values(), *self.other_gateway_api_key_envs]
         if self.gateway_api_key_env:
             names.append(self.gateway_api_key_env)
+        # Known credentials: removed whatever their length (a short token is still a credential).
         values = [self.gateway_bearer_token, self.gateway_api_key]
         values.extend(value for name in names for value in [os.environ.get(name), env.get(name)])
-        values.extend(value for name, value in env.items() if _SECRET_ENV_NAME_RE.search(name))
         values.extend(self._auth_file_secrets(env))
-        return [value for value in dict.fromkeys(values) if value and len(value) >= _MIN_SECRET_LENGTH]
+        # Variables that only have a name like a secret: a short value (a flag such as ``1``) is more likely not one.
+        values.extend(
+            value
+            for name, value in env.items()
+            if _SECRET_ENV_NAME_RE.search(name) and len(value) >= _MIN_SECRET_LENGTH
+        )
+        return [value for value in dict.fromkeys(values) if value]
 
     def _auth_file_secrets(self, env: Mapping[str, str]) -> list[str]:
         """Return the secret values of the ``auth.json`` that was copied into the agent directory of the run.
@@ -914,7 +920,7 @@ _SECRET_KEY_NAME_RE = re.compile(r"(?i)(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENT
 #: A value shorter than this is not taken for a credential (it would also hide ordinary words in a message).
 _MIN_SECRET_LENGTH = 6
 #: ``Authorization: Bearer <token>`` or ``Bearer <token>``: the token is removed even when it is not a known value.
-_BEARER_RE = re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]{8,}")
+_BEARER_RE = re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]+")
 _REDACTED = "<redacted>"
 
 
@@ -948,10 +954,10 @@ _AUTH_LONG_VALUE = 20
 def _redact_secrets(text: str, secrets: Iterable[str]) -> str:
     """Return ``text`` without the secrets (the longest first), without bearer tokens, and without a cut secret.
 
-    The stderr tail is a window on the end of the output: it can start in the middle of a secret. A start that is the
-    end of a secret (of at least 8 characters) is removed too.
+    Every non-empty secret is removed, whatever its length. The stderr tail is a window on the end of the output: it
+    can start in the middle of a secret. A start that is the end of a secret (of at least 8 characters) is removed too.
     """
-    ordered = sorted(set(secrets), key=len, reverse=True)
+    ordered = sorted({secret for secret in secrets if secret}, key=len, reverse=True)
     for secret in ordered:
         text = text.replace(secret, _REDACTED)
     text = _BEARER_RE.sub(r"\1" + _REDACTED, text)
