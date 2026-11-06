@@ -1297,8 +1297,9 @@ class _PiEventCollector:
             # counted. (Repo code in pi can write any record to stdout: only
             # evaluate trusted repositories.)
             entry = event.get("entry")
-            if isinstance(entry, dict) and entry.get("type") == "usage" and "usage" in entry:
-                self._add_usage(entry["usage"], "usage entry")
+            if isinstance(entry, dict) and entry.get("type") == "usage":
+                # A usage entry with no usage (a cut record, a changed schema) is damaged too.
+                self._add_usage(entry.get("usage"), "usage entry")
             return None
         if event_type == "auto_retry_end":
             if event.get("success") is False:

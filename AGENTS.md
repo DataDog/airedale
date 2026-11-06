@@ -322,8 +322,9 @@ Notes:
     usable `usage` record (`airedale.types.is_valid_pi_usage`: an object with `input`
     and `output`, counts that are finite whole numbers >= 0, a `cost.total` that
     is there, finite and >= 0; pi 1.4.0 and 1.5.0 always write it, 0 for a model with an unknown price), even if the run total is not zero. A `usage` that is
-    present in a tool result, a compaction result or a `usage` entry must be
-    usable too (a compaction result can have none). A zero record is data. Pi can reuse a `toolCallId` (even
+    present in a tool result or a compaction result must be usable too (a
+    compaction result or a tool result can have none); a `usage` entry must have a
+    usable `usage`. A zero record is data. Pi can reuse a `toolCallId` (even
     ""): the collector keeps each execution, binds the n-th transcript call
     with an id to the n-th top-level execution (no `parentToolCallId`) with that id, and gives a nested call to
     the latest execution with the parent id at its start. A call of a response with

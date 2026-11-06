@@ -259,7 +259,6 @@ class TestEventCollector:
             {"type": "entry_appended", "entry": warm},
             # Other entries (for example extension "custom" entries) are not usage.
             {"type": "entry_appended", "entry": {"type": "custom", "usage": _usage(1000, 1000)}},
-            {"type": "entry_appended", "entry": {"type": "usage"}},
             _events_tool_run()[-1],
         ]
         result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
@@ -267,6 +266,14 @@ class TestEventCollector:
         assert result.usage.cache_read_input_tokens == 1447 + 500
         assert result.usage.output_tokens == 20
         assert result.usage.estimated_cost_usd == pytest.approx(0.008)
+
+    @pytest.mark.parametrize("entry", [{"type": "usage"}, {"type": "usage", "kind": "cache_warm"}])
+    def test_usage_entry_without_usage_fails_the_run(self, entry):
+        # A cut record, or a changed schema: the accounting is incomplete.
+        events = [*_events_tool_run()[:-1], {"type": "entry_appended", "entry": entry}, _events_tool_run()[-1]]
+        error = _collect(events).result(model=MODEL, returncode=0, stderr_tail="").error
+        assert error is not None
+        assert "1 usage entry" in str(error)
 
     def test_nested_tool_calls_follow_their_parent(self):
         events = _events_tool_run()
