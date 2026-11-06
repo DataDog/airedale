@@ -214,5 +214,16 @@ if (request.action === "mcp") {
     events.push(event);
   }
   events.push({ type: "agent_settled", aborted: false });
+  // The duration of a tool depends on the machine: the same events on every run.
+  const zeroDurations = (value) => {
+    if (Array.isArray(value)) value.forEach(zeroDurations);
+    else if (value !== null && typeof value === "object") {
+      for (const key of Object.keys(value)) {
+        if (key === "durationMs") value[key] = 0;
+        else zeroDurations(value[key]);
+      }
+    }
+  };
+  zeroDurations(events);
   console.log(JSON.stringify(events));
 }
