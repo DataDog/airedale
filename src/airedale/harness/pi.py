@@ -986,17 +986,20 @@ def _finish_redaction(data: bytes) -> str:
     return _BEARER_RE.sub(r"\1" + _REDACTED, data.decode("utf-8", errors="replace").strip())
 
 
-def _redact_bytes(data: bytes, secrets: Iterable[str]) -> bytes:
+def _redact_bytes(data: bytes, secrets: Iterable[str], *, truncated: bool = True) -> bytes:
     """Return ``data`` without the secrets (the longest first, whatever their length) and without a cut secret.
 
     The work is done on the bytes, before any decoding or stripping: a decoding with replacement characters would change
     a secret (a window that starts inside a UTF-8 character), and stripping would remove the newline that ends a
     secret (a PEM key). The stderr tail is a window on the end of the output: it can start in the middle of a secret,
     in the middle of one of its UTF-8 characters. The start is matched with the end of every secret *first*, before
-    any secret is replaced: a shorter secret inside the cut part would otherwise change the start.
+    any secret is replaced: a shorter secret inside the cut part would otherwise change the start. This applies only
+    when the window ``truncated`` the output, and not when a complete secret stands at the start.
     """
     encoded = sorted({form for secret in secrets if secret for form in _byte_forms(secret)}, key=len, reverse=True)
-    data = _drop_cut_secret(data, encoded)
+    # A cut start only exists when the window dropped the beginning of the output.
+    if truncated:
+        data = _drop_cut_secret(data, encoded)
     for secret in encoded:
         data = data.replace(secret, _REDACTED.encode())
     return data
@@ -1039,14 +1042,20 @@ _MIN_CUT_SECRET = 4
 
 
 def _drop_cut_secret(data: bytes, secrets: list[bytes]) -> bytes:
-    """Remove the start of ``data`` when it is the end of a secret that the window cut."""
+    """Remove the start of ``data`` when it is the end of a secret that the window cut.
+
+    All the matches are looked for before any byte changes. A complete secret at the start wins over a cut that is not
+    longer than it: the first bytes of a complete key can also be the end of the key (a repeated pattern), and removing
+    only those would leave the rest of the key visible.
+    """
+    full = max((len(secret) for secret in secrets if data.startswith(secret)), default=0)
     best = 0
     for secret in secrets:
         for size in range(min(len(secret) - 1, len(data)), max(_MIN_CUT_SECRET, best + 1) - 1, -1):
             if data.startswith(secret[-size:]):
                 best = size
                 break
-    return _REDACTED.encode() + data[best:] if best else data
+    return _REDACTED.encode() + data[best:] if best > full else data
 
 
 def _collector_extension_failed(collector: _PiEventCollector, returncode: int | None, stderr_tail: str) -> bool:
@@ -1270,18 +1279,21 @@ class _TailBuffer:
     def __init__(self, limit: int) -> None:
         self._limit = limit
         self._data = bytearray()
+        #: True once the start of the output was dropped: only then can the tail start inside a secret.
+        self.truncated = False
 
     def append(self, chunk: bytes) -> None:
         self._data.extend(chunk)
         if len(self._data) > self._limit:
             del self._data[: len(self._data) - self._limit]
+            self.truncated = True
 
     def text(self) -> str:
         return self._data.decode("utf-8", errors="replace").strip()
 
     def redacted_text(self, secrets: Iterable[str]) -> str:
         """Return the tail without the secrets: they are removed from the raw bytes, then the text is made."""
-        return _finish_redaction(_redact_bytes(bytes(self._data), secrets))
+        return _finish_redaction(_redact_bytes(bytes(self._data), secrets, truncated=self.truncated))
 
 
 async def _drain(stream: asyncio.StreamReader | None, buffer: _TailBuffer) -> None:

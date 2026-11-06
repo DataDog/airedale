@@ -3724,6 +3724,57 @@ class TestRedactSecrets:
         assert "mnopqrstuvwx" not in redacted
         assert "end" in redacted
 
+    def test_complete_key_at_the_start_of_an_untruncated_tail_is_removed_whole(self):
+        from airedale.harness.pi import _TailBuffer
+
+        key = "a1b2" * 8  # 32 characters; its last 4 characters are also its first 4.
+        buffer = _TailBuffer(16 * 1024)
+        buffer.append(f"{key} first line\nsecond line\n".encode())
+        assert not buffer.truncated
+        assert buffer.redacted_text([key]) == "<redacted> first line\nsecond line"
+
+    def test_truncated_flag_is_set_only_when_bytes_were_dropped(self):
+        from airedale.harness.pi import _TailBuffer
+
+        buffer = _TailBuffer(10)
+        buffer.append(b"0123456789")
+        assert not buffer.truncated
+        buffer.append(b"x")
+        assert buffer.truncated
+
+    def test_complete_key_wins_over_a_shorter_cut_match_in_a_truncated_tail(self):
+        from airedale.harness.pi import _redact_secrets
+
+        key = "a1b2" * 8
+        assert _redact_secrets(f"{key} tail", [key]) == "<redacted> tail"
+
+    def test_short_value_at_the_start_does_not_hide_a_longer_cut_secret(self):
+        from airedale.harness.pi import _redact_secrets
+
+        long_secret = "PREFIX-private-secret-abcdefghijklmnopqrstuv"
+        assert _redact_secrets(long_secret[7:] + " rest", [long_secret, "private-secret"]) == "<redacted> rest"
+
+    def test_full_key_as_the_first_stderr_line_through_a_public_run(self, tmp_path, monkeypatch):
+        """The review: a 32-character key printed first left 28 characters visible (no window was cut)."""
+        key = "a1b2" * 8
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        program = (
+            "import sys\nsys.stdin.read()\n"
+            f"sys.stderr.write({key!r} + ' first line\\nsecond line\\n')\n"
+            'print(\'{"type": "agent_settled", "aborted": false}\', flush=True)\nsys.exit(3)\n'
+        )
+        runner = PiRunner(
+            cwd=tmp_path,
+            pi_command=[sys.executable, "-c", program],
+            gateway_base_url="https://gw.example",
+            gateway_api_key=key,
+        )
+        with pytest.raises(RuntimeError) as error:
+            _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
+        text = str(error.value)
+        assert "a1b2a1b2" not in text
+        assert "<redacted> first line" in text
+
     def test_text_without_secret_is_unchanged(self):
         from airedale.harness.pi import _redact_secrets
 
