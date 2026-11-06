@@ -267,6 +267,8 @@ class PiRunner(DecoratorSpanAgentRunner):
         #: them, so they do not reach pi either.
         self.other_gateway_api_key_envs = list(other_gateway_api_key_envs)
         self.pi_models = [dict(model) for model in pi_models]
+        #: The servers of the repo ``.pi/mcp.json`` as they were when the run started (see ``_project_servers``).
+        self._project_snapshot: list[McpServerSpec] | None = None
         self.pi_command = list(pi_command) if pi_command is not None else _default_pi_command()
 
     def _effective_builtin_tools(self) -> tuple[str, ...]:
@@ -285,6 +287,7 @@ class PiRunner(DecoratorSpanAgentRunner):
         progress: ProgressCallback | None,
     ) -> tuple[AgentRunResult, RuntimeError | None]:
         """Run pi and make one span for each model call, tool call and compaction."""
+        self._project_snapshot = discover_pi_project_mcp_servers(self.cwd, self._scenario_pi_configs())
         trace_headers, mcp_tool_metadata = await self._span_context()
         llmobs = _base.LLMObs
         spans: PiSpanRecorder | None = None
@@ -474,11 +477,7 @@ class PiRunner(DecoratorSpanAgentRunner):
         # only in "-"/"_") and replacements of a scenario server (the run fails
         # first) are not in the list.
         scenario_names = {server.name for server in self.mcp_servers}
-        project = [
-            server
-            for server in discover_pi_project_mcp_servers(self.cwd, self._scenario_pi_configs())
-            if server.name not in scenario_names
-        ]
+        project = [server for server in self._project_servers() if server.name not in scenario_names]
         return [*self.mcp_servers, *project]
 
     def _check_project_mcp_collisions(self, trace_headers: Mapping[str, str] | None = None) -> None:
@@ -559,7 +558,18 @@ class PiRunner(DecoratorSpanAgentRunner):
         Same list as the one in the span metadata: pi does not load an invalid
         entry, and does not start an entry with ``"enabled": false``.
         """
-        return [server.name for server in discover_pi_project_mcp_servers(self.cwd, self._scenario_pi_configs())]
+        return [server.name for server in self._project_servers()]
+
+    def _project_servers(self) -> list[McpServerSpec]:
+        """Return the servers that pi loads from the repo ``.pi/mcp.json``: the snapshot of the run, if there is one.
+
+        Pi reads the file once, at startup. The task can change or delete the file while it runs, so everything
+        that is reported about the run (tool definitions, agent manifest, dependencies) uses the list from the
+        start of the run (``_run_model_calls`` takes it), not a new read after the run.
+        """
+        if self._project_snapshot is not None:
+            return self._project_snapshot
+        return discover_pi_project_mcp_servers(self.cwd, self._scenario_pi_configs())
 
     def _models_json_token(self) -> str | None:
         """Return the gateway token that ``models.json`` holds (``None`` when it holds no token)."""

@@ -1911,6 +1911,36 @@ class TestPiToolNames:
         assert names[long_tool] == shortened
         assert names[other] != shortened
 
+    def test_project_servers_are_those_of_the_start_of_the_run(self, tmp_path, monkeypatch):
+        """A task that deletes or edits ``.pi/mcp.json`` does not change what is reported about the run."""
+        import airedale.harness.base as base
+        from airedale.harness.base import AgentRunResult
+        from airedale.types import UsageMetrics
+
+        mcp_file = tmp_path / ".pi" / "mcp.json"
+        mcp_file.parent.mkdir()
+        mcp_file.write_text(json.dumps({"mcpServers": {"repo-docs": {"command": "node"}}}))
+        runner = PiRunner(cwd=tmp_path, mcp_servers=[McpServerSpec(name="apm", url="http://localhost/mcp")])
+
+        async def _agent(self, **kwargs):
+            # The task runs: pi has read the file, the task deletes it (and adds another server).
+            mcp_file.write_text(json.dumps({"mcpServers": {"late": {"command": "node"}}}))
+            return AgentRunResult(
+                answer="done", usage=UsageMetrics(input_tokens=1, output_tokens=1, total_tokens=2), tool_calls=[]
+            )
+
+        reported: list[list[str]] = []
+        monkeypatch.setattr(PiRunner, "_run_agent", _agent)
+        monkeypatch.setattr(
+            base, "_annotate_agent_loop_span", lambda **kwargs: reported.append([s.name for s in kwargs["mcp_servers"]])
+        )
+        _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
+        assert reported == [["apm", "repo-docs"]]
+        # The next run reads the file again.
+        mcp_file.unlink()
+        _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
+        assert reported[-1] == ["apm"]
+
     def test_reported_mcp_servers_without_project_file(self, tmp_path):
         scenario = McpServerSpec(name="apm", url="http://localhost/mcp")
         assert PiRunner(cwd=tmp_path, mcp_servers=[scenario])._reported_mcp_servers() == [scenario]

@@ -333,7 +333,7 @@ Notes:
     the latest execution with the parent id at its start. A call of a response with
     `stopReason` `error` or `aborted` (pi runs no tool for it, and may retry with the same
     ids) takes no execution and shows "tool did not run".
-    Project `.pi/mcp.json` servers that pi loads (valid, not `enabled: false`) are also listed in
+    Project `.pi/mcp.json` servers that pi loads (valid, not `enabled: false`; read once at the start of the run, so a task that edits the file changes nothing) are also listed in
     the span metadata and the agent manifest (`PiRunner._reported_mcp_servers`),
     but they are not probed for tools, and they get no distributed-trace
     headers: pi reads the repo file as it is, and a project entry replaces a
