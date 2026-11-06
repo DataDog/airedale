@@ -131,6 +131,12 @@ FILES = [
     ("tab after an anchor", "---\nname: &x\talpha\ndescription: d\n---\n"),
     ("tab after a tag", "---\nname: !!str\talpha\ndescription: d\n---\n"),
     ("tab in a flow sequence", "---\nname: alpha\ndescription: d\nm: [a,\tb]\n---\n"),
+    ("recursive sequence alias", "---\nname: alpha\ndescription: d\nmetadata: &m [*m]\n---\n"),
+    ("recursive mapping alias", "---\nname: alpha\ndescription: d\nmetadata: &m {self: *m}\n---\n"),
+    ("recursive alias in a block mapping", "---\nname: alpha\ndescription: d\nm: &m\n  self: *m\n---\n"),
+    ("mutually recursive aliases", "---\nname: alpha\ndescription: d\na: &a {b: &b {a: *a, b: *b}}\n---\n"),
+    ("alias to a collection of its own parent", "---\n&r {name: alpha, description: d, me: *r}\n---\n"),
+    ("alias used before its anchor ends", "---\nname: alpha\ndescription: d\nm: &m [*m, *m]\n---\n"),
     ("non-ascii", "---\nname: alphä\ndescription: d\n---\n"),
     ("long key", "---\n? " + "k" * 2000 + "\n: v\nname: alpha\ndescription: d\n---\n"),
 ]
@@ -300,4 +306,15 @@ def test_a_tab_in_a_continuation_line_is_not_read_as_a_space(tmp_path):
             tmp_path,
             '---\nname: "alpha -\\tbeta"\ndescription: d\n---\n',
             "---\nname: alpha\n  -\tbeta\ndescription: d\n---\n",
+        )
+
+
+@pytest.mark.parametrize("metadata", ["&m [*m]", "&m {self: *m}"])
+def test_recursive_alias_in_a_project_skill_still_collides(tmp_path, metadata):
+    # Pi loads the skill (the alias is valid), so the name collides with the scenario skill.
+    with pytest.raises(ValueError, match="'alpha'"):
+        _collision(
+            tmp_path,
+            "---\nname: alpha\ndescription: d\n---\n",
+            f"---\nname: alpha\ndescription: d\nmetadata: {metadata}\n---\n",
         )

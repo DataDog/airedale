@@ -49,6 +49,18 @@
     ]
    }
   },
+  "{\"action\":\"skills\",\"content\":\"---\\n&r {name: alpha, description: d, me: *r}\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
   "{\"action\":\"skills\",\"content\":\"---\\n'1': a\\n1: b\\nname: alpha\\ndescription: d\\n---\\n\"}": {
    "1.4.0": {
     "names": [
@@ -873,6 +885,18 @@
     ]
    }
   },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\na: &a {b: &b {a: *a, b: *b}}\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
   "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nk: &a [1]\\nm: {? *a : 1, ? *a : 2}\\n---\\n\"}": {
    "1.4.0": {
     "names": [
@@ -913,6 +937,30 @@
     ]
    }
   },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nm: &m [*m, *m]\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nm: &m\\n  self: *m\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
   "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nm: [a,\\tb]\\n---\\n\"}": {
    "1.4.0": {
     "names": [
@@ -938,6 +986,30 @@
    }
   },
   "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nm: {x: 1}\\nn: {x: 2}\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nmetadata: &m [*m]\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nmetadata: &m {self: *m}\\n---\\n\"}": {
    "1.4.0": {
     "names": [
      "alpha"

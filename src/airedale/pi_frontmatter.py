@@ -210,6 +210,9 @@ def _top_level_strings(text: str) -> dict[str, str]:
         if isinstance(event, MappingStartEvent | SequenceStartEvent):
             kind = "mapping" if isinstance(event, MappingStartEvent) else "sequence"
             stack.append(_Frame(kind, event.tag, event.anchor))
+            if event.anchor:
+                # An alias inside the collection can refer to it (``&m [*m]``): the anchor exists from the start.
+                anchors[event.anchor] = ("mapping", (0, None)) if kind == "mapping" else ("sequence", None)
             continue
         if isinstance(event, MappingEndEvent | SequenceEndEvent):
             frame = stack.pop()
