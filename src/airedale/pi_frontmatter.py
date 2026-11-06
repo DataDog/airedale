@@ -41,6 +41,7 @@ from ruamel.yaml.events import (
     SequenceEndEvent,
     SequenceStartEvent,
 )
+from ruamel.yaml.tokens import BlockEntryToken, KeyToken
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -69,7 +70,7 @@ class UnsupportedFrontmatterError(ValueError):
 
     YAML 1.2 allows a tab as white space between tokens, inside a plain value, and
     in a few other places. ``ruamel.yaml`` allows it in fewer places. The reader
-    handles a tab after a ``:``, before a ``#`` comment or a ``:``, and at the end of a
+    handles a tab after a ``:``, before a ``#`` comment or a ``:``, after a ``-`` or ``?`` indicator, and at the end of a
     line (the tab is then not part of any value, and it is replaced by a space of the
     same width). For any other tab that the parser rejects it can not tell if
     the tab is part of a value, so it does not guess: a changed name could hide a
@@ -126,7 +127,14 @@ def _parse_with_separator_tabs(text: str) -> dict[str, str]:
 
 
 def _is_separator_tab(text: str, index: int) -> bool:
-    """Return True when the tab at ``index`` can only be white space between tokens (not part of a value)."""
+    """Return True when the tab at ``index`` can only be white space between tokens (not part of a value).
+
+    The rules do not depend on where the tab is in the document: a tab at the end of a line, before a
+    ``#`` comment, before the ``:`` of a key, or after a ``:`` (a ``:`` followed by white space is never
+    part of a plain value). A tab after ``-`` or ``?`` is a separator only when the scanner read that
+    character as an indicator: in the continuation line of a plain value (``name: a`` then ``  -<TAB>b``)
+    it is part of the value.
+    """
     line_start = text.rfind("\n", 0, index) + 1
     line_end = text.find("\n", index)
     line_end = len(text) if line_end == -1 else line_end
@@ -136,9 +144,29 @@ def _is_separator_tab(text: str, index: int) -> bool:
         return not after  # A line with only white space; a tab as indentation is an error for pi too.
     if not after or after.startswith("#"):
         return True  # The end of the line, or a comment.
-    if previous.endswith(":") or previous.strip() in ("-", "?"):
-        return True  # After the ``:`` of a key, or after the indicator of an entry.
-    return after.startswith(":") and (len(after) == 1 or after[1] in " \t")  # Before the ``:`` of a key.
+    if previous.endswith(":"):
+        return True  # After the ``:`` of a key.
+    if after.startswith(":") and (len(after) == 1 or after[1] in " \t"):
+        return True  # Before the ``:`` of a key.
+    if previous.endswith(("-", "?")):
+        # (Another indicator after the tab, ``-<TAB>- a``, makes a nested entry; pi rejects it.)
+        nested = after[:1] in ("-", "?", ":") and (len(after) == 1 or after[1] in " \t")
+        return not nested and _indicator_ends_at(text, line_start + len(previous))
+    return False
+
+
+def _indicator_ends_at(text: str, end: int) -> bool:
+    """Return True when the scanner reads the characters that end at ``end`` as a ``-`` or ``?`` indicator."""
+    loader = YAML(typ="safe", pure=True)
+    loader.version = (1, 2)
+    last: tuple[type, int] | None = None
+    try:
+        for token in loader.scan(text):
+            if token.end_mark.index <= end:
+                last = (type(token), token.end_mark.index)
+    except YAMLError:
+        pass
+    return last is not None and last[1] == end and last[0] in (BlockEntryToken, KeyToken)
 
 
 # --------------------------------------------------------------------------- #

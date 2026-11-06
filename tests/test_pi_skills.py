@@ -118,6 +118,19 @@ FILES = [
     ("zero keys", "---\nname: alpha\ndescription: d\n-0: a\n0: b\n---\n"),
     ("alias as a repeated key", "---\nname: alpha\ndescription: d\nk: &a [1]\nm: {? *a : 1, ? *a : 2}\n---\n"),
     ("collection keys that look the same", "---\nname: alpha\ndescription: d\nm: {? [a] : 1, ? [a] : 2}\n---\n"),
+    ("tab in a continuation line, after a dash", "---\nname: alpha\n  -\tbeta\ndescription: d\n---\n"),
+    ("tab in a continuation line, after a question mark", "---\nname: alpha\n  ?\tbeta\ndescription: d\n---\n"),
+    ("tab in a continuation line, inside", "---\nname: alpha\n  be\tta\ndescription: d\n---\n"),
+    ("tab in a continuation line, after a colon", "---\nname: alpha\n  x:\tbeta\ndescription: d\n---\n"),
+    ("tab in a continuation line, before a comment", "---\nname: alpha\n  beta\t# c\ndescription: d\n---\n"),
+    ("tab after a dash in a value", "---\nname: a -\tb\ndescription: d\n---\n"),
+    ("tab after a question mark in a value", "---\nname: a ?\tb\ndescription: d\n---\n"),
+    ("tab after a sequence indicator, indented", "---\nname: alpha\ndescription: d\nx:\n  -\ta\n---\n"),
+    ("tab after an explicit key indicator", "---\nname: alpha\ndescription: d\n?\tk\n: v\n---\n"),
+    ("tab between two sequence indicators", "---\nname: alpha\ndescription: d\nl:\n  -\t- a\n---\n"),
+    ("tab after an anchor", "---\nname: &x\talpha\ndescription: d\n---\n"),
+    ("tab after a tag", "---\nname: !!str\talpha\ndescription: d\n---\n"),
+    ("tab in a flow sequence", "---\nname: alpha\ndescription: d\nm: [a,\tb]\n---\n"),
     ("non-ascii", "---\nname: alphä\ndescription: d\n---\n"),
     ("long key", "---\n? " + "k" * 2000 + "\n: v\nname: alpha\ndescription: d\n---\n"),
 ]
@@ -131,7 +144,18 @@ def _write(tmp_path, content):
 
 
 #: Files with a tab that the reader can not place: it refuses to read them (see ``UnsupportedFrontmatterError``).
-UNSUPPORTED = {"tab as indentation", "plain value with a tab"}
+UNSUPPORTED = {
+    "tab as indentation",
+    "plain value with a tab",
+    "tab in a continuation line, after a dash",
+    "tab in a continuation line, after a question mark",
+    "tab in a continuation line, inside",
+    "tab after a dash in a value",
+    "tab after a question mark in a value",
+    "tab between two sequence indicators",
+    "tab after an anchor",
+    "tab after a tag",
+}
 
 
 @pytest.mark.parametrize(("label", "content"), FILES, ids=[label for label, _ in FILES])
@@ -266,3 +290,14 @@ def test_numbers_are_the_same_key_when_javascript_says_so(tmp_path):
         "---\nname: alpha\ndescription: d\n---\n",
         "---\nname: alpha\ndescription: d\n9007199254740992: a\n9007199254740993: b\n---\n",
     )
+
+
+def test_a_tab_in_a_continuation_line_is_not_read_as_a_space(tmp_path):
+    # Pi reads "alpha -<TAB>beta" for the project skill (the dash is part of the value), the same name as the scenario
+    # skill. A space would hide the collision: the run fails because the tab can not be placed.
+    with pytest.raises(UnsupportedFrontmatterError, match="tab"):
+        _collision(
+            tmp_path,
+            '---\nname: "alpha -\\tbeta"\ndescription: d\n---\n',
+            "---\nname: alpha\n  -\tbeta\ndescription: d\n---\n",
+        )

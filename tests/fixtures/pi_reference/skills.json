@@ -345,6 +345,18 @@
     ]
    }
   },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: !!str\\talpha\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
   "{\"action\":\"skills\",\"content\":\"---\\nname: !foo alpha\\ndescription: d\\n---\\n\"}": {
    "1.4.0": {
     "names": [
@@ -358,6 +370,18 @@
    }
   },
   "{\"action\":\"skills\",\"content\":\"---\\nname: &n alpha\\ndescription: *n\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: &x\\talpha\\ndescription: d\\n---\\n\"}": {
    "1.4.0": {
     "names": [
      "alpha"
@@ -613,6 +637,30 @@
     ]
    }
   },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: a -\\tb\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "a -\tb"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "a -\tb"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: a ?\\tb\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "a ?\tb"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "a ?\tb"
+    ]
+   }
+  },
   "{\"action\":\"skills\",\"content\":\"---\\nname: al\\n  pha\\ndescription: d\\n---\\n\"}": {
    "1.4.0": {
     "names": [
@@ -647,6 +695,62 @@
     "names": [
      "alpha"
     ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\n  -\\tbeta\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha -\tbeta"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha -\tbeta"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\n  ?\\tbeta\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha ?\tbeta"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha ?\tbeta"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\n  be\\tta\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha be\tta"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha be\tta"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\n  beta\\t# c\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha beta"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha beta"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\n  x:\\tbeta\\ndescription: d\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
    }
   },
   "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\n---\\n\"}": {
@@ -745,6 +849,18 @@
     "names": []
    }
   },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\n?\\tk\\n: v\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
   "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\n\\t\\n---\\n\"}": {
    "1.4.0": {
     "names": [
@@ -769,6 +885,14 @@
     ]
    }
   },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nl:\\n  -\\t- a\\n---\\n\"}": {
+   "1.4.0": {
+    "names": []
+   },
+   "1.5.0": {
+    "names": []
+   }
+  },
   "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nl:\\n- {x: 1, x: 2}\\n---\\n\"}": {
    "1.4.0": {
     "names": []
@@ -778,6 +902,18 @@
    }
   },
   "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nm: !!map [a]\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nm: [a,\\tb]\\n---\\n\"}": {
    "1.4.0": {
     "names": [
      "alpha"
@@ -907,6 +1043,18 @@
    },
    "1.5.0": {
     "names": []
+   }
+  },
+  "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nx:\\n  -\\ta\\n---\\n\"}": {
+   "1.4.0": {
+    "names": [
+     "alpha"
+    ]
+   },
+   "1.5.0": {
+    "names": [
+     "alpha"
+    ]
    }
   },
   "{\"action\":\"skills\",\"content\":\"---\\nname: alpha\\ndescription: d\\nx:\\n-\\ta\\n---\\n\"}": {

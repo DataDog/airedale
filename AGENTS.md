@@ -287,7 +287,8 @@ Notes:
     `!!pairs` with a bad item make pi skip the skill; numbers are keys of the same value
     when JavaScript says so. `tests/test_pi_skills.py` compares this with the installed
     pi releases. A tab is read exactly or not at all: tabs after `:`, before a
-    comment or `:`, and at the end of a line are white space and are placed; any
+    comment or `:`, at the end of a line, and after a `-` or `?` that the scanner reads as an indicator are
+    white space and are placed (not in the continuation line of a plain value); any
     other tab that the parser rejects (inside a plain value, as indentation) makes
     `pi_skill_dirs` raise `UnsupportedFrontmatterError`, because a tab that is read as a space could
     hide a name collision. Not reproduced: ignore files in `.agents/skills`, and
