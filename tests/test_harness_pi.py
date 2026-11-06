@@ -3371,6 +3371,48 @@ class TestRedactSecrets:
         assert _redact_secrets(tail, [secret]) == "<redacted> rest of the line"
         assert _redact_secrets("short", [secret]) == "short"
 
+    def test_cut_secret_with_a_shorter_known_value_inside_the_cut_part(self):
+        from airedale.harness.pi import _redact_secrets
+
+        long_secret = "PREFIX-private-secret-abcdefghijklmnopqrstuv"
+        short_secret = "private-secret"  # Inside the part that the window keeps.
+        tail = long_secret[7:] + " rest"
+        redacted = _redact_secrets(tail, [long_secret, short_secret])
+        assert "abcdefghijklmnopqrstuv" not in redacted
+        assert redacted == "<redacted> rest"
+
+    @pytest.mark.parametrize(
+        "secret",
+        ["é-password-0123456789abcdefghijklmnop", "€€-key-0123456789abcdefghij", "😀-token-0123456789abcdefghij"],
+    )
+    @pytest.mark.parametrize("cut", [1, 2, 3])
+    def test_window_that_starts_inside_a_utf8_character(self, secret, cut):
+        from airedale.harness.pi import _redact_secrets, _TailBuffer
+
+        payload = secret.encode() + b" rest"
+        first_character = len(secret[0].encode())
+        if cut >= first_character:
+            pytest.skip("the cut must be inside the first character")
+        buffer = _TailBuffer(len(payload) - cut)
+        buffer.append(payload)  # The tail starts inside the first character of the secret.
+        redacted = _redact_secrets(buffer.text(), [secret])
+        assert secret[1:] not in redacted
+        assert secret[2:] not in redacted
+        assert "0123456789" not in redacted
+        assert redacted.endswith("rest")
+
+    def test_cut_secret_through_the_tail_buffer_with_overlapping_values(self):
+        from airedale.harness.pi import _redact_secrets, _TailBuffer
+
+        long_secret = "tok-0123456789-abcdefghijklmnopqrstuvwx"
+        inner = "abcdefghijkl"  # A known value inside the long one.
+        payload = b"noise " * 20 + long_secret.encode() + b" end"
+        buffer = _TailBuffer(len(long_secret) - 5 + 4)
+        buffer.append(payload)
+        redacted = _redact_secrets(buffer.text(), [inner, long_secret])
+        assert "mnopqrstuvwx" not in redacted
+        assert "end" in redacted
+
     def test_text_without_secret_is_unchanged(self):
         from airedale.harness.pi import _redact_secrets
 

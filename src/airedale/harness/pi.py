@@ -955,18 +955,31 @@ def _redact_secrets(text: str, secrets: Iterable[str]) -> str:
     """Return ``text`` without the secrets (the longest first), without bearer tokens, and without a cut secret.
 
     Every non-empty secret is removed, whatever its length. The stderr tail is a window on the end of the output: it
-    can start in the middle of a secret. A start that is the end of a secret (of at least 8 characters) is removed too.
+    can start in the middle of a secret, or in the middle of a UTF-8 character of one (the cut bytes give U+FFFD). The
+    start is matched with the end of every secret *first*, before any secret is replaced: a shorter secret inside the
+    cut part would otherwise change the start and hide the cut secret.
     """
     ordered = sorted({secret for secret in secrets if secret}, key=len, reverse=True)
+    text = _drop_cut_secret(text, ordered)
     for secret in ordered:
         text = text.replace(secret, _REDACTED)
-    text = _BEARER_RE.sub(r"\1" + _REDACTED, text)
-    for secret in ordered:
-        for size in range(len(secret) - 1, 7, -1):
-            if text.startswith(secret[-size:]):
-                text = _REDACTED + text[size:]
+    return _BEARER_RE.sub(r"\1" + _REDACTED, text)
+
+
+#: A start of the tail is taken for the cut end of a secret from this many characters.
+_MIN_CUT_SECRET = 4
+
+
+def _drop_cut_secret(text: str, secrets: list[str]) -> str:
+    """Remove the start of ``text`` when it is the end of a secret that the window cut."""
+    body = text.lstrip("\ufffd")  # The bytes of a character that the window cut.
+    best = 0
+    for secret in secrets:
+        for size in range(min(len(secret) - 1, len(body)), _MIN_CUT_SECRET - 1, -1):
+            if body.startswith(secret[-size:]):
+                best = max(best, size)
                 break
-    return text
+    return _REDACTED + body[best:] if best else text
 
 
 def _collector_extension_failed(collector: _PiEventCollector, returncode: int | None, stderr_tail: str) -> bool:
