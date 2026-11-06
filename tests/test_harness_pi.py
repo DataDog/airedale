@@ -1219,6 +1219,78 @@ class TestEventCollector:
         assert error is not None
         assert "damaged token usage" in str(error)
 
+    @pytest.mark.parametrize("kind", ["tool_execution_start", "tool_execution_end"])
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("toolCallId", "missing"),
+            ("toolCallId", None),
+            ("toolCallId", 5),
+            ("toolCallId", ["x"]),
+            ("toolName", "missing"),
+            ("toolName", None),
+            ("toolName", 5),
+            ("parentToolCallId", None),
+            ("parentToolCallId", 5),
+            ("parentToolCallId", {}),
+        ],
+    )
+    def test_tool_event_with_a_field_of_the_wrong_type_is_malformed(self, kind, field, value):
+        # null or a missing id used to become the empty id, and could close the execution of another call.
+        events = _events_tool_run()
+        index = 5 if kind == "tool_execution_start" else 6
+        if value == "missing":
+            del events[index][field]
+        else:
+            events[index][field] = value
+        collector = _collect(events)
+        assert collector.invalid_lines == 1
+        error = collector.result(model=MODEL, returncode=0, stderr_tail="").error
+        assert error is not None
+        assert "malformed JSONL" in str(error)
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("isError", None),
+            ("isError", "false"),
+            ("isError", 0),
+            ("durationMs", None),
+            ("durationMs", "5"),
+            ("durationMs", True),
+            ("durationMs", -1),
+            ("durationMs", float("inf")),
+        ],
+    )
+    def test_tool_end_with_is_error_or_duration_of_the_wrong_type_is_malformed(self, field, value):
+        events = _events_tool_run()
+        events[6][field] = value
+        collector = _collect(events)
+        assert collector.invalid_lines == 1
+
+    def test_end_with_a_null_id_does_not_close_an_empty_id_execution(self):
+        # The execution with the empty id stays open: the bad record is ignored and counted.
+        events = _events_tool_run()
+        events[4]["message"]["content"][-1]["id"] = ""
+        events[5]["toolCallId"] = ""
+        events[6]["toolCallId"] = None
+        collector = _collect(events)
+        assert collector.invalid_lines == 1
+        result = collector.result(model=MODEL, returncode=0, stderr_tail="")
+        assert result.tool_calls[0].error == "tool did not run"
+        assert result.tool_calls[0].result is None
+
+    def test_tool_events_of_pi_agent_loop_are_valid(self, pi_reference):
+        for action in ("retry", "parallel"):
+            for version, events in pi_reference({"action": action}).items():
+                assert _collect(events).invalid_lines == 0, (action, version)
+
+    def test_valid_tool_events_are_accepted(self):
+        events = _events_tool_run()
+        events[5]["parentToolCallId"] = "parent"
+        events[6].update({"parentToolCallId": "parent", "isError": False, "durationMs": 0})
+        assert _collect(events).invalid_lines == 0
+
     def test_valid_utf8_and_escaped_surrogates_are_accepted(self):
         collector = _PiEventCollector()
         line = b'{"type": "session", "id": "caf\\u00e9 \\ud83d\\ude00 \xc3\xa9 \\ud800"}\n'

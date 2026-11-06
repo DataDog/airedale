@@ -1379,6 +1379,10 @@ class _PiEventCollector:
             # Pi writes one JSON object per record; anything else is damage.
             self.invalid_lines += 1
             return None
+        if _tool_event_problem(event) is not None:
+            # Not given to the spans either: they would coerce the same fields.
+            self.invalid_lines += 1
+            return None
         self.records += 1
         if self.spans is not None:
             self.spans.feed(event, received_ns=received_ns)
@@ -1421,6 +1425,9 @@ class _PiEventCollector:
                 # Nested model work done inside a tool (pi counts it in its
                 # session totals too).
                 self._add_usage(message["usage"], "tool result")
+            return None
+        if event_type in ("tool_execution_start", "tool_execution_end") and _tool_event_problem(event) is not None:
+            self.invalid_lines += 1
             return None
         if event_type == "tool_execution_start":
             name = str(event.get("toolName") or "unknown")
@@ -1789,6 +1796,33 @@ def _valid_assistant_content(content: Any) -> bool:
 
 #: ``stopReason`` of an assistant message whose tool calls pi does not run.
 _PI_NO_TOOL_STOP_REASONS = frozenset({"error", "aborted"})
+
+
+def _tool_event_problem(event: dict[str, Any]) -> str | None:
+    """Return what is wrong with a ``tool_execution_start`` or ``tool_execution_end`` record, or ``None``.
+
+    Pi writes ``toolCallId`` and ``toolName`` as strings (the id can be empty), ``parentToolCallId`` (only for a nested
+    call) as a string, ``isError`` as a boolean and ``durationMs`` as a number. Reading ``null``, a missing id or a
+    number as the empty id (or as no parent, or as success) would close the execution of another call, or hide that
+    a call failed.
+    """
+    event_type = event.get("type")
+    if event_type not in ("tool_execution_start", "tool_execution_end"):
+        return None
+    for key in ("toolCallId", "toolName"):
+        if not isinstance(event.get(key), str):
+            return f"{key} is not a string"
+    if "parentToolCallId" in event and not isinstance(event["parentToolCallId"], str):
+        return "parentToolCallId is not a string"
+    if event_type == "tool_execution_end":
+        if "isError" in event and not isinstance(event["isError"], bool):
+            return "isError is not a boolean"
+        duration = event.get("durationMs")
+        if "durationMs" in event and (
+            isinstance(duration, bool) or not isinstance(duration, int | float) or not 0 <= duration < float("inf")
+        ):
+            return "durationMs is not a number"
+    return None
 
 
 def _parent_tool_id(event: dict[str, Any]) -> str | None:
