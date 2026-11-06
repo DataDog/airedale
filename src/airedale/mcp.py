@@ -224,14 +224,20 @@ def url_without_secrets(url: str | None) -> str | None:
     and fragment can hold tokens (for example ``/s/<token>/mcp``).
 
     The URL is read like pi reads it (``airedale.whatwg_url``): ``\\`` ends the host as ``/`` does, and tabs and
-    newlines inside the URL are ignored. A URL that cannot be read is replaced by ``<redacted>``.
+    newlines inside the URL are ignored. A URL that cannot be read, or whose host the reader cannot decide in
+    every detail, is replaced by ``<redacted>``.
     """
     if not url:
         return url
     from airedale.whatwg_url import parse_url
 
-    parsed = parse_url(url)
-    if parsed is None or not parsed.hostname:
+    try:
+        parsed = parse_url(url)
+    except Exception:  # noqa: BLE001 - a report must not abort a run: what cannot be read is not reported
+        return REDACTED
+    # A host that the reader is not sure about (``exact=False``: IDNA, odd IPv6) can hold what pi reads as a path
+    # or as user info (full-width slashes, ``@``, brackets): it is not reported.
+    if parsed is None or not parsed.exact or not parsed.hostname:
         return REDACTED
     return f"{parsed.scheme}://{parsed.hostname}" + (f":{parsed.port}" if parsed.port else "")
 

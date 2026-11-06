@@ -2094,6 +2094,39 @@ class TestPiToolNames:
         assert url_without_secrets(url) == reported
         assert "TOKEN" not in (url_without_secrets(url) or "")
 
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://host\uff0fSECRET/mcp",  # full-width solidus: a path separator after IDNA mapping
+            "http://host\uff20SECRET/mcp",  # full-width commercial at
+            "http://host\uff1aSECRET/mcp",  # full-width colon
+            "http://[SECRET]/mcp",
+            "http://host%EF%BC%8FSECRET/mcp",  # percent-encoded full-width solidus
+            "http://user\uff20SECRET.example/mcp",
+            "https://exämple.test/SECRET",
+        ],
+    )
+    def test_project_server_url_with_an_uncertain_host_is_not_reported(self, tmp_path, url):
+        # The reader cannot tell what pi reads as the host: nothing of the URL is reported (to_safe_dict goes to
+        # LLMObs metadata and the agent manifest).
+        (tmp_path / ".pi").mkdir()
+        (tmp_path / ".pi" / "mcp.json").write_text(json.dumps({"mcpServers": {"repo": {"url": url}}}))
+        runner = PiRunner(cwd=tmp_path)
+        reported = runner._reported_mcp_servers()
+        assert [server.name for server in reported] == ["repo"]
+        assert "SECRET" not in json.dumps([server.to_safe_dict() for server in reported], ensure_ascii=False)
+        assert reported[0].url == "<redacted>"
+
+    def test_redaction_never_raises(self, monkeypatch):
+        import airedale.whatwg_url as whatwg
+        from airedale.mcp import url_without_secrets
+
+        def boom(value):
+            raise RuntimeError("bug in the reader")
+
+        monkeypatch.setattr(whatwg, "parse_url", boom)
+        assert url_without_secrets("https://host/SECRET") == "<redacted>"
+
     def test_long_tool_names_collide_after_shortening(self):
         from airedale.mcp import pi_mcp_tool_name, pi_mcp_tool_names
 

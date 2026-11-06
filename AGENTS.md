@@ -334,7 +334,7 @@ Notes:
     only at the end of the run takes the ended one (the span recorder does the same: `close()`). A call of a response with
     `stopReason` `error` or `aborted` (pi runs no tool for it, and may retry with the same
     ids) takes no execution and shows "tool did not run".
-    Project `.pi/mcp.json` servers that pi loads (valid, not `enabled: false`; read once at the start of the run, so a task that edits the file changes nothing) are also listed in
+    A reported URL has only scheme, host and port (read with `airedale.whatwg_url`); when the reader is not sure about the host (non-ASCII, odd IPv6) or cannot read the URL, it is reported as `<redacted>`. Project `.pi/mcp.json` servers that pi loads (valid, not `enabled: false`; read once at the start of the run, so a task that edits the file changes nothing) are also listed in
     the span metadata and the agent manifest (`PiRunner._reported_mcp_servers`),
     but they are not probed for tools, and they get no distributed-trace
     headers: pi reads the repo file as it is, and a project entry replaces a
