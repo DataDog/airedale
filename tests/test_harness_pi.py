@@ -574,6 +574,42 @@ class TestEventCollector:
             assert value not in text
             assert value not in caplog.text
 
+    def test_short_and_refreshed_values_of_the_copied_auth_json_are_removed(self, tmp_path, monkeypatch):
+        """Credentials of any length under a credential key, and a token that pi writes into the copy during the run."""
+        operator = tmp_path / "operator"
+        operator.mkdir()
+        (operator / "auth.json").write_text(
+            json.dumps(
+                {
+                    "anthropic": {"type": "api_key", "key": "k-1"},
+                    "openai": {"type": "oauth", "access": "ab", "refresh": "r-0123456789-old-refresh-token"},
+                }
+            )
+        )
+        child = tmp_path / "child.py"
+        child.write_text(
+            "import json, os, pathlib, sys\n"
+            "path = pathlib.Path(os.environ['PI_CODING_AGENT_DIR']) / 'auth.json'\n"
+            "data = json.loads(path.read_text())\n"
+            "data['openai']['access'] = 'NEW-refreshed-access-token-0123'\n"  # Pi refreshes an OAuth token.
+            "path.write_text(json.dumps(data))\n"
+            "print(json.dumps({'type': 'agent_start'}), flush=True)\n"
+            "print(json.dumps({'type': 'agent_settled', 'aborted': False}), flush=True)\n"
+            "sys.stderr.write('printed ' + path.read_text() + ' fixture failure\\n')\n"
+            "raise SystemExit(3)\n"
+        )
+        monkeypatch.setenv("PI_CODING_AGENT_DIR", str(operator))
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        runner = PiRunner(cwd=tmp_path, pi_command=[sys.executable, str(child)])
+        with pytest.raises(RuntimeError) as error:
+            _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
+        text = str(error.value)
+        assert "fixture failure" in text
+        for value in ("k-1", "r-0123456789-old-refresh-token", "NEW-refreshed-access-token-0123"):
+            assert value not in text
+        assert '"ab"' not in text  # An access token of two characters, under a credential key.
+
     def test_run_without_a_copy_of_auth_json_hides_nothing_of_the_file(self, tmp_path, monkeypatch):
         operator = tmp_path / "operator"
         operator.mkdir()
