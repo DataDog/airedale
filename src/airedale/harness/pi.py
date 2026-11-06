@@ -569,7 +569,7 @@ class PiRunner(DecoratorSpanAgentRunner):
             return {}
         if strict:
             for name, config in configs.items():
-                problem = validate_server_config(name, config)
+                problem = validate_server_config(name, config, exact=True)
                 if isinstance(problem, str):
                     raise ValueError(f"Scenario MCP server {name!r} is not valid for pi: {problem}")
         return configs

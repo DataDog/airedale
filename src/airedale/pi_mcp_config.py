@@ -161,8 +161,37 @@ def _is_override(value: Mapping[str, Any]) -> bool:
 # --------------------------------------------------------------------------- #
 # Validation (pi: ``validateMcpServerConfig``)
 # --------------------------------------------------------------------------- #
-def validate_server_config(name: str, raw: Any) -> dict[str, Any] | str:
-    """Validate one server entry. Return the entry with exposure aliases resolved, or an error."""
+def validate_server_config(name: str, raw: Any, *, exact: bool = False) -> dict[str, Any] | str:
+    """Validate one server entry. Return the entry with exposure aliases resolved, or an error.
+
+    The URL reader of Airedale does not decide every host exactly (an odd IPv6, an IDNA host): by default such a URL
+    counts as accepted, which is the fail-closed answer for the entries of a repo file (a replacement is not missed).
+    ``exact=True`` asks for the exact answer, for a config that Airedale itself writes for pi: a URL that is rejected
+    **or** that cannot be decided is an error, so a server that pi may reject is not started or probed.
+    """
+    problem = _validate_server_config(name, raw)
+    if exact and not isinstance(problem, str):
+        return _undecided_url_problem(name, problem) or problem
+    return problem
+
+
+def _undecided_url_problem(name: str, config: dict[str, Any]) -> str | None:
+    """Return an error for a URL of ``config`` that the reader cannot decide exactly (``None``: all are exact)."""
+    oauth_value = config.get("oauth")
+    oauth: dict[str, Any] = oauth_value if isinstance(oauth_value, dict) else {}
+    for label, value in (
+        ("url", config.get("url")),
+        ("oauth.callbackUrl", oauth.get("callbackUrl")),
+        ("oauth.authServerMetadataUrl", oauth.get("authServerMetadataUrl")),
+    ):
+        if isinstance(value, str):
+            url = parse_url(value)
+            if url is None or not url.exact:
+                return f'server "{name}": {label} cannot be checked exactly (pi may reject it): {value!r}'
+    return None
+
+
+def _validate_server_config(name: str, raw: Any) -> dict[str, Any] | str:
     if not _SERVER_NAME_RE.fullmatch(name):
         return f'invalid server name "{name}" (use letters, digits, "_" and "-")'
     if not isinstance(raw, dict):

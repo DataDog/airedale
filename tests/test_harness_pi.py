@@ -470,8 +470,23 @@ class TestEventCollector:
             (McpServerSpec(name="ok", url="ftp://example.test/mcp"), "not valid for pi"),
             (McpServerSpec(name="ok", type="sse", url="https://example.test/mcp"), "unsupported type|not valid for pi"),
             (McpServerSpec(name="ok", type="stdio"), "no 'command'|not valid for pi"),
+            # Pi rejects these hosts; the URL reader cannot decide them exactly, so the strict check refuses them.
+            (McpServerSpec(name="ok", url="http://[not-an-ip]/mcp"), "cannot be checked exactly"),
+            (McpServerSpec(name="ok", url="http://[1::2::3]/mcp"), "cannot be checked exactly"),
+            (McpServerSpec(name="ok", url="https://\u00ad127.1/mcp"), "cannot be checked exactly"),
+            (McpServerSpec(name="ok", url="http://exämple.test/mcp"), "cannot be checked exactly"),
         ],
-        ids=["name", "wildcard", "url scheme", "sse", "no command"],
+        ids=[
+            "name",
+            "wildcard",
+            "url scheme",
+            "sse",
+            "no command",
+            "not an ip",
+            "double colon",
+            "soft hyphen host",
+            "idna host",
+        ],
     )
     def test_scenario_server_that_pi_rejects_is_refused_before_the_probe(
         self, tmp_path, monkeypatch, fake_span_llmobs, server, message
@@ -3779,3 +3794,34 @@ class TestRedactSecrets:
         from airedale.harness.pi import _redact_secrets
 
         assert _redact_secrets("pi: model not found\n", ["tok-0123456789"]) == "pi: model not found"
+
+
+class TestStrictScenarioValidation:
+    """The strict check wants an exact accept; the guard for project entries keeps its fail-closed meaning."""
+
+    @pytest.mark.parametrize("url", ["https://example.test/mcp", "http://127.0.0.1:8080/mcp", "http://[::1]:9/mcp"])
+    def test_urls_that_are_decided_exactly_are_accepted(self, tmp_path, url):
+        runner = PiRunner(cwd=tmp_path, mcp_servers=[McpServerSpec(name="docs", url=url)])
+        assert list(runner._scenario_pi_configs({}, strict=True)) == ["docs"]
+
+    def test_undecided_url_is_refused_in_strict_mode_only(self, tmp_path):
+        from airedale.pi_mcp import validate_server_config
+
+        config = {"url": "http://[not-an-ip]/mcp"}
+        assert isinstance(validate_server_config("x", config), dict)  # The guard: possibly accepted.
+        assert "cannot be checked exactly" in str(validate_server_config("x", config, exact=True))
+
+    def test_project_entry_with_an_undecided_url_still_replaces_the_scenario_server(self, tmp_path):
+        (tmp_path / ".pi").mkdir()
+        (tmp_path / ".pi" / "mcp.json").write_text(
+            json.dumps({"mcpServers": {"docs": {"url": "http://[not-an-ip]/mcp"}}})
+        )
+        runner = PiRunner(cwd=tmp_path, mcp_servers=[McpServerSpec(name="docs", command="scenario")])
+        with pytest.raises(ValueError, match="docs"):
+            runner._check_project_mcp_collisions({})
+
+    def test_oauth_urls_of_a_scenario_server_are_checked_exactly_too(self):
+        from airedale.pi_mcp import validate_server_config
+
+        config = {"url": "https://example.test", "oauth": {"authServerMetadataUrl": "http://[x]/meta"}}
+        assert "oauth.authServerMetadataUrl" in str(validate_server_config("x", config, exact=True))
