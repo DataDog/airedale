@@ -646,7 +646,27 @@ class PiRunner(DecoratorSpanAgentRunner):
         values = [self.gateway_bearer_token, self.gateway_api_key]
         values.extend(value for name in names for value in [os.environ.get(name), env.get(name)])
         values.extend(value for name, value in env.items() if _SECRET_ENV_NAME_RE.search(name))
+        values.extend(self._auth_file_secrets(env))
         return [value for value in dict.fromkeys(values) if value and len(value) >= _MIN_SECRET_LENGTH]
+
+    def _auth_file_secrets(self, env: Mapping[str, str]) -> list[str]:
+        """Return the secret values of the ``auth.json`` that was copied into the agent directory of the run.
+
+        The copy holds the credentials of every provider of the operator (access and refresh tokens, keys). Pi, an
+        extension or a tool can print the file. Pi can also write new tokens into the copy, so the copy and the file
+        it came from are both read. The values are only used to clean the text of the run: they are kept nowhere.
+        """
+        agent_dir = env.get("PI_CODING_AGENT_DIR")
+        if not agent_dir or not (Path(agent_dir) / "auth.json").is_file():
+            return []  # No copy was made (the run has a key in the environment): nothing of the file is in the run.
+        values: list[str] = []
+        for path in (Path(agent_dir) / "auth.json", _operator_agent_dir() / "auth.json"):
+            try:
+                text = path.read_bytes().decode("utf-8", errors="replace")
+            except OSError:
+                continue
+            values.extend(_secret_strings_of_json(text))
+        return values
 
     # ------------------------------------------------------------------ #
     # Command line
@@ -876,11 +896,40 @@ async def _read_events(
 
 #: Names of environment variables that hold a credential.
 _SECRET_ENV_NAME_RE = re.compile(r"(?i)(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH)")
+#: Keys of a credentials file (``auth.json``) whose value is a credential.
+_SECRET_KEY_NAME_RE = re.compile(r"(?i)(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH|ACCESS|REFRESH)")
 #: A value shorter than this is not taken for a credential (it would also hide ordinary words in a message).
 _MIN_SECRET_LENGTH = 6
 #: ``Authorization: Bearer <token>`` or ``Bearer <token>``: the token is removed even when it is not a known value.
 _BEARER_RE = re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]{8,}")
 _REDACTED = "<redacted>"
+
+
+def _secret_strings_of_json(text: str) -> list[str]:
+    """Return the strings of a credentials file that can be a credential: long ones, and any under a secret-like key.
+
+    Short ordinary values (``"oauth"``, ``"api_key"``) are left out so that they are not hidden in messages. A file
+    that is not JSON gives its long tokens.
+    """
+    try:
+        data = js_json.loads(text.removeprefix("\ufeff"))
+    except ValueError:
+        return re.findall(r"[A-Za-z0-9._~+/=-]{16,}", text)
+    found: list[str] = []
+    stack: list[tuple[Any, str]] = [(data, "")]
+    while stack:
+        item, key = stack.pop()
+        if isinstance(item, dict):
+            stack.extend((child, str(name)) for name, child in item.items())
+        elif isinstance(item, list):
+            stack.extend((child, key) for child in item)
+        elif isinstance(item, str) and (len(item) >= _AUTH_LONG_VALUE or _SECRET_KEY_NAME_RE.search(key)):
+            found.append(item)
+    return found
+
+
+#: A string of a credentials file with at least this many characters is taken for a credential, whatever its key.
+_AUTH_LONG_VALUE = 20
 
 
 def _redact_secrets(text: str, secrets: Iterable[str]) -> str:

@@ -507,6 +507,61 @@ class TestEventCollector:
             assert secret not in text
         assert text.count("<redacted>") >= 5
 
+    def test_stderr_tail_has_no_value_of_the_copied_auth_json(self, tmp_path, fake_pi, monkeypatch, caplog):
+        """The copy of the operator's auth.json holds the tokens of every provider: none may reach the error or the log."""
+        operator = tmp_path / "operator"
+        operator.mkdir()
+        secrets = {
+            "access": "ACCESS-anthropic-0123456789abcdef",
+            "refresh": "REFRESH-anthropic-0123456789abcdef",
+            "openai_key": "sk-openai-0123456789abcdef0123",
+            "short_key": "k-12345",
+            "other_token": "TOKEN-google-0123456789abcdef",
+        }
+        auth = {
+            "anthropic": {"type": "oauth", "access": secrets["access"], "refresh": secrets["refresh"], "expires": 1},
+            "openai": {"type": "api_key", "key": secrets["openai_key"]},
+            "google": {"type": "api_key", "token": secrets["other_token"], "apiKey": secrets["short_key"]},
+        }
+        (operator / "auth.json").write_text(json.dumps(auth))
+        monkeypatch.setenv("PI_CODING_AGENT_DIR", str(operator))
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        printed = "\n".join(f"{name}={value}" for name, value in secrets.items())
+        command, _ = fake_pi(
+            [{"type": "agent_start"}, {"type": "agent_settled", "aborted": False}],
+            FAKE_PI_STDERR=f"cat auth.json: oauth api_key {printed}\n",
+            FAKE_PI_EXIT="3",
+        )
+        runner = PiRunner(cwd=workspace, pi_command=command)
+        with caplog.at_level("DEBUG"), pytest.raises(RuntimeError) as error:
+            _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
+        text = str(error.value)
+        assert "cat auth.json: oauth api_key" in text  # Ordinary words are kept.
+        for value in secrets.values():
+            assert value not in text
+            assert value not in caplog.text
+
+    def test_run_without_a_copy_of_auth_json_hides_nothing_of_the_file(self, tmp_path, monkeypatch):
+        operator = tmp_path / "operator"
+        operator.mkdir()
+        (operator / "auth.json").write_text(json.dumps({"anthropic": {"access": "ACCESS-0123456789abcdef0123"}}))
+        monkeypatch.setenv("PI_CODING_AGENT_DIR", str(operator))
+        assert PiRunner(cwd=tmp_path)._auth_file_secrets({"PI_CODING_AGENT_DIR": str(tmp_path / "empty")}) == []
+        assert PiRunner(cwd=tmp_path)._auth_file_secrets({}) == []
+
+    def test_secret_strings_of_a_credentials_file(self):
+        from airedale.harness.pi import _secret_strings_of_json
+
+        text = json.dumps(
+            {"a": {"type": "oauth", "access": "short", "list": ["x" * 25, "ok"], "expires": 5}, "b": ["y" * 20]}
+        )
+        assert sorted(_secret_strings_of_json(text)) == sorted(["short", "x" * 25, "y" * 20])
+        # A file that is not JSON gives its long tokens.
+        assert _secret_strings_of_json("not json: ABCDEFGHIJKLMNOPQRSTUV and word") == ["ABCDEFGHIJKLMNOPQRSTUV"]
+
     def test_empty_final_response_through_a_run(self, tmp_path, fake_pi):
         events = _events_tool_run()
         events[-4]["message"]["content"] = []
