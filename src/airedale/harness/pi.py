@@ -1285,6 +1285,12 @@ class _PiEventCollector:
                 # model call that holds the usage: the run must not succeed with a total that is too low.
                 self.invalid_lines += 1
                 return None
+            role = message.get("role")
+            if not isinstance(role, str) or not role:
+                # Every message of pi has a role (also the custom ones). Without it the record can be a model
+                # call, and the run must not succeed without its usage.
+                self.invalid_lines += 1
+                return None
             if message.get("role") == "assistant":
                 self.assistant_messages.append(message)
                 # A model call must have usage.

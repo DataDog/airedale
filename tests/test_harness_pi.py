@@ -872,11 +872,43 @@ class TestEventCollector:
         assert error is not None
         assert "malformed JSONL" in str(error)
 
+    @pytest.mark.parametrize("role", ["missing", None, 7, "", [], {}])
+    def test_message_end_without_a_role_fails_the_run(self, role):
+        # The message of a model call has no usable role: its usage would be lost (1,550 tokens instead of 3,008).
+        events = _events_tool_run()
+        if role == "missing":
+            del events[4]["message"]["role"]
+        else:
+            events[4]["message"]["role"] = role
+        collector = _collect(events)
+        assert collector.invalid_lines == 1
+        error = collector.result(model=MODEL, returncode=0, stderr_tail="").error
+        assert error is not None
+        assert "malformed JSONL" in str(error)
+
+    def test_message_end_with_an_empty_object_fails_the_run(self):
+        events = _events_tool_run()
+        events[4]["message"] = {}
+        collector = _collect(events)
+        assert collector.invalid_lines == 1
+        assert collector.result(model=MODEL, returncode=0, stderr_tail="").error is not None
+
+    @pytest.mark.parametrize("role", ["custom", "bashExecution", "branchSummary", "compactionSummary", "system"])
+    def test_message_end_with_another_role_name_is_accepted(self, role):
+        events = _events_tool_run()
+        events.insert(5, {"type": "message_end", "message": {"role": role, "content": "x"}})
+        collector = _collect(events)
+        assert collector.invalid_lines == 0
+        assert collector.result(model=MODEL, returncode=0, stderr_tail="").error is None
+
     def test_message_end_records_of_pi_agent_loop_all_have_a_message(self, pi_reference):
         """Pi's real loop (recorded): every message_end has a message object."""
         for version, events in pi_reference({"action": "parallel"}).items():
             ends = [event for event in events if event["type"] == "message_end"]
             assert ends and all(isinstance(event.get("message"), dict) for event in ends), version
+            assert all(isinstance(event["message"].get("role"), str) and event["message"]["role"] for event in ends), (
+                version
+            )
             assert _collect(events).invalid_lines == 0, version
 
     def test_valid_utf8_and_escaped_surrogates_are_accepted(self):
