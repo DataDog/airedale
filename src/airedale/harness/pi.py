@@ -1492,8 +1492,14 @@ class _PiEventCollector:
         if event_type == "auto_retry_start":
             return f"retry {event.get('attempt')}/{event.get('maxAttempts')}"
         if event_type == "agent_settled":
+            aborted = event.get("aborted")
+            if not isinstance(aborted, bool):
+                # Pi always writes a boolean (agent-session.js, 1.4.0 and 1.5.0). Reading a missing or other value as
+                # "not aborted" could turn a damaged record into a run that settled.
+                self.invalid_lines += 1
+                return None
             self.settled = True
-            self.aborted = bool(event.get("aborted"))
+            self.aborted = aborted
             return None
         return None
 

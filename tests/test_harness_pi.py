@@ -1369,6 +1369,29 @@ class TestEventCollector:
         events[6].update({"parentToolCallId": "parent", "isError": False, "durationMs": 0})
         assert _collect(events).invalid_lines == 0
 
+    @pytest.mark.parametrize("aborted", ["missing", None, "false", "true", 0, 1, [], {}])
+    def test_agent_settled_without_a_boolean_aborted_is_malformed(self, aborted):
+        events = _events_tool_run()
+        settled = events[-1]
+        assert settled["type"] == "agent_settled"
+        if aborted == "missing":
+            del settled["aborted"]
+        else:
+            settled["aborted"] = aborted
+        collector = _collect(events)
+        assert collector.invalid_lines == 1
+        assert not collector.settled  # The damaged record does not settle the run.
+        error = collector.result(model=MODEL, returncode=0, stderr_tail="").error
+        assert error is not None
+        assert "malformed JSONL" in str(error) or "before the run settled" in str(error)
+
+    @pytest.mark.parametrize("aborted", [True, False])
+    def test_agent_settled_with_a_boolean_aborted_is_read(self, aborted):
+        events = _events_tool_run()
+        events[-1]["aborted"] = aborted
+        collector = _collect(events)
+        assert (collector.invalid_lines, collector.settled, collector.aborted) == (0, True, aborted)
+
     def test_valid_utf8_and_escaped_surrogates_are_accepted(self):
         collector = _PiEventCollector()
         line = b'{"type": "session", "id": "caf\\u00e9 \\ud83d\\ude00 \xc3\xa9 \\ud800"}\n'
