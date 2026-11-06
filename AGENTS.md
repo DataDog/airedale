@@ -423,7 +423,7 @@ Resolution rules (`gateway.py`):
   model (`baseUrl`, `headers`, `apiKey`; `authHeader = true` for a helper token
   so it is sent as `Authorization: Bearer`). Pi's built-in catalog supplies the
   model details (API, context window, output limit, cost), so no hardcoded model
-  list is needed; `pi_models` covers models outside the catalog. Values are
+  list is needed; `pi_models` covers models outside the catalog (an entry must be made of values that JSON can hold: a TOML date or time, `inf` or `nan` is a `ConfigError` at load). Values are
   escaped (`$$` / `$!`) because pi interpolates `$NAME` and runs `!command`. The
   token is written to that private file, not to the pi env, and the
   `api_key_env` variables of all gateway providers are removed from the pi env

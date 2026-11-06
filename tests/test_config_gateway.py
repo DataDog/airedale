@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import textwrap
 from pathlib import Path
 
@@ -169,6 +170,25 @@ class TestPiModels:
         assert model["contextWindow"] == 200000
         assert anthropic.pi_models
 
+    def test_json_values_of_every_kind_are_accepted(self, tmp_path):
+        config = load_gateway(
+            write_toml(
+                tmp_path,
+                """
+                [[providers.openai.pi_models]]
+                id = "a"
+                reasoning = true
+                contextWindow = 1000
+                cost = { input = 1.5, output = 2 }
+                input = ["text", "image"]
+                compat = { nested = { list = [1, "x", false] } }
+                """,
+            )
+        )
+        provider = config.get("openai")
+        assert provider is not None
+        json.dumps(provider.pi_models)  # JSON can hold the whole entry.
+
     def test_default_is_empty(self, tmp_path):
         config = load_gateway(write_toml(tmp_path, '[providers.openai]\nbase_url = "https://gw"\n'))
         openai = config.get("openai")
@@ -182,6 +202,14 @@ class TestPiModels:
             ("pi_models = [1]", "must be a table"),
             ("[[providers.openai.pi_models]]\nname = 'no id'", "non-empty string 'id'"),
             ("[[providers.openai.pi_models]]\nid = 'a'\n[[providers.openai.pi_models]]\nid = 'a'", "more than once"),
+            # TOML dates and times, anywhere in the entry, and numbers that JSON does not have.
+            ("[[providers.openai.pi_models]]\nid = 'a'\nreleased = 2026-01-02", "date value"),
+            ("[[providers.openai.pi_models]]\nid = 'a'\nat = 07:30:00", "time value"),
+            ("[[providers.openai.pi_models]]\nid = 'a'\nat = 2026-01-02T07:30:00Z", "datetime value"),
+            ("[[providers.openai.pi_models]]\nid = 'a'\ncost = { input = 1, when = 2026-01-02 }", r"cost\.when"),
+            ("[[providers.openai.pi_models]]\nid = 'a'\nlist = [1, [2026-01-02]]", r"list\[1\]\[0\]"),
+            ("[[providers.openai.pi_models]]\nid = 'a'\ncost = { input = inf }", "finite number"),
+            ("[[providers.openai.pi_models]]\nid = 'a'\ncost = { input = nan }", "finite number"),
         ],
     )
     def test_invalid_pi_models(self, tmp_path, body, message):

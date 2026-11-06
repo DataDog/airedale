@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -67,8 +68,37 @@ def _parse_pi_models(provider: str, raw: Any) -> tuple[dict[str, Any], ...]:
         if model_id in seen:
             raise ConfigError(f"Provider '{provider}' 'pi_models' defines model '{model_id}' more than once")
         seen.add(model_id)
+        _check_json_value(entry, f"Provider '{provider}' 'pi_models[{index}]'")
         models.append(dict(entry))
     return tuple(models)
+
+
+def _check_json_value(value: Any, where: str) -> None:
+    """Raise :class:`ConfigError` unless ``value`` is made only of values that JSON can hold.
+
+    A ``pi_models`` entry is written as it is to the ``models.json`` of pi. TOML also has dates and times, which
+    JSON has not (and ``inf`` and ``nan``, which are not valid JSON).
+    """
+    stack: list[tuple[Any, str]] = [(value, where)]
+    while stack:
+        item, path = stack.pop()
+        if isinstance(item, bool | str | int):
+            continue
+        if isinstance(item, float):
+            if not math.isfinite(item):
+                raise ConfigError(f"{path} must be a finite number for JSON, not {item!r}")
+        elif isinstance(item, dict):
+            for key, child in item.items():
+                if not isinstance(key, str):
+                    raise ConfigError(f"{path} has a key that is not a string: {key!r}")
+                stack.append((child, f"{path}.{key}"))
+        elif isinstance(item, list):
+            stack.extend((child, f"{path}[{index}]") for index, child in enumerate(item))
+        else:
+            raise ConfigError(
+                f"{path} has a {type(item).__name__} value, which JSON cannot hold "
+                "(TOML dates and times are not allowed here); use a string or a number"
+            )
 
 
 def _parse_provider(name: str, config: dict[str, Any]) -> ProviderGatewayConfig:
