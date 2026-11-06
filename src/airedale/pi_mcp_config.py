@@ -112,7 +112,10 @@ def _reject_constant(name: str) -> Any:
 
 def _js_entries(mapping: Mapping[str, Any]) -> list[tuple[str, Any]]:
     """Entries in the order of ``Object.entries``: array indexes first, in number order."""
-    indexes = [key for key in mapping if _ARRAY_INDEX_RE.fullmatch(key) and int(key) <= _MAX_ARRAY_INDEX]
+    # A key with more than 10 digits is above 2**32 - 2: it is a plain property (and no ``int()`` of a long string).
+    indexes = [
+        key for key in mapping if len(key) <= 10 and _ARRAY_INDEX_RE.fullmatch(key) and int(key) <= _MAX_ARRAY_INDEX
+    ]
     indexes.sort(key=int)
     index_set = set(indexes)
     rest = [key for key in mapping if key not in index_set]

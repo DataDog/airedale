@@ -166,6 +166,9 @@ CASES: list[tuple[str, dict, str, Any, bool, list[str]]] = [
         False,
         [],
     ),
+    ("server name of 5000 digits", SCENARIO, "9" * 5000, {"command": "project"}, False, []),
+    ("server name that is an array index", SCENARIO, "4294967294", {"command": "project"}, False, []),
+    ("server name above the array indexes", SCENARIO, "4294967295", {"command": "project"}, False, []),
     ("identical definition", SCENARIO, "same", SCENARIO["same"], False, ["same"]),
 ]
 
@@ -322,3 +325,20 @@ class TestValidation:
     @pytest.mark.parametrize("url", ["http:", "http://", "https:///", "example.test", "http://[::1"])
     def test_urls_without_a_host(self, url):
         assert isinstance(validate_server_config("x", {"url": url}), str)
+
+
+def test_server_names_are_ordered_like_object_entries():
+    # Array indexes come first, in number order; the others keep their order. A name with more than 10 digits (or
+    # of thousands of digits) is a plain name and does not need a conversion to an integer.
+    from airedale.pi_mcp_config import _js_entries
+
+    names = ["b", "10", "9" * 5000, "2", "4294967295", "4294967294", "a"]
+    assert [name for name, _ in _js_entries(dict.fromkeys(names))] == [
+        "2",
+        "10",
+        "4294967294",
+        "b",
+        "9" * 5000,
+        "4294967295",
+        "a",
+    ]
