@@ -154,6 +154,17 @@ FILES = [
     ("pairs of an alias to an open mapping", "---\nname: alpha\ndescription: d\nm: &a {o: !!pairs [*a]}\n---\n"),
     ("omap of an alias to a finished mapping", "---\nname: alpha\ndescription: d\nm: &a {x: 1}\no: !!omap [*a]\n---\n"),
     ("omap of an alias to an open sequence", "---\nname: alpha\ndescription: d\nm: &a [!!omap [*a]]\n---\n"),
+    ("integer of 5000 digits as the name", "---\nname: " + "9" * 5000 + "\ndescription: d\n---\n"),
+    ("negative integer of 5000 digits as the name", "---\nname: -" + "9" * 5000 + "\ndescription: d\n---\n"),
+    ("integer of 5000 zeros", "---\nname: " + "0" * 5000 + "\ndescription: d\n---\n"),
+    ("integer of 5000 digits as a value", "---\nname: alpha\ndescription: d\nx: " + "9" * 5000 + "\n---\n"),
+    (
+        "keys that are integers of 5000 digits",
+        "---\nname: alpha\ndescription: d\n" + "9" * 5000 + ": a\n" + "9" * 4999 + "8: b\n---\n",
+    ),
+    ("float of 5000 digits", "---\nname: alpha\ndescription: d\nx: " + "9" * 5000 + ".5\n---\n"),
+    ("integer of 400 digits as a value", "---\nname: alpha\ndescription: d\nx: " + "9" * 400 + "\n---\n"),
+    ("hex integer of 5000 digits", "---\nname: alpha\ndescription: d\nx: 0x" + "f" * 5000 + "\n---\n"),
     ("non-ascii", "---\nname: alphä\ndescription: d\n---\n"),
     ("long key", "---\n? " + "k" * 2000 + "\n: v\nname: alpha\ndescription: d\n---\n"),
 ]
@@ -442,3 +453,13 @@ def test_settings_json_with_a_huge_integer_still_lists_skills(tmp_path):
     (cwd / ".pi").mkdir()
     (cwd / ".pi" / "settings.json").write_text('{"other": ' + "9" * 5000 + ', "skills": ["../tools/extra"]}')
     assert pi_skill_dirs([], str(cwd)) == [str(cwd / ".pi" / ".." / "tools" / "extra")]
+
+
+def test_a_long_integer_in_a_project_skill_still_collides(tmp_path):
+    # Pi reads the number as Infinity and loads the skill: the name collides. No exception, no skipped skill.
+    with pytest.raises(ValueError, match="'alpha'"):
+        _collision(
+            tmp_path,
+            "---\nname: alpha\ndescription: d\n---\n",
+            "---\nname: alpha\ndescription: d\nx: " + "9" * 5000 + "\n---\n",
+        )

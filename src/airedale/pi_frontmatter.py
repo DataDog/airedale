@@ -59,6 +59,8 @@ _YAML_NON_STRING_TAGS = frozenset(_YAML_PREFIX + name for name in ("binary", "ti
 _SET_TAG, _OMAP_TAG, _PAIRS_TAG = _YAML_PREFIX + "set", _YAML_PREFIX + "omap", _YAML_PREFIX + "pairs"
 #: ``pairs`` of a mapping that is not finished (an alias refers to it from inside).
 _UNFINISHED = -1
+#: A decimal integer with more digits than this is above the range of a double (309 digits at most).
+_MAX_DECIMAL_DIGITS = 400
 #: How many tabs the reader places before it gives up.
 _MAX_TAB_REPAIRS = 1000
 
@@ -349,8 +351,15 @@ def _resolve_plain_scalar(text: str) -> Node | None:
         return ("bool", _YAML_BOOL[text])
     if _YAML_INT_RE.fullmatch(text):
         prefix = text[:2]
-        number = int(text[2:], 8 if prefix == "0o" else 16) if prefix in ("0o", "0x") else int(text)
-        return ("int", _js_number(number))
+        if prefix in ("0o", "0x"):
+            return ("int", _js_number(int(text[2:], 8 if prefix == "0o" else 16)))  # No limit for these bases.
+        digits = text.lstrip("+-").lstrip("0")
+        if len(digits) > _MAX_DECIMAL_DIGITS:
+            # JavaScript: ``parseInt`` of a number above 1.8e308 is Infinity. (No ``int()`` of a very long text:
+            # Python refuses it above 4,300 digits.)
+            return ("int", -math.inf if text.startswith("-") else math.inf)
+        number = int(digits or "0")  # (The leading zeros are not converted: a text of 5000 zeros is over the limit.)
+        return ("int", _js_number(-number if text.startswith("-") else number))
     if _YAML_INF_RE.fullmatch(text) or text in _YAML_NAN:
         return ("float", float(text.replace(".", "").replace("NaN", "nan").lower()))
     if _YAML_FLOAT_RE.fullmatch(text):
