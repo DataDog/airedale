@@ -969,6 +969,45 @@ class TestEventCollector:
             )
             assert _collect(events).invalid_lines == 0, version
 
+    @pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+    def test_javascript_invalid_constants_in_a_record_fail_the_run(self, constant):
+        # JSON.parse rejects these; Python accepted them and scored "nan" as the answer.
+        events = _events_tool_run()
+        collector = _PiEventCollector()
+        for event in events:
+            line = json.dumps(event).encode() + b"\n"
+            if event.get("type") == "message_end" and event["message"].get("role") == "assistant":
+                line = line.replace(b'"The directory is empty."', constant.encode()) if b"empty" in line else line
+            collector.feed_line(line)
+        assert collector.invalid_lines == 1
+        error = collector.result(model=MODEL, returncode=0, stderr_tail="").error
+        assert error is not None
+
+    def test_text_block_with_a_constant_is_not_the_answer(self):
+        line = (
+            b'{"type": "message_end", "message": {"role": "assistant", "content": [{"type": "text", "text": NaN}]}}\n'
+        )
+        collector = _PiEventCollector()
+        collector.feed_line(line)
+        assert collector.invalid_lines == 1
+        assert collector.assistant_messages == []
+
+    @pytest.mark.parametrize("field", ["input", "output", "cacheRead", "cacheWrite"])
+    def test_count_of_400_digits_is_infinity_and_damaged(self, field):
+        # 400 digits are legal JSON for Python, and Infinity for JSON.parse: the count is not a finite number.
+        events = _events_tool_run()
+        collector = _PiEventCollector()
+        for event in events:
+            if event.get("type") == "message_end" and event["message"].get("role") == "assistant":
+                event["message"]["usage"][field] = None  # replaced in the text below
+            line = json.dumps(event).encode() + b"\n"
+            if event.get("type") == "message_end" and event["message"].get("role") == "assistant":
+                line = line.replace(f'"{field}": null'.encode(), f'"{field}": 1'.encode() + b"0" * 400, 1)
+            collector.feed_line(line)
+        error = collector.result(model=MODEL, returncode=0, stderr_tail="").error
+        assert error is not None
+        assert "damaged token usage" in str(error)
+
     def test_valid_utf8_and_escaped_surrogates_are_accepted(self):
         collector = _PiEventCollector()
         line = b'{"type": "session", "id": "caf\\u00e9 \\ud83d\\ude00 \xc3\xa9 \\ud800"}\n'

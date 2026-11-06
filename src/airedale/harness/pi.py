@@ -124,6 +124,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from airedale import js_json
 from airedale.harness import base as _base
 from airedale.harness.base import (
     AgentOutputSegment,
@@ -1259,7 +1260,9 @@ class _PiEventCollector:
         if not text.strip():
             return None
         try:
-            event = json.loads(text)
+            # Like ``JSON.parse`` (what pi writes with): NaN and Infinity are errors, and an integer above the range
+            # of a double is Infinity (so a damaged count is seen as damaged).
+            event = js_json.loads(text)
         except ValueError:
             self.invalid_lines += 1
             logger.debug("Ignoring non-JSON pi stdout line: %.200s", text)
