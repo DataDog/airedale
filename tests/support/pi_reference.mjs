@@ -153,4 +153,66 @@ if (request.action === "mcp") {
   }
   events.push({ type: "agent_settled", aborted: false });
   console.log(JSON.stringify(events));
+} else if (request.action === "parallel") {
+  // The events of pi's agent loop (mock model) for one turn with two parallel tool calls that both have
+  // the id "": the first call is slower, so the end records come in the other order.
+  Date.now = () => 1_700_000_000_000;
+  const modules = `${base}/../`;
+  const { agentLoop } = await import(pathToFileURL(`${modules}pi-agent-core/dist/agent-loop.js`).href);
+  const { AssistantMessageEventStream } = await import(
+    pathToFileURL(`${modules}pi-ai/dist/utils/event-stream.js`).href
+  );
+  const model = { id: "claude-sonnet-4-6", provider: "anthropic", api: "anthropic-messages" };
+  const usage = {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
+  const message = (content, stopReason) => ({
+    role: "assistant",
+    api: model.api,
+    provider: model.provider,
+    model: model.id,
+    content,
+    stopReason,
+    usage,
+    timestamp: Date.now(),
+  });
+  const tool = (name, delay) => ({
+    name,
+    label: name,
+    description: "test",
+    parameters: { type: "object", properties: {} },
+    execute: async () => {
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      return { content: [{ type: "text", text: `${name} result` }], details: {} };
+    },
+  });
+  const context = { messages: [], tools: [tool("slow", 60), tool("fast", 0)] };
+  const responses = [
+    message(
+      [
+        { type: "toolCall", id: "", name: "slow", arguments: {} },
+        { type: "toolCall", id: "", name: "fast", arguments: {} },
+      ],
+      "toolUse",
+    ),
+    message([{ type: "text", text: "done" }], "stop"),
+  ];
+  const streamFn = () => {
+    const response = responses.shift();
+    const stream = new AssistantMessageEventStream();
+    stream.push({ type: "done", reason: response.stopReason, message: response });
+    return stream;
+  };
+  const events = [];
+  const prompt = [{ role: "user", content: "run", timestamp: Date.now() }];
+  for await (const event of agentLoop(prompt, context, { model, convertToLlm: (m) => m }, undefined, streamFn)) {
+    events.push(event);
+  }
+  events.push({ type: "agent_settled", aborted: false });
+  console.log(JSON.stringify(events));
 }

@@ -476,25 +476,77 @@ class TestEventCollector:
         # Each nested call follows the execution that it started under.
         assert [call.name for call in result.tool_calls] == ["ls", "child1", "read", "child2"]
 
-    def test_start_again_before_the_end_keeps_the_earlier_execution(self):
-        # The first "" call never ends: it does not take the result of the second.
+    def _parallel_calls(self, ids, ends):
+        """A turn with parallel calls: all starts, then the ends in the order of ``ends``."""
         events = _events_tool_run()
-        events[4]["message"]["content"].append({"type": "toolCall", "id": "", "name": "read", "arguments": {}})
-        events[4]["message"]["content"][2]["id"] = ""
+        message = events[4]["message"]
+        message["content"] = [
+            {"type": "toolCall", "id": tool_id, "name": f"t{index}", "arguments": {}}
+            for index, tool_id in enumerate(ids)
+        ]
+        starts = [
+            {"type": "tool_execution_start", "toolCallId": tool_id, "toolName": f"t{index}", "args": {}}
+            for index, tool_id in enumerate(ids)
+        ]
+        finishes = [
+            {
+                "type": "tool_execution_end",
+                "toolCallId": ids[index],
+                "toolName": f"t{index}",
+                "result": {"content": [{"type": "text", "text": f"result {index}"}]},
+                "isError": False,
+            }
+            for index in ends
+        ]
+        events[5:7] = [*starts, *finishes]
+        return events
+
+    @pytest.mark.parametrize("ids", [["", ""], ["", "", ""], ["a", "a"]])
+    def test_parallel_calls_with_the_same_id_fail_the_run(self, ids):
+        # Pi ends parallel calls as they finish, so the end records of calls with one id can not be matched.
+        events = self._parallel_calls(ids, ends=list(reversed(range(len(ids)))))
+        error = _collect(events).result(model=MODEL, returncode=0, stderr_tail="").error
+        assert error is not None
+        assert "cannot be matched" in str(error)
+        assert f"{len(ids)} tool calls" in str(error)
+
+    def test_parallel_calls_with_distinct_ids_finish_in_any_order(self):
+        events = self._parallel_calls(["a", "b", "c"], ends=[2, 0, 1])
+        result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
+        assert result.error is None
+        assert [call.result for call in result.tool_calls] == ["result 0", "result 1", "result 2"]
+
+    def test_calls_with_the_same_id_one_after_the_other_keep_their_results(self):
+        events = _events_tool_run()
+        events[4]["message"]["content"] = [
+            {"type": "toolCall", "id": "", "name": "t0", "arguments": {}},
+            {"type": "toolCall", "id": "", "name": "t1", "arguments": {}},
+        ]
         events[5:7] = [
-            {"type": "tool_execution_start", "toolCallId": "", "toolName": "ls"},
-            {"type": "tool_execution_start", "toolCallId": "", "toolName": "read"},
+            {"type": "tool_execution_start", "toolCallId": "", "toolName": "t0"},
             {
                 "type": "tool_execution_end",
                 "toolCallId": "",
-                "toolName": "read",
-                "result": {"content": [{"type": "text", "text": "second"}]},
+                "toolName": "t0",
+                "result": {"content": [{"type": "text", "text": "r0"}]},
+            },
+            {"type": "tool_execution_start", "toolCallId": "", "toolName": "t1"},
+            {
+                "type": "tool_execution_end",
+                "toolCallId": "",
+                "toolName": "t1",
+                "result": {"content": [{"type": "text", "text": "r1"}]},
             },
         ]
         result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
-        first, second = result.tool_calls
-        assert (first.result, first.error) == (None, "tool did not run")
-        assert (second.result, second.error) == ("second", None)
+        assert result.error is None
+        assert [call.result for call in result.tool_calls] == ["r0", "r1"]
+
+    def test_parallel_events_of_pi_agent_loop(self, pi_reference):
+        """Pi's real agent loop: parallel calls with the id "" end in the order of completion."""
+        for version, events in pi_reference({"action": "parallel"}).items():
+            error = _collect(events).result(model=MODEL, returncode=0, stderr_tail="").error
+            assert error is not None and "cannot be matched" in str(error), version
 
     def test_nested_execution_is_not_the_execution_of_a_model_call(self):
         # A damaged stream: call_2 is a model call, and the only execution with

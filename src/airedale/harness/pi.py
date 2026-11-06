@@ -1199,7 +1199,7 @@ class _PiEventCollector:
     #: (even ""), so each occurrence is kept and the id is not a key.
     tool_executions: list[_ToolExecution] = field(default_factory=list)
     #: The execution of each id that started but did not end.
-    _open_executions: dict[str, _ToolExecution] = field(default_factory=dict, repr=False)
+    _open_executions: dict[str, list[_ToolExecution]] = field(default_factory=dict, repr=False)
     #: The latest execution of each id: the parent of the calls that name it.
     _latest_executions: dict[str, _ToolExecution] = field(default_factory=dict, repr=False)
     #: Executions that named a parent that has not started yet, by parent id.
@@ -1285,7 +1285,7 @@ class _PiEventCollector:
             tool_id = str(event.get("toolCallId") or "")
             # The end record belongs to the open execution of this id. With no
             # start record, it makes an execution that is already over.
-            execution = self._open_executions.pop(tool_id, None) or self._begin_execution(event, track_open=False)
+            execution = self._end_execution(tool_id) or self._begin_execution(event, track_open=False)
             execution.result = event.get("result")
             execution.is_error = bool(event.get("isError"))
             execution.duration_ms = event.get("durationMs")
@@ -1322,6 +1322,27 @@ class _PiEventCollector:
             return None
         return None
 
+    def _end_execution(self, tool_id: str) -> _ToolExecution | None:
+        """Return the open execution that an end record closes (``None``: no start record).
+
+        Pi starts all parallel tool calls of a turn before it waits for them, and ends them as they
+        finish, in any order. Calls with the same id (even "") are then open together, and an end
+        record does not tell which of them it is. Their results can not be matched to the calls, so
+        the run fails (the first open execution gets the record, so that nothing else is lost).
+        """
+        open_executions = self._open_executions.get(tool_id)
+        if not open_executions:
+            return None
+        if len(open_executions) > 1:
+            self.fail(
+                f"pi ran {len(open_executions)} tool calls with the id {tool_id!r} at the same time; "
+                "their results cannot be matched to the calls"
+            )
+        execution = open_executions.pop(0)
+        if not open_executions:
+            del self._open_executions[tool_id]
+        return execution
+
     def _add_usage(self, usage: Any, source: str) -> None:
         """Count a ``usage`` record; remember a record that is damaged."""
         if is_valid_pi_usage(usage):
@@ -1344,7 +1365,7 @@ class _PiEventCollector:
                 self._waiting_for_parent.setdefault(parent_id, []).append(execution)
         self.tool_executions.append(execution)
         if track_open:
-            self._open_executions[tool_id] = execution
+            self._open_executions.setdefault(tool_id, []).append(execution)
         self._latest_executions[tool_id] = execution
         # Calls that came before their parent get it now.
         for waiting in self._waiting_for_parent.pop(tool_id, ()):

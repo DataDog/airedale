@@ -1,0 +1,1182 @@
+{
+ "_comment": "Answers of pi to the requests of the tests. Record again: see tests/conftest.py (pi_reference).",
+ "cases": {
+  "{\"action\":\"parallel\"}": {
+   "1.4.0": [
+    {
+     "type": "agent_start"
+    },
+    {
+     "type": "turn_start"
+    },
+    {
+     "message": {
+      "content": "",
+      "role": "system",
+      "timestamp": 1700000000000,
+      "toolsAdded": [
+       {
+        "description": "test",
+        "name": "slow",
+        "parameters": {
+         "properties": {},
+         "type": "object"
+        }
+       },
+       {
+        "description": "test",
+        "name": "fast",
+        "parameters": {
+         "properties": {},
+         "type": "object"
+        }
+       }
+      ]
+     },
+     "type": "message_start"
+    },
+    {
+     "message": {
+      "content": "",
+      "role": "system",
+      "timestamp": 1700000000000,
+      "toolsAdded": [
+       {
+        "description": "test",
+        "name": "slow",
+        "parameters": {
+         "properties": {},
+         "type": "object"
+        }
+       },
+       {
+        "description": "test",
+        "name": "fast",
+        "parameters": {
+         "properties": {},
+         "type": "object"
+        }
+       }
+      ]
+     },
+     "type": "message_end"
+    },
+    {
+     "message": {
+      "content": "run",
+      "role": "user",
+      "timestamp": 1700000000000
+     },
+     "type": "message_start"
+    },
+    {
+     "message": {
+      "content": "run",
+      "role": "user",
+      "timestamp": 1700000000000
+     },
+     "type": "message_end"
+    },
+    {
+     "message": {
+      "api": "anthropic-messages",
+      "content": [
+       {
+        "arguments": {},
+        "id": "",
+        "name": "slow",
+        "type": "toolCall"
+       },
+       {
+        "arguments": {},
+        "id": "",
+        "name": "fast",
+        "type": "toolCall"
+       }
+      ],
+      "durationMs": 0,
+      "model": "claude-sonnet-4-6",
+      "provider": "anthropic",
+      "role": "assistant",
+      "stopReason": "toolUse",
+      "thinkingLevel": "off",
+      "timestamp": 1700000000000,
+      "usage": {
+       "cacheRead": 0,
+       "cacheWrite": 0,
+       "cost": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "input": 0,
+        "output": 0,
+        "total": 0
+       },
+       "input": 0,
+       "output": 0,
+       "totalTokens": 0
+      }
+     },
+     "type": "message_start"
+    },
+    {
+     "message": {
+      "api": "anthropic-messages",
+      "content": [
+       {
+        "arguments": {},
+        "id": "",
+        "name": "slow",
+        "type": "toolCall"
+       },
+       {
+        "arguments": {},
+        "id": "",
+        "name": "fast",
+        "type": "toolCall"
+       }
+      ],
+      "durationMs": 0,
+      "model": "claude-sonnet-4-6",
+      "provider": "anthropic",
+      "role": "assistant",
+      "stopReason": "toolUse",
+      "thinkingLevel": "off",
+      "timestamp": 1700000000000,
+      "usage": {
+       "cacheRead": 0,
+       "cacheWrite": 0,
+       "cost": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "input": 0,
+        "output": 0,
+        "total": 0
+       },
+       "input": 0,
+       "output": 0,
+       "totalTokens": 0
+      }
+     },
+     "type": "message_end"
+    },
+    {
+     "args": {},
+     "toolCallId": "",
+     "toolName": "slow",
+     "type": "tool_execution_start"
+    },
+    {
+     "args": {},
+     "toolCallId": "",
+     "toolName": "fast",
+     "type": "tool_execution_start"
+    },
+    {
+     "durationMs": 0,
+     "isError": false,
+     "result": {
+      "content": [
+       {
+        "text": "fast result",
+        "type": "text"
+       }
+      ],
+      "details": {}
+     },
+     "toolCallId": "",
+     "toolName": "fast",
+     "type": "tool_execution_end"
+    },
+    {
+     "durationMs": 61,
+     "isError": false,
+     "result": {
+      "content": [
+       {
+        "text": "slow result",
+        "type": "text"
+       }
+      ],
+      "details": {}
+     },
+     "toolCallId": "",
+     "toolName": "slow",
+     "type": "tool_execution_end"
+    },
+    {
+     "message": {
+      "content": [
+       {
+        "text": "slow result",
+        "type": "text"
+       }
+      ],
+      "details": {},
+      "durationMs": 61,
+      "isError": false,
+      "role": "toolResult",
+      "timestamp": 1700000000000,
+      "toolCallId": "",
+      "toolName": "slow"
+     },
+     "type": "message_start"
+    },
+    {
+     "message": {
+      "content": [
+       {
+        "text": "slow result",
+        "type": "text"
+       }
+      ],
+      "details": {},
+      "durationMs": 61,
+      "isError": false,
+      "role": "toolResult",
+      "timestamp": 1700000000000,
+      "toolCallId": "",
+      "toolName": "slow"
+     },
+     "type": "message_end"
+    },
+    {
+     "message": {
+      "content": [
+       {
+        "text": "fast result",
+        "type": "text"
+       }
+      ],
+      "details": {},
+      "durationMs": 0,
+      "isError": false,
+      "role": "toolResult",
+      "timestamp": 1700000000000,
+      "toolCallId": "",
+      "toolName": "fast"
+     },
+     "type": "message_start"
+    },
+    {
+     "message": {
+      "content": [
+       {
+        "text": "fast result",
+        "type": "text"
+       }
+      ],
+      "details": {},
+      "durationMs": 0,
+      "isError": false,
+      "role": "toolResult",
+      "timestamp": 1700000000000,
+      "toolCallId": "",
+      "toolName": "fast"
+     },
+     "type": "message_end"
+    },
+    {
+     "message": {
+      "api": "anthropic-messages",
+      "content": [
+       {
+        "arguments": {},
+        "id": "",
+        "name": "slow",
+        "type": "toolCall"
+       },
+       {
+        "arguments": {},
+        "id": "",
+        "name": "fast",
+        "type": "toolCall"
+       }
+      ],
+      "durationMs": 0,
+      "model": "claude-sonnet-4-6",
+      "provider": "anthropic",
+      "role": "assistant",
+      "stopReason": "toolUse",
+      "thinkingLevel": "off",
+      "timestamp": 1700000000000,
+      "usage": {
+       "cacheRead": 0,
+       "cacheWrite": 0,
+       "cost": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "input": 0,
+        "output": 0,
+        "total": 0
+       },
+       "input": 0,
+       "output": 0,
+       "totalTokens": 0
+      }
+     },
+     "toolResults": [
+      {
+       "content": [
+        {
+         "text": "slow result",
+         "type": "text"
+        }
+       ],
+       "details": {},
+       "durationMs": 61,
+       "isError": false,
+       "role": "toolResult",
+       "timestamp": 1700000000000,
+       "toolCallId": "",
+       "toolName": "slow"
+      },
+      {
+       "content": [
+        {
+         "text": "fast result",
+         "type": "text"
+        }
+       ],
+       "details": {},
+       "durationMs": 0,
+       "isError": false,
+       "role": "toolResult",
+       "timestamp": 1700000000000,
+       "toolCallId": "",
+       "toolName": "fast"
+      }
+     ],
+     "type": "turn_end"
+    },
+    {
+     "type": "turn_start"
+    },
+    {
+     "message": {
+      "api": "anthropic-messages",
+      "content": [
+       {
+        "text": "done",
+        "type": "text"
+       }
+      ],
+      "durationMs": 0,
+      "model": "claude-sonnet-4-6",
+      "provider": "anthropic",
+      "role": "assistant",
+      "stopReason": "stop",
+      "thinkingLevel": "off",
+      "timestamp": 1700000000000,
+      "usage": {
+       "cacheRead": 0,
+       "cacheWrite": 0,
+       "cost": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "input": 0,
+        "output": 0,
+        "total": 0
+       },
+       "input": 0,
+       "output": 0,
+       "totalTokens": 0
+      }
+     },
+     "type": "message_start"
+    },
+    {
+     "message": {
+      "api": "anthropic-messages",
+      "content": [
+       {
+        "text": "done",
+        "type": "text"
+       }
+      ],
+      "durationMs": 0,
+      "model": "claude-sonnet-4-6",
+      "provider": "anthropic",
+      "role": "assistant",
+      "stopReason": "stop",
+      "thinkingLevel": "off",
+      "timestamp": 1700000000000,
+      "usage": {
+       "cacheRead": 0,
+       "cacheWrite": 0,
+       "cost": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "input": 0,
+        "output": 0,
+        "total": 0
+       },
+       "input": 0,
+       "output": 0,
+       "totalTokens": 0
+      }
+     },
+     "type": "message_end"
+    },
+    {
+     "message": {
+      "api": "anthropic-messages",
+      "content": [
+       {
+        "text": "done",
+        "type": "text"
+       }
+      ],
+      "durationMs": 0,
+      "model": "claude-sonnet-4-6",
+      "provider": "anthropic",
+      "role": "assistant",
+      "stopReason": "stop",
+      "thinkingLevel": "off",
+      "timestamp": 1700000000000,
+      "usage": {
+       "cacheRead": 0,
+       "cacheWrite": 0,
+       "cost": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "input": 0,
+        "output": 0,
+        "total": 0
+       },
+       "input": 0,
+       "output": 0,
+       "totalTokens": 0
+      }
+     },
+     "toolResults": [],
+     "type": "turn_end"
+    },
+    {
+     "messages": [
+      {
+       "content": "",
+       "role": "system",
+       "timestamp": 1700000000000,
+       "toolsAdded": [
+        {
+         "description": "test",
+         "name": "slow",
+         "parameters": {
+          "properties": {},
+          "type": "object"
+         }
+        },
+        {
+         "description": "test",
+         "name": "fast",
+         "parameters": {
+          "properties": {},
+          "type": "object"
+         }
+        }
+       ]
+      },
+      {
+       "content": "run",
+       "role": "user",
+       "timestamp": 1700000000000
+      },
+      {
+       "api": "anthropic-messages",
+       "content": [
+        {
+         "arguments": {},
+         "id": "",
+         "name": "slow",
+         "type": "toolCall"
+        },
+        {
+         "arguments": {},
+         "id": "",
+         "name": "fast",
+         "type": "toolCall"
+        }
+       ],
+       "durationMs": 0,
+       "model": "claude-sonnet-4-6",
+       "provider": "anthropic",
+       "role": "assistant",
+       "stopReason": "toolUse",
+       "thinkingLevel": "off",
+       "timestamp": 1700000000000,
+       "usage": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "cost": {
+         "cacheRead": 0,
+         "cacheWrite": 0,
+         "input": 0,
+         "output": 0,
+         "total": 0
+        },
+        "input": 0,
+        "output": 0,
+        "totalTokens": 0
+       }
+      },
+      {
+       "content": [
+        {
+         "text": "slow result",
+         "type": "text"
+        }
+       ],
+       "details": {},
+       "durationMs": 61,
+       "isError": false,
+       "role": "toolResult",
+       "timestamp": 1700000000000,
+       "toolCallId": "",
+       "toolName": "slow"
+      },
+      {
+       "content": [
+        {
+         "text": "fast result",
+         "type": "text"
+        }
+       ],
+       "details": {},
+       "durationMs": 0,
+       "isError": false,
+       "role": "toolResult",
+       "timestamp": 1700000000000,
+       "toolCallId": "",
+       "toolName": "fast"
+      },
+      {
+       "api": "anthropic-messages",
+       "content": [
+        {
+         "text": "done",
+         "type": "text"
+        }
+       ],
+       "durationMs": 0,
+       "model": "claude-sonnet-4-6",
+       "provider": "anthropic",
+       "role": "assistant",
+       "stopReason": "stop",
+       "thinkingLevel": "off",
+       "timestamp": 1700000000000,
+       "usage": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "cost": {
+         "cacheRead": 0,
+         "cacheWrite": 0,
+         "input": 0,
+         "output": 0,
+         "total": 0
+        },
+        "input": 0,
+        "output": 0,
+        "totalTokens": 0
+       }
+      }
+     ],
+     "type": "agent_end"
+    },
+    {
+     "aborted": false,
+     "type": "agent_settled"
+    }
+   ],
+   "1.5.0": [
+    {
+     "type": "agent_start"
+    },
+    {
+     "type": "turn_start"
+    },
+    {
+     "message": {
+      "content": "",
+      "role": "system",
+      "timestamp": 1700000000000,
+      "toolsAdded": [
+       {
+        "description": "test",
+        "name": "slow",
+        "parameters": {
+         "properties": {},
+         "type": "object"
+        }
+       },
+       {
+        "description": "test",
+        "name": "fast",
+        "parameters": {
+         "properties": {},
+         "type": "object"
+        }
+       }
+      ]
+     },
+     "type": "message_start"
+    },
+    {
+     "message": {
+      "content": "",
+      "role": "system",
+      "timestamp": 1700000000000,
+      "toolsAdded": [
+       {
+        "description": "test",
+        "name": "slow",
+        "parameters": {
+         "properties": {},
+         "type": "object"
+        }
+       },
+       {
+        "description": "test",
+        "name": "fast",
+        "parameters": {
+         "properties": {},
+         "type": "object"
+        }
+       }
+      ]
+     },
+     "type": "message_end"
+    },
+    {
+     "message": {
+      "content": "run",
+      "role": "user",
+      "timestamp": 1700000000000
+     },
+     "type": "message_start"
+    },
+    {
+     "message": {
+      "content": "run",
+      "role": "user",
+      "timestamp": 1700000000000
+     },
+     "type": "message_end"
+    },
+    {
+     "message": {
+      "api": "anthropic-messages",
+      "content": [
+       {
+        "arguments": {},
+        "id": "",
+        "name": "slow",
+        "type": "toolCall"
+       },
+       {
+        "arguments": {},
+        "id": "",
+        "name": "fast",
+        "type": "toolCall"
+       }
+      ],
+      "durationMs": 0,
+      "model": "claude-sonnet-4-6",
+      "provider": "anthropic",
+      "role": "assistant",
+      "stopReason": "toolUse",
+      "thinkingLevel": "off",
+      "timestamp": 1700000000000,
+      "usage": {
+       "cacheRead": 0,
+       "cacheWrite": 0,
+       "cost": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "input": 0,
+        "output": 0,
+        "total": 0
+       },
+       "input": 0,
+       "output": 0,
+       "totalTokens": 0
+      }
+     },
+     "type": "message_start"
+    },
+    {
+     "message": {
+      "api": "anthropic-messages",
+      "content": [
+       {
+        "arguments": {},
+        "id": "",
+        "name": "slow",
+        "type": "toolCall"
+       },
+       {
+        "arguments": {},
+        "id": "",
+        "name": "fast",
+        "type": "toolCall"
+       }
+      ],
+      "durationMs": 0,
+      "model": "claude-sonnet-4-6",
+      "provider": "anthropic",
+      "role": "assistant",
+      "stopReason": "toolUse",
+      "thinkingLevel": "off",
+      "timestamp": 1700000000000,
+      "usage": {
+       "cacheRead": 0,
+       "cacheWrite": 0,
+       "cost": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "input": 0,
+        "output": 0,
+        "total": 0
+       },
+       "input": 0,
+       "output": 0,
+       "totalTokens": 0
+      }
+     },
+     "type": "message_end"
+    },
+    {
+     "args": {},
+     "toolCallId": "",
+     "toolName": "slow",
+     "type": "tool_execution_start"
+    },
+    {
+     "args": {},
+     "toolCallId": "",
+     "toolName": "fast",
+     "type": "tool_execution_start"
+    },
+    {
+     "durationMs": 1,
+     "isError": false,
+     "result": {
+      "content": [
+       {
+        "text": "fast result",
+        "type": "text"
+       }
+      ],
+      "details": {}
+     },
+     "toolCallId": "",
+     "toolName": "fast",
+     "type": "tool_execution_end"
+    },
+    {
+     "durationMs": 63,
+     "isError": false,
+     "result": {
+      "content": [
+       {
+        "text": "slow result",
+        "type": "text"
+       }
+      ],
+      "details": {}
+     },
+     "toolCallId": "",
+     "toolName": "slow",
+     "type": "tool_execution_end"
+    },
+    {
+     "message": {
+      "content": [
+       {
+        "text": "slow result",
+        "type": "text"
+       }
+      ],
+      "details": {},
+      "durationMs": 63,
+      "isError": false,
+      "role": "toolResult",
+      "timestamp": 1700000000000,
+      "toolCallId": "",
+      "toolName": "slow"
+     },
+     "type": "message_start"
+    },
+    {
+     "message": {
+      "content": [
+       {
+        "text": "slow result",
+        "type": "text"
+       }
+      ],
+      "details": {},
+      "durationMs": 63,
+      "isError": false,
+      "role": "toolResult",
+      "timestamp": 1700000000000,
+      "toolCallId": "",
+      "toolName": "slow"
+     },
+     "type": "message_end"
+    },
+    {
+     "message": {
+      "content": [
+       {
+        "text": "fast result",
+        "type": "text"
+       }
+      ],
+      "details": {},
+      "durationMs": 1,
+      "isError": false,
+      "role": "toolResult",
+      "timestamp": 1700000000000,
+      "toolCallId": "",
+      "toolName": "fast"
+     },
+     "type": "message_start"
+    },
+    {
+     "message": {
+      "content": [
+       {
+        "text": "fast result",
+        "type": "text"
+       }
+      ],
+      "details": {},
+      "durationMs": 1,
+      "isError": false,
+      "role": "toolResult",
+      "timestamp": 1700000000000,
+      "toolCallId": "",
+      "toolName": "fast"
+     },
+     "type": "message_end"
+    },
+    {
+     "message": {
+      "api": "anthropic-messages",
+      "content": [
+       {
+        "arguments": {},
+        "id": "",
+        "name": "slow",
+        "type": "toolCall"
+       },
+       {
+        "arguments": {},
+        "id": "",
+        "name": "fast",
+        "type": "toolCall"
+       }
+      ],
+      "durationMs": 0,
+      "model": "claude-sonnet-4-6",
+      "provider": "anthropic",
+      "role": "assistant",
+      "stopReason": "toolUse",
+      "thinkingLevel": "off",
+      "timestamp": 1700000000000,
+      "usage": {
+       "cacheRead": 0,
+       "cacheWrite": 0,
+       "cost": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "input": 0,
+        "output": 0,
+        "total": 0
+       },
+       "input": 0,
+       "output": 0,
+       "totalTokens": 0
+      }
+     },
+     "toolResults": [
+      {
+       "content": [
+        {
+         "text": "slow result",
+         "type": "text"
+        }
+       ],
+       "details": {},
+       "durationMs": 63,
+       "isError": false,
+       "role": "toolResult",
+       "timestamp": 1700000000000,
+       "toolCallId": "",
+       "toolName": "slow"
+      },
+      {
+       "content": [
+        {
+         "text": "fast result",
+         "type": "text"
+        }
+       ],
+       "details": {},
+       "durationMs": 1,
+       "isError": false,
+       "role": "toolResult",
+       "timestamp": 1700000000000,
+       "toolCallId": "",
+       "toolName": "fast"
+      }
+     ],
+     "type": "turn_end"
+    },
+    {
+     "type": "turn_start"
+    },
+    {
+     "message": {
+      "api": "anthropic-messages",
+      "content": [
+       {
+        "text": "done",
+        "type": "text"
+       }
+      ],
+      "durationMs": 0,
+      "model": "claude-sonnet-4-6",
+      "provider": "anthropic",
+      "role": "assistant",
+      "stopReason": "stop",
+      "thinkingLevel": "off",
+      "timestamp": 1700000000000,
+      "usage": {
+       "cacheRead": 0,
+       "cacheWrite": 0,
+       "cost": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "input": 0,
+        "output": 0,
+        "total": 0
+       },
+       "input": 0,
+       "output": 0,
+       "totalTokens": 0
+      }
+     },
+     "type": "message_start"
+    },
+    {
+     "message": {
+      "api": "anthropic-messages",
+      "content": [
+       {
+        "text": "done",
+        "type": "text"
+       }
+      ],
+      "durationMs": 0,
+      "model": "claude-sonnet-4-6",
+      "provider": "anthropic",
+      "role": "assistant",
+      "stopReason": "stop",
+      "thinkingLevel": "off",
+      "timestamp": 1700000000000,
+      "usage": {
+       "cacheRead": 0,
+       "cacheWrite": 0,
+       "cost": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "input": 0,
+        "output": 0,
+        "total": 0
+       },
+       "input": 0,
+       "output": 0,
+       "totalTokens": 0
+      }
+     },
+     "type": "message_end"
+    },
+    {
+     "message": {
+      "api": "anthropic-messages",
+      "content": [
+       {
+        "text": "done",
+        "type": "text"
+       }
+      ],
+      "durationMs": 0,
+      "model": "claude-sonnet-4-6",
+      "provider": "anthropic",
+      "role": "assistant",
+      "stopReason": "stop",
+      "thinkingLevel": "off",
+      "timestamp": 1700000000000,
+      "usage": {
+       "cacheRead": 0,
+       "cacheWrite": 0,
+       "cost": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "input": 0,
+        "output": 0,
+        "total": 0
+       },
+       "input": 0,
+       "output": 0,
+       "totalTokens": 0
+      }
+     },
+     "toolResults": [],
+     "type": "turn_end"
+    },
+    {
+     "messages": [
+      {
+       "content": "",
+       "role": "system",
+       "timestamp": 1700000000000,
+       "toolsAdded": [
+        {
+         "description": "test",
+         "name": "slow",
+         "parameters": {
+          "properties": {},
+          "type": "object"
+         }
+        },
+        {
+         "description": "test",
+         "name": "fast",
+         "parameters": {
+          "properties": {},
+          "type": "object"
+         }
+        }
+       ]
+      },
+      {
+       "content": "run",
+       "role": "user",
+       "timestamp": 1700000000000
+      },
+      {
+       "api": "anthropic-messages",
+       "content": [
+        {
+         "arguments": {},
+         "id": "",
+         "name": "slow",
+         "type": "toolCall"
+        },
+        {
+         "arguments": {},
+         "id": "",
+         "name": "fast",
+         "type": "toolCall"
+        }
+       ],
+       "durationMs": 0,
+       "model": "claude-sonnet-4-6",
+       "provider": "anthropic",
+       "role": "assistant",
+       "stopReason": "toolUse",
+       "thinkingLevel": "off",
+       "timestamp": 1700000000000,
+       "usage": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "cost": {
+         "cacheRead": 0,
+         "cacheWrite": 0,
+         "input": 0,
+         "output": 0,
+         "total": 0
+        },
+        "input": 0,
+        "output": 0,
+        "totalTokens": 0
+       }
+      },
+      {
+       "content": [
+        {
+         "text": "slow result",
+         "type": "text"
+        }
+       ],
+       "details": {},
+       "durationMs": 63,
+       "isError": false,
+       "role": "toolResult",
+       "timestamp": 1700000000000,
+       "toolCallId": "",
+       "toolName": "slow"
+      },
+      {
+       "content": [
+        {
+         "text": "fast result",
+         "type": "text"
+        }
+       ],
+       "details": {},
+       "durationMs": 1,
+       "isError": false,
+       "role": "toolResult",
+       "timestamp": 1700000000000,
+       "toolCallId": "",
+       "toolName": "fast"
+      },
+      {
+       "api": "anthropic-messages",
+       "content": [
+        {
+         "text": "done",
+         "type": "text"
+        }
+       ],
+       "durationMs": 0,
+       "model": "claude-sonnet-4-6",
+       "provider": "anthropic",
+       "role": "assistant",
+       "stopReason": "stop",
+       "thinkingLevel": "off",
+       "timestamp": 1700000000000,
+       "usage": {
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "cost": {
+         "cacheRead": 0,
+         "cacheWrite": 0,
+         "input": 0,
+         "output": 0,
+         "total": 0
+        },
+        "input": 0,
+        "output": 0,
+        "totalTokens": 0
+       }
+      }
+     ],
+     "type": "agent_end"
+    },
+    {
+     "aborted": false,
+     "type": "agent_settled"
+    }
+   ]
+  }
+ },
+ "node": "v26.13.0",
+ "pi_versions": [
+  "1.4.0",
+  "1.5.0"
+ ]
+}
