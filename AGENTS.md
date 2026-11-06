@@ -286,7 +286,7 @@ Notes:
     a repeated key at any depth, `!!set` with a value that is not null, and `!!omap` /
     `!!pairs` with a bad item make pi skip the skill (an alias item in `!!omap` / `!!pairs` makes `pi_skill_dirs` raise
     `UnsupportedFrontmatterError`: the reader does not copy how the package reads it); numbers are keys of the same value
-    when JavaScript says so. `tests/test_pi_skills.py` compares this with the installed
+    when JavaScript says so. Skill discovery follows directory symlinks as pi does (checked in 1.4.0 and 1.5.0), loads a file once by its real path (a link to a skill already loaded is not a collision) and does not enter a directory that is above it. `tests/test_pi_skills.py` compares this with the installed
     pi releases. A tab is read exactly or not at all: tabs after `:`, before a
     comment or `:`, at the end of a line, and after a `-` or `?` that the scanner reads as an indicator are
     white space and are placed (not in the continuation line of a plain value); any

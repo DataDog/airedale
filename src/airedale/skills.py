@@ -172,6 +172,7 @@ def pi_skill_dirs(skill_dirs: list[str], cwd: str) -> list[str]:
     """
     scenario: list[str] = []
     names: dict[str, str] = {}
+    real_paths: set[str] = set()  # Pi skips a skill file that it already loaded (a symlink to it) without a word.
     for skill_dir in skill_dirs:
         source_path = Path(skill_dir).resolve()
         if not source_path.exists():
@@ -179,9 +180,13 @@ def pi_skill_dirs(skill_dirs: list[str], cwd: str) -> list[str]:
         if not source_path.is_dir():
             raise ValueError(f"Skill path is not a directory: {skill_dir}")
         for name, skill_file in _pi_skills(source_path):
+            real = os.path.realpath(skill_file)
+            if real in real_paths:
+                continue
             if name in names:
                 raise ValueError(f"Skill '{name}' (scenario skill {skill_file}) collides with {names[name]}")
             names[name] = f"scenario skill {skill_file}"
+            real_paths.add(real)
         scenario.append(str(source_path))
 
     workspace = Path(cwd)
@@ -199,6 +204,9 @@ def pi_skill_dirs(skill_dirs: list[str], cwd: str) -> list[str]:
         if str(path) in project:
             continue
         for name, skill_file in _pi_skills(path):
+            real = os.path.realpath(skill_file)
+            if real in real_paths:
+                continue  # The same file through a symlink: pi loads it once and does not report a collision.
             if name in names:
                 raise ValueError(
                     f"Skill '{name}' (project skill {skill_file}) collides with {names[name]}; "
@@ -209,6 +217,7 @@ def pi_skill_dirs(skill_dirs: list[str], cwd: str) -> list[str]:
                 logger.warning("Project skill %s shadowed by %s", skill_file, seen_project[name])
                 continue
             seen_project[name] = str(skill_file)
+            real_paths.add(real)
         project.append(str(path))
     return [*scenario, *project]
 
@@ -249,7 +258,9 @@ def _expand_pi_home(entry: str) -> Path:
     return Path(entry)
 
 
-def _pi_skill_entries(directory: Path, mode: str, root: Path | None = None) -> list[Path]:
+def _pi_skill_entries(
+    directory: Path, mode: str, root: Path | None = None, ancestors: frozenset[str] = frozenset()
+) -> list[Path]:
     """Return the skill files that pi's automatic discovery finds in ``directory``.
 
     Same walk as pi's ``collectSkillEntries``: a directory with ``SKILL.md``
@@ -262,6 +273,10 @@ def _pi_skill_entries(directory: Path, mode: str, root: Path | None = None) -> l
     root = root or directory
     if not directory.is_dir():
         return []
+    real = os.path.realpath(directory)
+    if real in ancestors:
+        return []  # A symlink to a directory above: pi would follow it until the system refuses, finding the same files.
+    ancestors = ancestors | {real}
     if (directory / "SKILL.md").is_file():
         return [directory / "SKILL.md"]
     entries: list[Path] = []
@@ -280,7 +295,7 @@ def _pi_skill_entries(directory: Path, mode: str, root: Path | None = None) -> l
         ):
             entries.append(child)
         elif child.is_dir():
-            entries.extend(_pi_skill_entries(child, mode, root))
+            entries.extend(_pi_skill_entries(child, mode, root, ancestors))
     return entries
 
 
@@ -299,7 +314,13 @@ def _pi_skills(path: Path) -> list[tuple[str, Path]]:
     return _pi_skills_in_dir(path, top_level=True)
 
 
-def _pi_skills_in_dir(directory: Path, *, top_level: bool) -> list[tuple[str, Path]]:
+def _pi_skills_in_dir(
+    directory: Path, *, top_level: bool, ancestors: frozenset[str] = frozenset()
+) -> list[tuple[str, Path]]:
+    real = os.path.realpath(directory)
+    if real in ancestors:
+        return []  # A symlink to a directory above (see ``_pi_skill_entries``).
+    ancestors = ancestors | {real}
     skill_file = directory / "SKILL.md"
     if skill_file.is_file():
         name = _pi_skill_name(skill_file)
@@ -313,7 +334,7 @@ def _pi_skills_in_dir(directory: Path, *, top_level: bool) -> list[tuple[str, Pa
         if entry.name.startswith(".") or entry.name in _PI_SKIPPED_SKILL_DIRS:
             continue
         if entry.is_dir():
-            found.extend(_pi_skills_in_dir(entry, top_level=False))
+            found.extend(_pi_skills_in_dir(entry, top_level=False, ancestors=ancestors))
         elif top_level and entry.is_file() and entry.suffix == ".md":
             name = _pi_skill_name(entry)
             if name:

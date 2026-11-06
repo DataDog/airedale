@@ -498,3 +498,58 @@ def test_tilde_and_tilde_slash_are_the_home_directory(tmp_path, monkeypatch):
 def test_skill_dirs_do_not_raise_for_a_tilde_user_entry(tmp_path):
     cwd = _settings(tmp_path, ["~user-that-does-not-exist/skills"])
     assert pi_skill_dirs([], str(cwd)) == []  # The path does not exist: it is left out.
+
+
+def _skill(path, name, body="d"):
+    path.mkdir(parents=True)
+    (path / "SKILL.md").write_text(f"---\nname: {name}\ndescription: {body}\n---\n")
+    return path
+
+
+def test_symlink_to_the_scenario_skill_is_the_same_file_not_a_collision(tmp_path):
+    # Pi follows directory symlinks and loads a file once (by its real path): no collision diagnostic.
+    scenario = _skill(tmp_path / "src" / "alpha", "alpha")
+    cwd = tmp_path / "cwd"
+    (cwd / ".pi" / "skills").mkdir(parents=True)
+    (cwd / ".pi" / "skills" / "linked").symlink_to(scenario, target_is_directory=True)
+    assert pi_skill_dirs([str(scenario)], str(cwd))[0] == str(scenario.resolve())
+
+
+def test_different_skill_with_the_same_name_is_still_a_collision(tmp_path):
+    scenario = _skill(tmp_path / "src" / "alpha", "alpha")
+    cwd = tmp_path / "cwd"
+    _skill(cwd / ".pi" / "skills" / "other", "alpha", "another file")
+    with pytest.raises(ValueError, match="collides"):
+        pi_skill_dirs([str(scenario)], str(cwd))
+
+
+def test_two_links_to_one_project_skill_load_it_once(tmp_path, caplog):
+    cwd = tmp_path / "cwd"
+    target = _skill(tmp_path / "shared" / "beta", "beta")
+    root = cwd / ".pi" / "skills"
+    root.mkdir(parents=True)
+    (root / "one").symlink_to(target, target_is_directory=True)
+    (root / "two").symlink_to(target, target_is_directory=True)
+    with caplog.at_level("WARNING"):
+        assert pi_skill_dirs([], str(cwd)) == [str(root)]
+    assert "shadowed" not in caplog.text
+
+
+def test_symlink_to_a_directory_above_does_not_loop(tmp_path):
+    cwd = tmp_path / "cwd"
+    root = cwd / ".pi" / "skills"
+    _skill(root / "team" / "gamma", "gamma")
+    (root / "team" / "up").symlink_to(root, target_is_directory=True)  # A link to an ancestor.
+    (root / "team" / "up2").symlink_to(cwd, target_is_directory=True)
+    agents = cwd / ".agents" / "skills"
+    _skill(agents / "team" / "delta", "delta")
+    (agents / "team" / "up").symlink_to(agents, target_is_directory=True)
+    assert pi_skill_dirs([], str(cwd)) == [str(root), str(agents / "team" / "delta" / "SKILL.md")]
+
+
+def test_broken_symlink_is_skipped(tmp_path):
+    cwd = tmp_path / "cwd"
+    root = cwd / ".pi" / "skills"
+    root.mkdir(parents=True)
+    (root / "broken").symlink_to(tmp_path / "missing", target_is_directory=True)
+    assert pi_skill_dirs([], str(cwd)) == [str(root)]
