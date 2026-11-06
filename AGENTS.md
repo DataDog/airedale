@@ -459,6 +459,7 @@ src/airedale/
   mcp.py                 McpServerSpec (from McpServerConfig); HTTP/stdio rendering for both SDKs;
                          merged_headers (static + trace); managed-server start/health;
                          tools/list metadata catalog; discover_claude_project_mcp_servers (.mcp.json)
+  js_json.py             JSON.parse rules for the files pi reads (huge integers are Infinity, NaN is an error)
   pi_mcp_config.py       translation of pi's MCP config loader/validator (MIT, Mario Zechner: pi's notice, no Datadog header)
   whatwg_url.py          reads URLs like JavaScript's URL (for the pi MCP guard; undecidable hosts count as accepted)
   pi_mcp.py              uses it: which scenario servers a repo .pi/mcp.json changes, which servers it adds

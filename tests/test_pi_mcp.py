@@ -169,6 +169,22 @@ CASES: list[tuple[str, dict, str, Any, bool, list[str]]] = [
     ("server name of 5000 digits", SCENARIO, "9" * 5000, {"command": "project"}, False, []),
     ("server name that is an array index", SCENARIO, "4294967294", {"command": "project"}, False, []),
     ("server name above the array indexes", SCENARIO, "4294967295", {"command": "project"}, False, []),
+    (
+        "file with an integer of 5000 digits",
+        SCENARIO,
+        "same",
+        _Raw('{"other": ' + "9" * 5000 + ', "mcpServers": {"same": {"command": "project"}}}'),
+        False,
+        ["same"],
+    ),
+    (
+        "file with a negative integer of 5000 digits",
+        SCENARIO,
+        "same",
+        _Raw('{"other": [-' + "9" * 5000 + '], "mcpServers": {"same": {"command": "project"}}}'),
+        False,
+        ["same"],
+    ),
     ("identical definition", SCENARIO, "same", SCENARIO["same"], False, ["same"]),
 ]
 

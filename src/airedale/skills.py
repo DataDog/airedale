@@ -6,11 +6,11 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import shutil
 from pathlib import Path
 
+from airedale import js_json
 from airedale.pi_frontmatter import read_pi_frontmatter
 from airedale.types import slugify
 
@@ -219,7 +219,7 @@ def _pi_settings_skill_paths(workspace: Path) -> list[Path]:
         return []
     try:
         # As pi: invalid UTF-8 bytes become U+FFFD, and a UTF-8 byte order mark is removed before the JSON is parsed.
-        data = json.loads(settings_file.read_bytes().decode("utf-8", errors="replace").removeprefix("\ufeff"))
+        data = js_json.loads(settings_file.read_bytes().decode("utf-8", errors="replace").removeprefix("\ufeff"))
     except (OSError, ValueError):
         logger.warning("Unable to parse project pi settings %s", settings_file, exc_info=True)
         return []

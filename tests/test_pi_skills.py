@@ -431,3 +431,14 @@ def test_settings_json_with_a_byte_order_mark_lists_skills(tmp_path, bom):
     (cwd / ".pi").mkdir()
     (cwd / ".pi" / "settings.json").write_bytes(bom + json.dumps({"skills": ["../tools/extra"]}).encode())
     assert pi_skill_dirs([], str(cwd)) == [str(cwd / ".pi" / ".." / "tools" / "extra")]
+
+
+def test_settings_json_with_a_huge_integer_still_lists_skills(tmp_path):
+    # JSON.parse reads an integer of 5000 digits as Infinity: the settings file is valid for pi.
+    cwd = tmp_path / "cwd"
+    skill = cwd / "tools" / "extra"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\nname: extra\ndescription: d\n---\n")
+    (cwd / ".pi").mkdir()
+    (cwd / ".pi" / "settings.json").write_text('{"other": ' + "9" * 5000 + ', "skills": ["../tools/extra"]}')
+    assert pi_skill_dirs([], str(cwd)) == [str(cwd / ".pi" / ".." / "tools" / "extra")]

@@ -33,7 +33,6 @@ that uses it for Airedale is in :mod:`airedale.pi_mcp`.
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from dataclasses import dataclass
@@ -43,6 +42,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
     from pathlib import Path
 
+from airedale import js_json
 from airedale.whatwg_url import is_loopback_host, parse_url
 
 logger = logging.getLogger(__name__)
@@ -93,7 +93,7 @@ def _read_json_object(path: Path, errors: list[str]) -> dict[str, Any] | None:
     try:
         # Node decodes invalid UTF-8 with U+FFFD and strips one BOM.
         text = path.read_bytes().decode("utf-8", errors="replace").removeprefix("\ufeff")
-        parsed = json.loads(text, parse_constant=_reject_constant)
+        parsed = js_json.loads(text)
     except (OSError, ValueError) as error:
         errors.append(f"{path}: {error}")
         logger.warning("Ignoring unreadable project MCP config at %s", path)
@@ -103,11 +103,6 @@ def _read_json_object(path: Path, errors: list[str]) -> dict[str, Any] | None:
         errors.append(f'{path}: expected an object with an "mcpServers" object')
         return None
     return parsed
-
-
-def _reject_constant(name: str) -> Any:
-    # JSON.parse rejects NaN and Infinity; Python's parser accepts them.
-    raise ValueError(f"Unexpected token {name} in JSON")
 
 
 def _js_entries(mapping: Mapping[str, Any]) -> list[tuple[str, Any]]:
