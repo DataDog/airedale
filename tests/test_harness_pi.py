@@ -2117,6 +2117,28 @@ class TestPiToolNames:
         assert "SECRET" not in json.dumps([server.to_safe_dict() for server in reported], ensure_ascii=False)
         assert reported[0].url == "<redacted>"
 
+    @pytest.mark.parametrize(
+        ("port", "reported"),
+        [
+            ("0" * 5000 + "80", "http://host"),  # A valid port (80, the default) with thousands of leading zeros.
+            ("0" * 5000 + "8080", "http://host:8080"),
+            ("8080", "http://host:8080"),
+        ],
+    )
+    def test_project_server_with_a_port_of_leading_zeros_is_reported(self, tmp_path, port, reported):
+        (tmp_path / ".pi").mkdir()
+        url = f"http://host:{port}/SECRET/mcp"
+        (tmp_path / ".pi" / "mcp.json").write_text(json.dumps({"mcpServers": {"repo": {"url": url}}}))
+        servers = PiRunner(cwd=tmp_path)._reported_mcp_servers()
+        assert [(server.name, server.url) for server in servers] == [("repo", reported)]
+
+    @pytest.mark.parametrize("port", ["9" * 5000, "9" * 5, "65536"])
+    def test_project_server_with_a_port_that_pi_rejects_is_not_loaded_and_does_not_raise(self, tmp_path, port):
+        (tmp_path / ".pi").mkdir()
+        url = f"http://host:{port}/SECRET/mcp"
+        (tmp_path / ".pi" / "mcp.json").write_text(json.dumps({"mcpServers": {"repo": {"url": url}}}))
+        assert PiRunner(cwd=tmp_path)._reported_mcp_servers() == []
+
     def test_redaction_never_raises(self, monkeypatch):
         import airedale.whatwg_url as whatwg
         from airedale.mcp import url_without_secrets
