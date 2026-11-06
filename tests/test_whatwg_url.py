@@ -11,6 +11,11 @@ import pytest
 from airedale.whatwg_url import is_loopback_host, parse_url
 
 URLS = [
+    "http://host:" + "9" * 5000 + "/",
+    "http://host:" + "0" * 5000 + "80/",
+    "http://host:" + "0" * 5000 + "/",
+    "http://host:" + "1" * 6 + "/",
+    "http://host:" + "0" * 50 + "8080/x",
     "https://%C2%AD127.1/mcp",
     "https://\u00ad127.1/mcp",
     "https://127\u200b.1/mcp",
@@ -187,3 +192,17 @@ def test_a_host_with_characters_that_idna_removes_is_never_a_sure_failure(value)
 
 def test_an_ascii_forbidden_character_is_still_a_sure_failure():
     assert parse_url("http://a\u00ad b/") is None
+
+
+@pytest.mark.parametrize("digits", ["9" * 5000, "9" * 5, "1" * 6, "65536"])
+def test_a_port_that_is_too_long_or_too_large_fails_without_an_exception(digits):
+    assert parse_url(f"http://host:{digits}/") is None
+
+
+def test_a_port_with_many_leading_zeros_is_read():
+    url = parse_url("http://host:" + "0" * 5000 + "8080/")
+    assert url is not None
+    assert url.port == "8080"
+    default = parse_url("http://host:" + "0" * 5000 + "80/")
+    assert default is not None
+    assert default.port == ""

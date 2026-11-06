@@ -83,9 +83,17 @@ def parse_url(value: str) -> ParsedUrl | None:
     host_part, port_text = _split_host_port(host_text)
     if port_text is None:
         return None
-    if port_text and (not port_text.isascii() or not port_text.isdigit() or int(port_text) > 65535):
-        return None
-    port = "" if port_text and int(port_text) == _DEFAULT_PORTS[scheme] else str(int(port_text)) if port_text else ""
+    port = ""
+    if port_text:
+        if not port_text.isascii() or not port_text.isdigit():
+            return None
+        # No ``int()`` of the whole text: a very long run of digits would exceed the limit of Python for the
+        # conversion of a string (and is not a port anyway).
+        digits = port_text.lstrip("0") or "0"
+        if len(digits) > 5 or int(digits) > 65535:
+            return None
+        if int(digits) != _DEFAULT_PORTS[scheme]:
+            port = digits
     host = _parse_host(host_part)
     if host is None:
         return None
