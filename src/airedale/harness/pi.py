@@ -1465,7 +1465,7 @@ class _PiEventCollector:
             text = line.decode("utf-8").rstrip("\r\n")
         except UnicodeDecodeError:
             self.invalid_lines += 1
-            logger.debug("Ignoring a pi stdout line that is not UTF-8: %r", line[:200])
+            logger.debug("Ignoring a pi stdout line that is not UTF-8 (%d bytes)", len(line))
             return None
         if not text.strip():
             return None
@@ -1475,7 +1475,8 @@ class _PiEventCollector:
             event = js_json.loads(text)
         except ValueError:
             self.invalid_lines += 1
-            logger.debug("Ignoring non-JSON pi stdout line: %.200s", text)
+            # (Not the text: a record can hold an answer or a credential.)
+            logger.debug("Ignoring a non-JSON pi stdout line (%d characters)", len(text))
             return None
         if not isinstance(event, dict):
             # Pi writes one JSON object per record; anything else is damage.

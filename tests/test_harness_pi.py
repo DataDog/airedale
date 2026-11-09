@@ -3854,3 +3854,57 @@ class TestStrictScenarioValidation:
 
         config = {"url": "https://example.test", "oauth": {"authServerMetadataUrl": "http://[x]/meta"}}
         assert "oauth.authServerMetadataUrl" in str(validate_server_config("x", config, exact=True))
+
+
+class TestNoRawValueInDiagnostics:
+    """A URL, a header, an environment value or a stdout line must not be copied into an error or a log."""
+
+    SECRET = "SECRET-api-key-0123"
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            f"http://[not-an-ip]/mcp?api_key={SECRET}",
+            f"http://user:{SECRET}@[1::2::3]/mcp",
+            f"https://\u00ad127.1/mcp#{SECRET}",
+            f"http://exämple.test/{SECRET}/mcp",
+        ],
+    )
+    def test_refused_server_url_is_not_in_the_error(self, tmp_path, url):
+        runner = PiRunner(cwd=tmp_path, mcp_servers=[McpServerSpec(name="docs", url=url)])
+        with pytest.raises(ValueError, match="cannot be checked exactly") as error:
+            runner._scenario_pi_configs({}, strict=True)
+        assert self.SECRET not in str(error.value)
+        assert "docs" in str(error.value)  # The server name and the field stay.
+        assert "url" in str(error.value)
+
+    @pytest.mark.parametrize("field", ["callbackUrl", "authServerMetadataUrl"])
+    def test_refused_oauth_url_is_not_in_the_error(self, field):
+        from airedale.pi_mcp import validate_server_config
+
+        config = {"url": "https://example.test", "oauth": {field: f"http://[x]/cb?token={self.SECRET}"}}
+        problem = str(validate_server_config("docs", config, exact=True))
+        assert field in problem
+        assert self.SECRET not in problem
+
+    def test_every_error_of_the_scenario_validation_is_free_of_the_values(self, tmp_path):
+        # Headers and environment values with a credential: the messages name the field, not the value.
+        from airedale.pi_mcp import validate_server_config
+
+        for config in (
+            {"url": "https://e.test", "headers": {"X-Api-Key": 5}},
+            {"command": "x", "env": {"TOKEN": 5}},
+            {"command": "x", "args": [self.SECRET, 5]},
+            {"url": "ftp://e.test/?k=" + self.SECRET},
+            {"command": "x", "cwd": 5, "env": {"TOKEN": self.SECRET}},
+        ):
+            assert self.SECRET not in str(validate_server_config("docs", config, exact=True))
+
+    def test_stdout_lines_are_not_logged_with_their_text(self, caplog):
+        collector = _PiEventCollector()
+        with caplog.at_level("DEBUG"):
+            collector.feed_line(f"not json {self.SECRET}\n".encode())
+            collector.feed_line(b"\xff " + self.SECRET.encode() + b"\n")
+        assert collector.invalid_lines == 2
+        assert self.SECRET not in caplog.text
+        assert "Ignoring" in caplog.text

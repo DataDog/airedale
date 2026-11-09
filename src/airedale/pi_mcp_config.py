@@ -187,7 +187,8 @@ def _undecided_url_problem(name: str, config: dict[str, Any]) -> str | None:
         if isinstance(value, str):
             url = parse_url(value)
             if url is None or not url.exact:
-                return f'server "{name}": {label} cannot be checked exactly (pi may reject it): {value!r}'
+                # (The URL is not in the message: it can hold a credential, in the user info or the query.)
+                return f'server "{name}": {label} cannot be checked exactly (pi may reject it)'
     return None
 
 

@@ -695,7 +695,7 @@ here, including:
   their original copyright/license header and a reference to their source, and
   must not have the Datadog copyright line prepended.
 - **Secrets:** never commit tokens; never log bearer tokens; redact headers in
-  LLMObs metadata.
+  LLMObs metadata. Never copy a raw URL, header, environment or config value, or a raw line of the output of pi, into an error, a log or a span: name the server, the field and the reason (a URL can hold a credential in its user info or query).
 
 ### Version control — jj (Jujutsu), never git
 
