@@ -261,7 +261,7 @@ def _expand_pi_home(entry: str) -> Path:
 
 
 def _pi_skill_entries(
-    directory: Path, mode: str, root: Path | None = None, ancestors: frozenset[str] = frozenset()
+    directory: Path, mode: str, root: Path | None = None, ancestors: frozenset[tuple[str, bool]] = frozenset()
 ) -> list[Path]:
     """Return the skill files that pi's automatic discovery finds in ``directory``.
 
@@ -275,10 +275,15 @@ def _pi_skill_entries(
     root = root or directory
     if not directory.is_dir():
         return []
-    real = os.path.realpath(directory)
-    if real in ancestors:
-        return []  # A symlink to a directory above: pi would follow it until the system refuses, finding the same files.
-    ancestors = ancestors | {real}
+    at_root = directory == root
+    # The state of the walk is the real directory **and** whether pi sees it as the root (the root takes the loose
+    # ``.md`` files in ``pi`` mode, a child in ``agents`` mode): a link to the root is a child by path, and finds files
+    # that the root does not. Only a directory seen again in the same state is a loop: pi would follow the link until
+    # the system refuses and find the same files again, which the real-path rule of its loader drops.
+    state = (os.path.realpath(directory), at_root)
+    if state in ancestors:
+        return []
+    ancestors = ancestors | {state}
     if (directory / "SKILL.md").is_file():
         return [directory / "SKILL.md"]
     entries: list[Path] = []
@@ -289,7 +294,6 @@ def _pi_skill_entries(
     for child in children:
         if child.name.startswith(".") or child.name in _PI_SKIPPED_SKILL_DIRS:
             continue
-        at_root = directory == root
         if (
             child.is_file()
             and child.suffix == ".md"
@@ -317,12 +321,12 @@ def _pi_skills(path: Path) -> list[tuple[str, Path]]:
 
 
 def _pi_skills_in_dir(
-    directory: Path, *, top_level: bool, ancestors: frozenset[str] = frozenset()
+    directory: Path, *, top_level: bool, ancestors: frozenset[tuple[str, bool]] = frozenset()
 ) -> list[tuple[str, Path]]:
-    real = os.path.realpath(directory)
-    if real in ancestors:
-        return []  # A symlink to a directory above (see ``_pi_skill_entries``).
-    ancestors = ancestors | {real}
+    state = (os.path.realpath(directory), top_level)  # (See ``_pi_skill_entries``.)
+    if state in ancestors:
+        return []
+    ancestors = ancestors | {state}
     skill_file = directory / "SKILL.md"
     if skill_file.is_file():
         name = _pi_skill_name(skill_file)

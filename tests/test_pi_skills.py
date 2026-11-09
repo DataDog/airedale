@@ -7,12 +7,13 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
 
 from airedale.pi_frontmatter import UnsupportedFrontmatterError
-from airedale.skills import _frontmatter, _pi_skill_name, pi_skill_dirs
+from airedale.skills import _frontmatter, _pi_skill_name, _pi_skills, pi_skill_dirs
 
 #: (label, file content) of a project skill ``project/SKILL.md``. Pi's name for each is the reference.
 FILES = [
@@ -596,3 +597,83 @@ def test_a_collision_below_tilde_slash_slash_is_found(tmp_path, monkeypatch):
     cwd = _settings(tmp_path, ["~//extra"])
     with pytest.raises(ValueError, match="collides"):
         pi_skill_dirs([str(scenario)], str(cwd))
+
+
+def _md(name):
+    return f"---\nname: {name}\ndescription: d\n---\n"
+
+
+#: Trees with links (path -> content, path -> target): what pi loads from them, by the real path of each file.
+SKILL_TREES = {
+    "agents loose file and a link to the root": (
+        {".agents/skills/loose.md": _md("loose")},
+        {".agents/skills/loop": ".agents/skills"},
+    ),
+    "agents loose file, link below a directory": (
+        {".agents/skills/loose.md": _md("loose"), ".agents/skills/a/x.md": _md("x")},
+        {".agents/skills/a/back": ".agents/skills"},
+    ),
+    "pi loose file and a link to the root": (
+        {".pi/skills/loose.md": _md("loose")},
+        {".pi/skills/loop": ".pi/skills"},
+    ),
+    "pi skill directory and links above": (
+        {".pi/skills/team/gamma/SKILL.md": _md("gamma")},
+        {".pi/skills/team/up": ".pi/skills", ".pi/skills/team/up2": ""},
+    ),
+    "agents skill directory and a link above": (
+        {".agents/skills/team/delta/SKILL.md": _md("delta"), ".agents/skills/top.md": _md("top")},
+        {".agents/skills/team/up": ".agents/skills"},
+    ),
+    "agents root skill and a link": (
+        {".agents/skills/SKILL.md": _md("rootskill"), ".agents/skills/other.md": _md("other")},
+        {".agents/skills/loop": ".agents/skills"},
+    ),
+    "two links that point to each other": (
+        {".agents/skills/a/one.md": _md("one"), ".agents/skills/b/two.md": _md("two")},
+        {".agents/skills/a/to-b": ".agents/skills/b", ".agents/skills/b/to-a": ".agents/skills/a"},
+    ),
+    "link to the project": (
+        {".agents/skills/s/x.md": _md("x"), ".pi/skills/loose.md": _md("loose")},
+        {".agents/skills/s/home": "", ".pi/skills/home": ""},
+    ),
+    "two links to one skill": (
+        {"shared/beta/SKILL.md": _md("beta")},
+        {".pi/skills/one": "shared/beta", ".pi/skills/two": "shared/beta"},
+    ),
+    "same name in two files": (
+        {".agents/skills/loose.md": _md("same"), ".agents/skills/d/SKILL.md": _md("same")},
+        {".agents/skills/loop": ".agents/skills"},
+    ),
+    "link to a markdown file": (
+        {"notes/n.md": _md("n")},
+        {".agents/skills/d/link.md": "notes/n.md", ".pi/skills/link.md": "notes/n.md"},
+    ),
+}
+
+
+@pytest.mark.parametrize("label", SKILL_TREES)
+def test_skills_of_a_tree_with_links_are_those_of_pi(pi_reference, tmp_path, label):
+    files, links = SKILL_TREES[label]
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    for path, content in files.items():
+        (cwd / path).parent.mkdir(parents=True, exist_ok=True)
+        (cwd / path).write_text(content)
+    for path, target in links.items():
+        (cwd / path).parent.mkdir(parents=True, exist_ok=True)
+        (cwd / path).symlink_to(cwd / target, target_is_directory=(cwd / target).is_dir())
+    names: dict[str, str] = {}  # Pi keeps the first skill of a name (and loads a real file once).
+    try:
+        for path in pi_skill_dirs([], str(cwd)):
+            for name, skill_file in _pi_skills(Path(path)):
+                names.setdefault(name, os.path.relpath(os.path.realpath(skill_file), os.path.realpath(cwd)))
+        loaded, ours_collides = set(names.values()), False
+    except ValueError:
+        loaded, ours_collides = set(), True
+    request = {"action": "skill_tree", "files": files, "links": links}
+    for version, answer in pi_reference(request).items():
+        if ours_collides:
+            assert answer["collisions"], version
+            continue
+        assert loaded == set(answer["files"]), version

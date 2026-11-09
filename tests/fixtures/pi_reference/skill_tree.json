@@ -1,0 +1,246 @@
+{
+ "_comment": "Answers of pi to the requests of the tests. Record again: see tests/conftest.py (pi_reference).",
+ "cases": {
+  "{\"action\":\"skill_tree\",\"files\":{\".agents/skills/SKILL.md\":\"---\\nname: rootskill\\ndescription: d\\n---\\n\",\".agents/skills/other.md\":\"---\\nname: other\\ndescription: d\\n---\\n\"},\"links\":{\".agents/skills/loop\":\".agents/skills\"}}": {
+   "1.4.0": {
+    "collisions": 0,
+    "files": [
+     ".agents/skills/SKILL.md"
+    ],
+    "names": [
+     "rootskill"
+    ]
+   },
+   "1.5.0": {
+    "collisions": 0,
+    "files": [
+     ".agents/skills/SKILL.md"
+    ],
+    "names": [
+     "rootskill"
+    ]
+   }
+  },
+  "{\"action\":\"skill_tree\",\"files\":{\".agents/skills/a/one.md\":\"---\\nname: one\\ndescription: d\\n---\\n\",\".agents/skills/b/two.md\":\"---\\nname: two\\ndescription: d\\n---\\n\"},\"links\":{\".agents/skills/a/to-b\":\".agents/skills/b\",\".agents/skills/b/to-a\":\".agents/skills/a\"}}": {
+   "1.4.0": {
+    "collisions": 0,
+    "files": [
+     ".agents/skills/a/one.md",
+     ".agents/skills/b/two.md"
+    ],
+    "names": [
+     "one",
+     "two"
+    ]
+   },
+   "1.5.0": {
+    "collisions": 0,
+    "files": [
+     ".agents/skills/a/one.md",
+     ".agents/skills/b/two.md"
+    ],
+    "names": [
+     "one",
+     "two"
+    ]
+   }
+  },
+  "{\"action\":\"skill_tree\",\"files\":{\".agents/skills/a/x.md\":\"---\\nname: x\\ndescription: d\\n---\\n\",\".agents/skills/loose.md\":\"---\\nname: loose\\ndescription: d\\n---\\n\"},\"links\":{\".agents/skills/a/back\":\".agents/skills\"}}": {
+   "1.4.0": {
+    "collisions": 0,
+    "files": [
+     ".agents/skills/a/x.md",
+     ".agents/skills/loose.md"
+    ],
+    "names": [
+     "loose",
+     "x"
+    ]
+   },
+   "1.5.0": {
+    "collisions": 0,
+    "files": [
+     ".agents/skills/a/x.md",
+     ".agents/skills/loose.md"
+    ],
+    "names": [
+     "loose",
+     "x"
+    ]
+   }
+  },
+  "{\"action\":\"skill_tree\",\"files\":{\".agents/skills/d/SKILL.md\":\"---\\nname: same\\ndescription: d\\n---\\n\",\".agents/skills/loose.md\":\"---\\nname: same\\ndescription: d\\n---\\n\"},\"links\":{\".agents/skills/loop\":\".agents/skills\"}}": {
+   "1.4.0": {
+    "collisions": 1,
+    "files": [
+     ".agents/skills/d/SKILL.md"
+    ],
+    "names": [
+     "same"
+    ]
+   },
+   "1.5.0": {
+    "collisions": 1,
+    "files": [
+     ".agents/skills/d/SKILL.md"
+    ],
+    "names": [
+     "same"
+    ]
+   }
+  },
+  "{\"action\":\"skill_tree\",\"files\":{\".agents/skills/loose.md\":\"---\\nname: loose\\ndescription: d\\n---\\n\"},\"links\":{\".agents/skills/loop\":\".agents/skills\"}}": {
+   "1.4.0": {
+    "collisions": 0,
+    "files": [
+     ".agents/skills/loose.md"
+    ],
+    "names": [
+     "loose"
+    ]
+   },
+   "1.5.0": {
+    "collisions": 0,
+    "files": [
+     ".agents/skills/loose.md"
+    ],
+    "names": [
+     "loose"
+    ]
+   }
+  },
+  "{\"action\":\"skill_tree\",\"files\":{\".agents/skills/s/x.md\":\"---\\nname: x\\ndescription: d\\n---\\n\",\".pi/skills/loose.md\":\"---\\nname: loose\\ndescription: d\\n---\\n\"},\"links\":{\".agents/skills/s/home\":\"\",\".pi/skills/home\":\"\"}}": {
+   "1.4.0": {
+    "collisions": 0,
+    "files": [
+     ".agents/skills/s/x.md",
+     ".pi/skills/loose.md"
+    ],
+    "names": [
+     "loose",
+     "x"
+    ]
+   },
+   "1.5.0": {
+    "collisions": 0,
+    "files": [
+     ".agents/skills/s/x.md",
+     ".pi/skills/loose.md"
+    ],
+    "names": [
+     "loose",
+     "x"
+    ]
+   }
+  },
+  "{\"action\":\"skill_tree\",\"files\":{\".agents/skills/team/delta/SKILL.md\":\"---\\nname: delta\\ndescription: d\\n---\\n\",\".agents/skills/top.md\":\"---\\nname: top\\ndescription: d\\n---\\n\"},\"links\":{\".agents/skills/team/up\":\".agents/skills\"}}": {
+   "1.4.0": {
+    "collisions": 0,
+    "files": [
+     ".agents/skills/team/delta/SKILL.md",
+     ".agents/skills/top.md"
+    ],
+    "names": [
+     "delta",
+     "top"
+    ]
+   },
+   "1.5.0": {
+    "collisions": 0,
+    "files": [
+     ".agents/skills/team/delta/SKILL.md",
+     ".agents/skills/top.md"
+    ],
+    "names": [
+     "delta",
+     "top"
+    ]
+   }
+  },
+  "{\"action\":\"skill_tree\",\"files\":{\".pi/skills/loose.md\":\"---\\nname: loose\\ndescription: d\\n---\\n\"},\"links\":{\".pi/skills/loop\":\".pi/skills\"}}": {
+   "1.4.0": {
+    "collisions": 0,
+    "files": [
+     ".pi/skills/loose.md"
+    ],
+    "names": [
+     "loose"
+    ]
+   },
+   "1.5.0": {
+    "collisions": 0,
+    "files": [
+     ".pi/skills/loose.md"
+    ],
+    "names": [
+     "loose"
+    ]
+   }
+  },
+  "{\"action\":\"skill_tree\",\"files\":{\".pi/skills/team/gamma/SKILL.md\":\"---\\nname: gamma\\ndescription: d\\n---\\n\"},\"links\":{\".pi/skills/team/up\":\".pi/skills\",\".pi/skills/team/up2\":\"\"}}": {
+   "1.4.0": {
+    "collisions": 0,
+    "files": [
+     ".pi/skills/team/gamma/SKILL.md"
+    ],
+    "names": [
+     "gamma"
+    ]
+   },
+   "1.5.0": {
+    "collisions": 0,
+    "files": [
+     ".pi/skills/team/gamma/SKILL.md"
+    ],
+    "names": [
+     "gamma"
+    ]
+   }
+  },
+  "{\"action\":\"skill_tree\",\"files\":{\"notes/n.md\":\"---\\nname: n\\ndescription: d\\n---\\n\"},\"links\":{\".agents/skills/d/link.md\":\"notes/n.md\",\".pi/skills/link.md\":\"notes/n.md\"}}": {
+   "1.4.0": {
+    "collisions": 0,
+    "files": [
+     "notes/n.md"
+    ],
+    "names": [
+     "n"
+    ]
+   },
+   "1.5.0": {
+    "collisions": 0,
+    "files": [
+     "notes/n.md"
+    ],
+    "names": [
+     "n"
+    ]
+   }
+  },
+  "{\"action\":\"skill_tree\",\"files\":{\"shared/beta/SKILL.md\":\"---\\nname: beta\\ndescription: d\\n---\\n\"},\"links\":{\".pi/skills/one\":\"shared/beta\",\".pi/skills/two\":\"shared/beta\"}}": {
+   "1.4.0": {
+    "collisions": 0,
+    "files": [
+     "shared/beta/SKILL.md"
+    ],
+    "names": [
+     "beta"
+    ]
+   },
+   "1.5.0": {
+    "collisions": 0,
+    "files": [
+     "shared/beta/SKILL.md"
+    ],
+    "names": [
+     "beta"
+    ]
+   }
+  }
+ },
+ "node": "v26.13.0",
+ "pi_versions": [
+  "1.4.0",
+  "1.5.0"
+ ]
+}

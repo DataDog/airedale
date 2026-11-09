@@ -70,6 +70,42 @@ if (request.action === "mcp") {
     }
   }
   console.log(JSON.stringify(result));
+} else if (request.action === "skill_tree") {
+  // The skills that pi loads from the project of this tree (``files``: path -> content, ``links``: path -> target,
+  // relative to the project): the automatic discovery of .pi/skills and .agents/skills, then the loader.
+  const { DefaultPackageManager, SettingsManager } = await import(pathToFileURL(`${base}/dist/index.js`).href);
+  const { loadSkills } = await load("core/skills.js");
+  const { symlinkSync, realpathSync } = await import("node:fs");
+  const { dirname, relative } = await import("node:path");
+  const cwd = join(sandbox, "cwd");
+  const agentDir = join(sandbox, "agent");
+  mkdirSync(cwd, { recursive: true });
+  mkdirSync(agentDir, { recursive: true });
+  for (const [path, content] of Object.entries(request.files)) {
+    mkdirSync(dirname(join(cwd, path)), { recursive: true });
+    writeFileSync(join(cwd, path), content);
+  }
+  for (const [path, target] of Object.entries(request.links)) {
+    mkdirSync(dirname(join(cwd, path)), { recursive: true });
+    symlinkSync(join(cwd, target), join(cwd, path));
+  }
+  const settingsManager = SettingsManager.create(cwd, agentDir);
+  const manager = new DefaultPackageManager({ cwd, agentDir, settingsManager });
+  const resolved = await manager.resolve();
+  const paths = resolved.skills.filter((skill) => skill.enabled).map((skill) => skill.path);
+  const result = loadSkills({ cwd, agentDir, skillPaths: paths, includeDefaults: false });
+  const cwdReal = realpathSync(cwd);
+  // (Skills of the machine of the test, outside of the project, are left out.)
+  const inside = result.skills
+    .map((skill) => ({ name: skill.name, file: relative(cwdReal, realpathSync(skill.filePath)) }))
+    .filter((skill) => !skill.file.startsWith(".."));
+  console.log(
+    JSON.stringify({
+      files: inside.map((skill) => skill.file).sort(),
+      names: inside.map((skill) => skill.name).sort(),
+      collisions: result.diagnostics.filter((item) => item.type === "collision").length,
+    }),
+  );
 } else if (request.action === "home_paths") {
   // What pi's normalizePath makes of each entry of a skills list, with the given home directory.
   const { normalizePath } = await load("utils/paths.js");
