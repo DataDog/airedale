@@ -23,7 +23,6 @@ scenario server.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -88,28 +87,6 @@ def merge_project_mcp_config(project_file: Path, scenario: Mapping[str, Mapping[
     return merge
 
 
-_PLAIN_COMMAND = re.compile(r"[A-Za-z0-9._+@-]+")
-
-
-def _reportable_command(command: Any) -> str:
-    """Return the file name of ``command`` for reports, or ``<redacted>``.
-
-    The repo file can write a credential in a directory of the path (``/opt/<token>/bin/server``) or in a
-    command line (``node --token=/<token>``, where the part after the last ``/`` is the token). The file name is
-    kept only when the whole ``command`` is **one path**: no whitespace of any kind, no ``=``, no quote, no
-    control character. Any other value is not reported.
-    """
-    from airedale.mcp import REDACTED
-
-    text = str(command)
-    if any(char.isspace() or char in "=\"'`?#" or ord(char) < 32 or ord(char) == 127 for char in text):
-        return REDACTED
-    if "://" in text:  # A URL is not an executable path: its last segment can be a token.
-        return REDACTED
-    name = text.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
-    return name if _PLAIN_COMMAND.fullmatch(name) else REDACTED
-
-
 def discover_pi_project_mcp_servers(
     cwd: str | Path, scenario: Mapping[str, Mapping[str, Any]] | None = None
 ) -> list[McpServerSpec]:
@@ -121,7 +98,7 @@ def discover_pi_project_mcp_servers(
     that pi rejects (invalid, or a name that differs from a scenario server only
     in ``-``/``_``) and an entry with ``"enabled": false`` are left out. The repo
     file can hold credentials, and these specs go to telemetry, so ``env``
-    values, ``args``, the directories of ``command`` and everything in ``url`` after the
+    values, ``args``, ``command`` and everything in ``url`` after the
     host and port are redacted (headers are redacted by :meth:`McpServerSpec.to_safe_dict`).
     The other values of the spec are the server name (limited by pi to letters, digits,
     ``_`` and ``-``), the transport and the fixed fields.
@@ -147,7 +124,9 @@ def discover_pi_project_mcp_servers(
                 McpServerSpec(
                     name=name,
                     type="stdio",
-                    command=_reportable_command(config["command"]),
+                    # Never reported: every attempt to recognize a safe executable path has a bypass (a URL with another
+                    # separator, a backslash, a control character), and the value is the repo's, not the scenario's.
+                    command=REDACTED,
                     args=tuple(REDACTED for _ in config.get("args") or []),
                     env=dict.fromkeys(config.get("env") or {}, REDACTED),
                 )

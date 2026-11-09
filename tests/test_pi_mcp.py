@@ -323,45 +323,42 @@ class TestReporting:
         assert "secret" not in json.dumps([server.to_safe_dict() for server in reported])
         assert reported[0].env == {} and reported[1].headers == {}
 
-    @pytest.mark.parametrize(
-        ("command", "reported"),
-        [
-            ("npx", "npx"),
-            ("/usr/local/bin/uvx", "uvx"),
-            ("C:\\tools\\run-server.exe", "run-server.exe"),
-            ("/opt/SECRET-TOKEN-1/bin/server", "server"),
-            ("./SECRET-TOKEN-1/server", "server"),
-            ("node --token=SECRET-TOKEN-1", "<redacted>"),
-            ("node --endpoint=https://mcp.invalid/SECRET-TOKEN-1", "<redacted>"),
-            ("node https://mcp.invalid/SECRET-TOKEN-1", "<redacted>"),
-            ("https://mcp.invalid/SECRET-TOKEN-1", "<redacted>"),
-            ("https://user:pw@mcp.invalid/x/SECRET-TOKEN-1", "<redacted>"),
-            ("file:///opt/x/SECRET-TOKEN-1", "<redacted>"),
-            ("/opt/x/server?key=SECRET-TOKEN-1", "<redacted>"),
-            ("/opt/x/server#SECRET-TOKEN-1", "<redacted>"),
-            ("C:\\opt\\SECRET-TOKEN-1\\bin\\server.exe", "server.exe"),
-            ("node --token=/SECRET-TOKEN-1", "<redacted>"),
-            ("node --token=C:\\SECRET-TOKEN-1", "<redacted>"),
-            ("node --token=\\SECRET-TOKEN-1", "<redacted>"),
-            ("--token=/SECRET-TOKEN-1", "<redacted>"),
-            ("/opt/x/SECRET-TOKEN-1=", "<redacted>"),
-            ("/opt/x/'SECRET-TOKEN-1'", "<redacted>"),
-            ('"/opt/x/SECRET-TOKEN-1"', "<redacted>"),
-            ("/opt/x/SECRET-TOKEN-1\u00a0--flag", "<redacted>"),
-            ("/opt/x/SECRET-TOKEN-1\u2028", "<redacted>"),
-            ("/opt/x/\x00SECRET-TOKEN-1", "<redacted>"),
-            ("/opt/x/SECRET-TOKEN-1\n", "<redacted>"),
-            ("SECRET=SECRET-TOKEN-1", "<redacted>"),
-            ("/opt/x/SECRET TOKEN", "<redacted>"),
+    COMMANDS = [
+        # Paths, the ordinary ones too.
+        "npx", "/usr/local/bin/uvx", "C:\\tools\\run-server.exe", "/opt/SECRET-TOKEN-1/bin/server",
+        "relative/SECRET-TOKEN-1/server", "./SECRET-TOKEN-1/server", "C:\\opt\\SECRET-TOKEN-1\\bin\\server.exe",
+        # Command lines and values with a separator, a quote, or a control character.
+        "node --token=SECRET-TOKEN-1", "node --token=/SECRET-TOKEN-1", "node --token=C:\\SECRET-TOKEN-1",
+        "node --endpoint=https://mcp.invalid/SECRET-TOKEN-1", "node https://mcp.invalid/SECRET-TOKEN-1",
+        "SECRET=SECRET-TOKEN-1", "/opt/x/SECRET TOKEN", "'/opt/x/SECRET-TOKEN-1'", '"/opt/x/SECRET-TOKEN-1"',
+        "/opt/x/SECRET-TOKEN-1\u00a0--flag", "/opt/x/SECRET-TOKEN-1\u2028", "/opt/x/\x00SECRET-TOKEN-1",
+        "/opt/x/SECRET-TOKEN-1\n", "/opt/x/\x85SECRET-TOKEN-1", "/opt/x/\x9bSECRET-TOKEN-1", "/opt/x/\x80SECRET-TOKEN-1",
+        "/opt/x/server?key=SECRET-TOKEN-1", "/opt/x/server#SECRET-TOKEN-1",
+        # URLs that Node's URL reads: the 23 forms of the review of round 18 (5 schemes x 5 separators, 4 file forms).
+        *[
+            f"{scheme}:{separator}mcp.invalid/SECRET-TOKEN-1"
+            for scheme in ("http", "https", "ws", "wss", "ftp")
+            for separator in ("", "/", "\\", "//", "\\\\")
         ],
-    )
-    def test_command_is_reported_as_a_file_name_only(self, tmp_path, command, reported):
+        "file:/opt/SECRET-TOKEN-1", "file:C:/opt/SECRET-TOKEN-1", "file:\\C:\\opt\\SECRET-TOKEN-1",
+        "file:///opt/SECRET-TOKEN-1", "https://user:pw@mcp.invalid/x/SECRET-TOKEN-1",
+    ]  # fmt: skip
+
+    @pytest.mark.parametrize("command", COMMANDS)
+    def test_command_of_a_project_server_is_always_redacted(self, tmp_path, command):
         (tmp_path / ".pi").mkdir()
         (tmp_path / ".pi" / "mcp.json").write_text(json.dumps({"mcpServers": {"cli": {"command": command}}}))
         [server] = discover_pi_project_mcp_servers(tmp_path)
-        assert server.command == reported
-        assert server.to_safe_dict()["command"] == reported
+        assert server.command == "<redacted>"
+        assert server.to_safe_dict()["command"] == "<redacted>"
         assert "SECRET-TOKEN-1" not in json.dumps(server.to_safe_dict())
+
+    def test_command_of_a_scenario_server_keeps_its_reporting(self):
+        # The scenario is the user's own config (trusted): its command is reported as written.
+        from airedale.mcp import McpServerSpec
+
+        spec = McpServerSpec(name="docs", command="uvx", args=("docs-server",))
+        assert spec.to_safe_dict()["command"] == "uvx"
 
     def test_nothing_of_a_project_server_is_reported_raw(self, tmp_path):
         (tmp_path / ".pi").mkdir()
