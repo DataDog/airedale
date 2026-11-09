@@ -2157,7 +2157,39 @@ class TestRunnerConfig:
 
     @pytest.mark.parametrize(
         "entry",
-        ["read,bash", "*", "mcp__*", "re*d", "+bash", "-read", " read", "read ", "", "  ", "read,", ",", "a,b,c"],
+        [
+            "read,bash",
+            "*",
+            "mcp__*",
+            "re*d",
+            "+bash",
+            "-read",
+            " read",
+            "read ",
+            "",
+            "  ",
+            "read,",
+            ",",
+            "a,b,c",
+            "\ufeff+bash",
+            "\ufeffread",
+            "read\ufeff",
+            "\ufeff",
+            "\u00a0read",
+            "read\u2028",
+            "\u2003read",
+            "re ad",
+            "read\n",
+            "\tread",
+            "r\u0435ad",
+            "read;bash",
+            "read|bash",
+            "'read'",
+            "a=b",
+            ".hidden",
+            "x+y",
+            "é",
+        ],
     )
     def test_builtin_tool_entry_with_pi_cli_syntax_is_refused_before_pi_starts(self, tmp_path, fake_pi, entry):
         # Pi splits ``--tools`` at "," and trims, reads "*" as a pattern and a leading "+"/"-" as a change to its
@@ -2171,7 +2203,9 @@ class TestRunnerConfig:
         with pytest.raises(ValueError, match="'read,bash'"):
             PiRunner(cwd=tmp_path, allowed_builtin_tools=["read,bash"]).check_scenario()
 
-    @pytest.mark.parametrize("entry", ["read", "Bash", "my_extension_tool", "ext.tool", "a-b", "x+y", "mcp__docs__q"])
+    @pytest.mark.parametrize(
+        "entry", ["read", "Bash", "my_extension_tool", "ext.tool", "a-b", "_x", "9lives", "mcp__docs__q"]
+    )
     def test_exact_builtin_tool_names_are_accepted(self, tmp_path, entry):
         runner = PiRunner(cwd=tmp_path, allowed_builtin_tools=[entry])
         runner.check_scenario()

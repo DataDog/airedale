@@ -168,6 +168,8 @@ DEFAULT_PI_COMMAND = "pi"
 PI_BUILTIN_TOOLS: tuple[str, ...] = ("read", "bash", "edit", "write", "grep", "find", "ls")
 #: Built-in pi tools that exist on Windows only.
 PI_WINDOWS_BUILTIN_TOOLS: tuple[str, ...] = ("powershell",)
+#: An exact tool name for the ``--tools`` list of pi (see ``PiRunner._check_builtin_tool_names``).
+_PI_EXACT_TOOL_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*")
 #: Claude Code built-in tool names mapped to the pi tool with the same job, so
 #: one ``allowed_builtin_tools`` list (for example in ``[defaults]``) works for
 #: both harnesses. Other names are passed to pi unchanged.
@@ -519,29 +521,22 @@ class PiRunner(DecoratorSpanAgentRunner):
     def _check_builtin_tool_names(self) -> None:
         """Raise when an ``allowed_builtin_tools`` entry is not an exact tool name.
 
-        The entries are joined into the value of ``--tools``. Pi splits that value at ``,``, trims each entry, reads
-        ``*`` as a pattern, and reads a leading ``+`` or ``-`` as a change to its default tools (pi 1.4.0 and 1.5.0:
+        The entries are joined into the value of ``--tools``. Pi splits that value at ``,``, trims each entry (with
+        the whitespace of JavaScript's ``trim()``, which has U+FEFF and more than Python's ``strip()``), reads ``*``
+        as a pattern, and reads a leading ``+`` or ``-`` as a change to its default tools (pi 1.4.0 and 1.5.0:
         ``cli/args.js``, ``getToolListError``, ``createToolNameMatcher``). ``"read,bash"`` would become two tools and
-        ``"*"`` every tool. An entry with one of these is refused, before any server is probed.
+        ``"*"`` every tool. Instead of copying these rules, an entry must be made of ASCII letters, digits, ``_``,
+        ``.`` and ``-`` and must not start with ``-`` or ``.``: any other entry is refused, before any server is
+        probed.
         """
         if self.allowed_builtin_tools is None:
             return
         for entry in self.allowed_builtin_tools:
-            reason = None
-            if not isinstance(entry, str) or not entry.strip():
-                reason = "it is empty"
-            elif "," in entry:
-                reason = "it has a ',' (pi would read several tools)"
-            elif "*" in entry:
-                reason = "it has a '*' (pi would read a pattern)"
-            elif entry != entry.strip():
-                reason = "it has leading or trailing whitespace (pi trims it)"
-            elif entry[0] in "+-":
-                reason = "it starts with '+' or '-' (pi would add or remove a default tool)"
-            if reason is not None:
+            if not isinstance(entry, str) or _PI_EXACT_TOOL_NAME.fullmatch(entry) is None:
                 raise ValueError(
-                    f"allowed_builtin_tools entry {entry!r} is not an exact tool name: {reason}. "
-                    "List one exact pi tool name per entry."
+                    f"allowed_builtin_tools entry {entry!r} is not an exact tool name: use one tool name per entry, "
+                    "made of ASCII letters, digits, '_', '.' and '-' (not starting with '-' or '.'); "
+                    "no separator, pattern, '+' or '-' prefix or whitespace is allowed because pi reads them"
                 )
 
     def check_scenario(self) -> None:
