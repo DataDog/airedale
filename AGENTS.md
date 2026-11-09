@@ -696,7 +696,7 @@ here, including:
   must not have the Datadog copyright line prepended.
 - **Tool records:** pi writes the name of a tool call in its start and its end record (same tool call object in `agent-loop.js` and `nested-tool-calls.js`, 1.4.0 and 1.5.0). An end record whose id is open but whose `toolName` is not the name of any open call with that id is malformed (the run fails; the span recorder does not give it the result). Parallel calls that share an id keep failing with their own message.
 - **Secrets:** never commit tokens; never log bearer tokens; redact headers in
-  LLMObs metadata. Never copy a raw URL, header, environment or config value, or a raw line of the output of pi, into an error, a log or a span: name the server, the field and the reason (a URL can hold a credential in its user info or query).
+  LLMObs metadata. A project `.pi/mcp.json` server is reported with `args` and `env` values as `<redacted>`, the URL as scheme, host and port, and the `command` as a plain file name (else `<redacted>`). Never copy a raw URL, header, environment or config value, or a raw line of the output of pi, into an error, a log or a span: name the server, the field and the reason (a URL can hold a credential in its user info or query).
 
 ### Version control — jj (Jujutsu), never git
 

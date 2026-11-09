@@ -323,6 +323,57 @@ class TestReporting:
         assert "secret" not in json.dumps([server.to_safe_dict() for server in reported])
         assert reported[0].env == {} and reported[1].headers == {}
 
+    @pytest.mark.parametrize(
+        ("command", "reported"),
+        [
+            ("npx", "npx"),
+            ("/usr/local/bin/uvx", "uvx"),
+            ("C:\\tools\\run-server.exe", "run-server.exe"),
+            ("/opt/SECRET-TOKEN-1/bin/server", "server"),
+            ("./SECRET-TOKEN-1/server", "server"),
+            ("node --token=SECRET-TOKEN-1", "<redacted>"),
+            ("SECRET=SECRET-TOKEN-1", "<redacted>"),
+            ("/opt/x/SECRET TOKEN", "<redacted>"),
+        ],
+    )
+    def test_command_is_reported_as_a_file_name_only(self, tmp_path, command, reported):
+        (tmp_path / ".pi").mkdir()
+        (tmp_path / ".pi" / "mcp.json").write_text(json.dumps({"mcpServers": {"cli": {"command": command}}}))
+        [server] = discover_pi_project_mcp_servers(tmp_path)
+        assert server.command == reported
+        assert server.to_safe_dict()["command"] == reported
+        assert "SECRET-TOKEN-1" not in json.dumps(server.to_safe_dict())
+
+    def test_nothing_of_a_project_server_is_reported_raw(self, tmp_path):
+        (tmp_path / ".pi").mkdir()
+        (tmp_path / ".pi" / "mcp.json").write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "cli": {
+                            "command": "/opt/SECRET-C/server",
+                            "args": ["--key", "SECRET-A"],
+                            "env": {"TOKEN": "SECRET-E"},
+                            "cwd": "/home/SECRET-W",
+                            "headers": {"X": "SECRET-H"},
+                            "toolExposure": {"SECRET-T": "direct"},
+                            "oauth": {"clientSecret": "SECRET-O"},
+                        },
+                        "web": {
+                            "url": "https://user:SECRET-U@example.test:8443/SECRET-P/mcp?k=SECRET-Q#SECRET-F",
+                            "headers": {"Authorization": "Bearer SECRET-H"},
+                            "oauth": {"clientSecret": "SECRET-O", "callbackUrl": "http://localhost/SECRET-CB"},
+                        },
+                    }
+                }
+            )
+        )
+        reported = discover_pi_project_mcp_servers(tmp_path)
+        assert len(reported) == 2
+        text = json.dumps([server.to_safe_dict() for server in reported])
+        assert "SECRET" not in text
+        assert "example.test" in text
+
 
 class TestValidation:
     @pytest.mark.parametrize("name", ["a b", "a.b", "", "é", "a\n"])

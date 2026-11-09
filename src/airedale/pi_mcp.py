@@ -23,6 +23,7 @@ scenario server.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -87,6 +88,21 @@ def merge_project_mcp_config(project_file: Path, scenario: Mapping[str, Mapping[
     return merge
 
 
+_PLAIN_COMMAND = re.compile(r"[A-Za-z0-9._+@-]+")
+
+
+def _reportable_command(command: Any) -> str:
+    """Return the file name of ``command`` for reports, or ``<redacted>``.
+
+    The repo file can write a credential in a directory of the path (``/opt/<token>/bin/server``) or in a
+    command line (``node --token=abc``); only a plain file name is kept.
+    """
+    from airedale.mcp import REDACTED
+
+    name = str(command).replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+    return name if _PLAIN_COMMAND.fullmatch(name) else REDACTED
+
+
 def discover_pi_project_mcp_servers(
     cwd: str | Path, scenario: Mapping[str, Mapping[str, Any]] | None = None
 ) -> list[McpServerSpec]:
@@ -98,8 +114,10 @@ def discover_pi_project_mcp_servers(
     that pi rejects (invalid, or a name that differs from a scenario server only
     in ``-``/``_``) and an entry with ``"enabled": false`` are left out. The repo
     file can hold credentials, and these specs go to telemetry, so ``env``
-    values, ``args`` and everything in ``url`` after the host and port are
-    redacted (headers are redacted by :meth:`McpServerSpec.to_safe_dict`).
+    values, ``args``, the directories of ``command`` and everything in ``url`` after the
+    host and port are redacted (headers are redacted by :meth:`McpServerSpec.to_safe_dict`).
+    The other values of the spec are the server name (limited by pi to letters, digits,
+    ``_`` and ``-``), the transport and the fixed fields.
     """
     from airedale.mcp import REDACTED, McpServerSpec, url_without_secrets
 
@@ -122,7 +140,7 @@ def discover_pi_project_mcp_servers(
                 McpServerSpec(
                     name=name,
                     type="stdio",
-                    command=config["command"],
+                    command=_reportable_command(config["command"]),
                     args=tuple(REDACTED for _ in config.get("args") or []),
                     env=dict.fromkeys(config.get("env") or {}, REDACTED),
                 )
