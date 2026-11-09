@@ -580,7 +580,17 @@ class TestModelCalls:
 # --------------------------------------------------------------------------- #
 # Tools and compaction
 # --------------------------------------------------------------------------- #
+#: The name of the last start record of each id: pi writes the same name in the end record.
+_TOOL_NAMES: dict[str, str] = {}
+
+
+@pytest.fixture(autouse=True)
+def _reset_tool_names():
+    _TOOL_NAMES.clear()
+
+
 def _tool_start(tool_id: str, name: str = "bash", parent: str | None = None) -> dict:
+    _TOOL_NAMES[tool_id] = name
     event = {"type": "tool_execution_start", "toolCallId": tool_id, "toolName": name, "args": {"command": "ls"}}
     if parent is not None:
         event["parentToolCallId"] = parent
@@ -593,7 +603,7 @@ def _tool_end(
     event: dict[str, Any] = {
         "type": "tool_execution_end",
         "toolCallId": tool_id,
-        "toolName": "bash",
+        "toolName": _TOOL_NAMES.get(tool_id, "bash"),
         "result": {"content": [{"type": "text", "text": "out"}]},
         "isError": error,
     }

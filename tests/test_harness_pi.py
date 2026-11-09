@@ -3908,3 +3908,54 @@ class TestNoRawValueInDiagnostics:
         assert collector.invalid_lines == 2
         assert self.SECRET not in caplog.text
         assert "Ignoring" in caplog.text
+
+
+class TestEndRecordNamesTheSameTool:
+    """Pi repeats the name of a tool call in its end record (pi 1.4.0 and 1.5.0): another name is damage."""
+
+    def _events(self, end_name):
+        events = _events_tool_run()
+        end = next(event for event in events if event["type"] == "tool_execution_end")
+        start = next(event for event in events if event["type"] == "tool_execution_start")
+        end["toolName"] = end_name
+        return events, start, end
+
+    def test_end_with_another_tool_name_fails_the_run(self):
+        events, start, end = self._events("write")
+        assert start["toolName"] != "write"
+        error = _collect(events).result(model=MODEL, returncode=0, stderr_tail="").error
+        assert "malformed JSONL" in str(error)
+
+    def test_the_execution_is_not_closed_by_that_record(self):
+        events, _, _ = self._events("write")
+        collector = _collect(events)
+        assert [call.tool_name for call in collector.tool_executions] == [events[5]["toolName"]]
+        assert not collector.tool_executions[0].finished
+        assert collector.tool_executions[0].result is None
+
+    def test_end_with_the_same_name_is_fine(self):
+        events, start, _ = self._events("write")
+        events[events.index(next(e for e in events if e["type"] == "tool_execution_end"))]["toolName"] = start[
+            "toolName"
+        ]
+        assert _collect(events).result(model=MODEL, returncode=0, stderr_tail="").error is None
+
+    def test_end_without_a_start_keeps_its_own_name(self):
+        events, _, end = self._events("write")
+        events = [event for event in events if event["type"] != "tool_execution_start"]
+        collector = _collect(events)
+        assert collector.result(model=MODEL, returncode=0, stderr_tail="").error is None
+        assert [call.tool_name for call in collector.tool_executions] == ["write"]
+
+    def test_the_span_recorder_does_not_give_the_result_to_another_tool(self):
+        from airedale.harness.pi_spans import PiSpanRecorder
+
+        recorder = PiSpanRecorder(model=MODEL, sdk_name="pi", harness="h", prompt_version="v")
+        recorder.feed({"type": "tool_execution_start", "toolCallId": "c1", "toolName": "read", "args": {}})
+        recorder.feed(
+            {"type": "tool_execution_end", "toolCallId": "c1", "toolName": "bash", "result": "SECRET", "isError": False}
+        )
+        assert recorder.records == []  # The record is ignored: the span of "read" is still open.
+        recorder.close_tool("c1", 1)
+        assert [record.name for record in recorder.records] == ["read"]
+        assert not recorder.records[0].output_data

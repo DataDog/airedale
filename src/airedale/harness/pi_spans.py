@@ -660,6 +660,11 @@ class PiSpanRecorder:
     def _on_tool_end(self, event: dict[str, Any], now: int) -> None:
         tool_id = str(event.get("toolCallId") or "")
         open_tool = self._open_tools.get(tool_id)
+        if open_tool is not None and open_tool.record.name != str(event.get("toolName") or "unknown"):
+            # Pi repeats the name of the start record in the end record (the run fails on a record that does not):
+            # the result is not given to the span of another tool.
+            logger.debug("Ignoring the end record of tool call %r: the tool name is not the one of its start", tool_id)
+            return
         if open_tool is None:
             # No start record: make a span that ends now.
             name = str(event.get("toolName") or "unknown")

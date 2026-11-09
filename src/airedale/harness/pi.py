@@ -1482,7 +1482,7 @@ class _PiEventCollector:
             # Pi writes one JSON object per record; anything else is damage.
             self.invalid_lines += 1
             return None
-        if _tool_event_problem(event) is not None:
+        if _tool_event_problem(event) is not None or self._end_names_another_tool(event):
             # Not given to the spans either: they would coerce the same fields.
             self.invalid_lines += 1
             return None
@@ -1529,7 +1529,9 @@ class _PiEventCollector:
                 # session totals too).
                 self._add_usage(message["usage"], "tool result")
             return None
-        if event_type in ("tool_execution_start", "tool_execution_end") and _tool_event_problem(event) is not None:
+        if event_type in ("tool_execution_start", "tool_execution_end") and (
+            _tool_event_problem(event) is not None or self._end_names_another_tool(event)
+        ):
             self.invalid_lines += 1
             return None
         if event_type == "tool_execution_start":
@@ -1584,6 +1586,25 @@ class _PiEventCollector:
             self.aborted = aborted
             return None
         return None
+
+    def _end_names_another_tool(self, event: dict[str, Any]) -> bool:
+        """Return True for an end record with the id of an open execution but the name of another tool.
+
+        Pi writes the start and the end record of a call from the same tool call (``toolCall.id`` and
+        ``toolCall.name`` in ``agent-loop.js``, ``id`` and ``name`` in ``nested-tool-calls.js``; pi 1.4.0 and 1.5.0), so
+        the name is the same. A record that differs is damaged, and closing the execution by id alone would give the
+        result to the wrong tool. The record is refused, and the run fails.
+        """
+        if event.get("type") != "tool_execution_end" or self.failure is not None:
+            # (After a failure, the first one stays the cause: parallel calls with one id are such a failure, and their
+            # records are those of pi, in any order.)
+            return False
+        open_executions = self._open_executions.get(str(event.get("toolCallId") or ""))
+        if not open_executions:
+            return False
+        # (With several open calls of one id the run fails anyway, as the results cannot be matched: see ``_end_execution``.)
+        name = str(event.get("toolName") or "unknown")
+        return all(execution.tool_name != name for execution in open_executions)
 
     def _end_execution(self, tool_id: str) -> _ToolExecution | None:
         """Return the open execution that an end record closes (``None``: no start record).
