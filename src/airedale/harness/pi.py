@@ -494,6 +494,17 @@ class PiRunner(DecoratorSpanAgentRunner):
         """
         if not self.mcp_servers:
             return
+        self._check_scenario_server_names()
+        project_file = Path(self.cwd) / ".pi" / "mcp.json"
+        changed = merge_project_mcp_config(project_file, self._scenario_pi_configs(trace_headers, strict=True)).changed
+        if changed:
+            raise ValueError(
+                f"Project MCP config {project_file} defines server(s) {', '.join(changed)} with the same name as "
+                "scenario MCP server(s) and pi would use the project definition (or apply its changes, for example "
+                '"enabled": false). Rename or remove the project entry.'
+            )
+
+    def _check_scenario_server_names(self) -> None:
         by_key: dict[str, list[str]] = {}
         for server in self.mcp_servers:
             by_key.setdefault(_pi_server_key(server.name), []).append(server.name)
@@ -503,14 +514,21 @@ class PiRunner(DecoratorSpanAgentRunner):
                 f"Scenario MCP servers {'; '.join(duplicates)} have the same name for pi (pi ignores the "
                 "difference between '-' and '_') and pi would run only one of them. Rename the server(s)."
             )
-        project_file = Path(self.cwd) / ".pi" / "mcp.json"
-        changed = merge_project_mcp_config(project_file, self._scenario_pi_configs(trace_headers, strict=True)).changed
-        if changed:
-            raise ValueError(
-                f"Project MCP config {project_file} defines server(s) {', '.join(changed)} with the same name as "
-                "scenario MCP server(s) and pi would use the project definition (or apply its changes, for example "
-                '"enabled": false). Rename or remove the project entry.'
-            )
+
+    def check_scenario(self) -> None:
+        """Raise :class:`ValueError` when the scenario alone (no workspace) makes the run impossible for pi.
+
+        The checks of the run that need no repo: the names of the scenario servers, how they are written for pi
+        (strict), the possible tool name collisions, and the scenario skill directories. The experiment calls this
+        for every pi scenario **before** it starts a managed MCP server or an LLMObs experiment. The checks that
+        need the repo (its ``.pi/mcp.json``, its skills) stay in the run (``_check_before_probe``).
+        """
+        self._check_scenario_server_names()
+        self._scenario_pi_configs({}, strict=True)
+        self._check_tool_name_collisions()
+        # (A directory without a project: only the scenario skills are read.)
+        with tempfile.TemporaryDirectory(prefix="airedale-pi-check-") as empty:
+            pi_skill_dirs(self.skills, empty)
 
     def _check_before_probe(self, trace_headers: Mapping[str, str]) -> None:
         """Run the local checks of the run before any MCP server is probed (the probe starts them)."""

@@ -46,6 +46,7 @@ __all__ = [
     "CodexRunner",
     "PiRunner",
     "ProgressCallback",
+    "check_scenario_for_pi",
     "create_runner",
     "mcp_system_prompt",
 ]
@@ -126,6 +127,23 @@ def create_runner(
         gateway_token=resolved.bearer_token or resolved.api_key,
         gateway_headers=resolved.headers,
     )
+
+
+def check_scenario_for_pi(scenario: ScenarioConfig) -> None:
+    """Raise :class:`ValueError` when a ``pi`` scenario cannot run, by what the scenario says alone.
+
+    The experiment calls this for each selected scenario before it starts a managed MCP server (which a refused run
+    would have started for nothing). The checks that need the repo of a run (its ``.pi/mcp.json``, its skills) are
+    done by the run. Another harness: nothing to check.
+    """
+    if scenario.harness != HARNESS_PI:
+        return
+    specs = [McpServerSpec.from_config(server) for server in scenario.mcp_servers]
+    runner = PiRunner(cwd=".", mcp_servers=specs, skills=list(scenario.skills), pi_command=["pi"])
+    try:
+        runner.check_scenario()
+    except ValueError as error:
+        raise ValueError(f"Scenario '{scenario.name}' cannot run with pi: {error}") from error
 
 
 def _merge_project_mcp_servers(

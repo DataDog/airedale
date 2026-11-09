@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from airedale.config.experiment import ExperimentConfig, McpServerConfig, ScenarioConfig, TaskConfig
 from airedale.experiment import _experiment_name, _managed_server_specs, _normalize_filter
 from airedale.types import ModelSpec
@@ -245,3 +247,100 @@ class TestPerRunWorkspaces:
         assert len(constructed_cwds) == runs
         # Each run gets a distinct, fresh workspace.
         assert len(set(constructed_cwds)) == runs
+
+
+# ---------------------------------------------------------------------------
+# A pi scenario that cannot run is refused before anything starts
+# ---------------------------------------------------------------------------
+
+
+class TestPiScenarioRefusedBeforeStart:
+    def _config(self, scenario: ScenarioConfig) -> ExperimentConfig:
+        return ExperimentConfig(
+            project="p",
+            models=("anthropic/claude-sonnet-4-6",),
+            scenarios=(scenario,),
+            tasks=(TaskConfig(id="t", prompt="p", criteria=("c",)),),
+        )
+
+    def _spy(self, monkeypatch):
+        import airedale.experiment as experiment_module
+
+        calls: list[str] = []
+
+        class _Managed:
+            def __init__(self, specs):
+                calls.append(f"managed_servers({[spec.name for spec in specs]})")
+
+            async def __aenter__(self):
+                return None
+
+            async def __aexit__(self, *exc):
+                return None
+
+        monkeypatch.setattr(experiment_module, "managed_servers", _Managed)
+        monkeypatch.setattr(experiment_module, "enable_llmobs", lambda *a, **k: calls.append("enable_llmobs"))
+        monkeypatch.setattr(
+            experiment_module.dataset_module, "get_or_create_dataset", lambda *a, **k: calls.append("dataset")
+        )
+        return calls
+
+    @pytest.mark.parametrize(
+        ("servers", "skills", "message"),
+        [
+            # A name that pi does not accept: the managed server would be started for nothing.
+            ((McpServerConfig(name="bad.name", url="http://localhost:8000/mcp", command="serve"),), (), "bad.name"),
+            (
+                (McpServerConfig(name="ok", url="http://localhost:8000/mcp", command="serve", tool_names=("a*",)),),
+                (),
+                "ok",
+            ),
+            (
+                (
+                    McpServerConfig(name="docs-api", url="http://localhost:8000/mcp", command="serve"),
+                    McpServerConfig(name="docs_api", url="http://localhost:8001/mcp"),
+                ),
+                (),
+                "same name for pi",
+            ),
+            (
+                (McpServerConfig(name="ok", url="http://localhost:8000/mcp", command="serve"),),
+                ("/does/not/exist",),
+                "does not exist",
+            ),
+        ],
+    )
+    def test_run_experiments_starts_nothing(self, monkeypatch, servers, skills, message):
+        from airedale.experiment import run_experiments
+
+        calls = self._spy(monkeypatch)
+        scenario = ScenarioConfig(name="s", harness="pi", mcp_servers=servers, skills=skills)
+        with pytest.raises(ValueError, match=message) as error:
+            asyncio.run(run_experiments(self._config(scenario), gateway=None, show_progress=False))
+        assert "Scenario 's' cannot run with pi" in str(error.value)
+        assert calls == []
+
+    def test_possible_tool_name_collision_starts_nothing(self, monkeypatch):
+        from airedale.experiment import run_experiments
+
+        calls = self._spy(monkeypatch)
+        servers = (
+            McpServerConfig(name="a", url="http://localhost:8000/mcp", command="serve", tool_names=("b__c",)),
+            McpServerConfig(name="a__b", url="http://localhost:8001/mcp", tool_names=("c",)),
+        )
+        scenario = ScenarioConfig(name="s", harness="pi", mcp_servers=servers)
+        with pytest.raises(ValueError, match="collision"):
+            asyncio.run(run_experiments(self._config(scenario), gateway=None, show_progress=False))
+        assert calls == []
+
+    def test_other_harness_is_not_checked(self):
+        from airedale.harness import check_scenario_for_pi
+
+        servers = (McpServerConfig(name="bad.name", url="http://localhost:8000/mcp", command="serve"),)
+        check_scenario_for_pi(ScenarioConfig(name="s", harness="native", mcp_servers=servers))
+
+    def test_a_valid_pi_scenario_passes(self):
+        from airedale.harness import check_scenario_for_pi
+
+        servers = (McpServerConfig(name="ok", url="http://localhost:8000/mcp", command="serve"),)
+        check_scenario_for_pi(ScenarioConfig(name="s", harness="pi", mcp_servers=servers))
