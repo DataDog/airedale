@@ -1673,6 +1673,28 @@ class TestRunnerConfig:
             }
         }
 
+    BASE_URLS = [
+        "https://gw.test/v1/$TENANT",
+        "https://gw.test/${TENANT}/x",
+        "https://gw.test/$$x",
+        "https://gw.test/$!y",
+        "https://gw.test/!cmd",
+        "https://gw.test/v1/$",
+    ]
+
+    def test_base_url_with_a_dollar_is_written_as_it_is_and_pi_does_not_expand_it(self, pi_reference, tmp_path):
+        """Pi 1.4.0 and 1.5.0 expand ``$NAME`` in the API key and the headers of ``models.json``, not in ``baseUrl``.
+
+        An escape (``$$``) would change the URL that the model calls, so the URL is written raw.
+        """
+        for url in self.BASE_URLS:
+            runner = PiRunner(cwd=tmp_path, gateway_base_url=url)
+            assert runner._models_config(MODEL)["providers"]["anthropic"]["baseUrl"] == url
+        request = {"action": "base_url", "provider": "anthropic", "env": {"TENANT": "RESOLVED"}, "urls": self.BASE_URLS}
+        for version, answers in pi_reference(request).items():
+            assert [answer["model"] for answer in answers] == self.BASE_URLS, version
+            assert all(answer["error"] is None for answer in answers), version
+
     def test_models_config_static_key_uses_native_auth(self, tmp_path):
         runner = PiRunner(cwd=tmp_path, gateway_base_url="https://gw/v1", gateway_api_key="k")
         entry = runner._models_config(ModelSpec.parse("openai/gpt-5.5"))["providers"]["openai"]

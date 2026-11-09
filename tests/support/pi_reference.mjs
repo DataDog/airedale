@@ -105,6 +105,22 @@ if (request.action === "mcp") {
       collisions: result.diagnostics.filter((item) => item.type === "collision").length,
     }),
   );
+} else if (request.action === "base_url") {
+  // The base URL that pi uses for the models of ``request.provider`` when models.json sets ``request.urls`` as
+  // ``baseUrl`` (``$NAME`` and ``${NAME}`` in the URL would be expanded if pi expanded this field).
+  const { ModelRuntime } = await load("core/model-runtime.js");
+  process.env.PI_OFFLINE = "1";
+  for (const [name, value] of Object.entries(request.env ?? {})) process.env[name] = value;
+  const results = [];
+  for (const url of request.urls) {
+    const modelsPath = join(sandbox, "models.json");
+    writeFileSync(modelsPath, JSON.stringify({ providers: { [request.provider]: { baseUrl: url, apiKey: "k" } } }));
+    const runtime = await ModelRuntime.create({ modelsPath, authPath: join(sandbox, "auth.json") });
+    const model = runtime.getModels(request.provider)[0];
+    const auth = await runtime.getAuth(model);
+    results.push({ model: model.baseUrl, auth: auth?.auth?.baseUrl ?? null, error: runtime.getError() ?? null });
+  }
+  console.log(JSON.stringify(results));
 } else if (request.action === "home_paths") {
   // What pi's normalizePath makes of each entry of a skills list, with the given home directory.
   const { normalizePath } = await load("utils/paths.js");
