@@ -864,3 +864,53 @@ def test_skills_of_a_tree_with_links_are_those_of_pi(pi_reference, tmp_path, lab
             assert answer["collisions"], version
             continue
         assert loaded == {tuple(pair) for pair in answer["skills"]}, version
+
+
+def _alias_tree(tmp_path, *, shadowing_name, aliases):
+    root = tmp_path / "cwd"
+    for path in ("stable", "shared/B", ".agents/skills", ".pi"):
+        (root / path).mkdir(parents=True)
+    (root / "stable/SKILL.md").write_text(_md(shadowing_name))
+    (root / "shared/B/zzzz.md").write_text("---\ndescription: d\n---\n")
+    (root / ".pi/settings.json").write_text(json.dumps({"skills": ["../stable"]}))
+    for alias in aliases:
+        (root / ".agents/skills" / alias).symlink_to(root / "shared/B", target_is_directory=True)
+    return root
+
+
+def test_alias_that_a_project_skill_shadows_still_counts_for_the_names_of_the_file(tmp_path):
+    # ``ax`` is the name of a project skill: the alias ``ax`` of the file is dropped as a shadowed skill. The file
+    # also has the alias ``by``: two derived names for one file, whatever pi reads first.
+    root = _alias_tree(tmp_path, shadowing_name="ax", aliases=("ax", "by"))
+    with pytest.raises(ValueError, match="no 'name'"):
+        pi_skill_dirs([], str(root))
+
+
+def test_alias_that_a_project_skill_shadows_counts_whatever_the_order_of_the_links(tmp_path):
+    root = _alias_tree(tmp_path, shadowing_name="by", aliases=("ax", "by"))
+    with pytest.raises(ValueError, match="no 'name'"):
+        pi_skill_dirs([], str(root))
+
+
+def test_aliases_with_the_same_name_one_of_them_shadowed_are_kept(tmp_path):
+    # The two links are called ``foo``: one derived name, so no refusal, even when a project skill shadows it.
+    root = _alias_tree(tmp_path, shadowing_name="foo", aliases=())
+    for parent in ("p", "q"):
+        (root / ".agents/skills" / parent).mkdir()
+        (root / ".agents/skills" / parent / "foo").symlink_to(root / "shared/B", target_is_directory=True)
+    assert pi_skill_dirs([], str(root)) == [
+        str(root / ".pi/../stable"),
+        str(root / ".agents/skills/p/foo/zzzz.md"),
+        str(root / ".agents/skills/q/foo/zzzz.md"),
+    ]
+
+
+def test_scenario_alias_dropped_as_a_duplicate_still_counts(tmp_path):
+    scenario = tmp_path / "scenario" / "one"
+    scenario.mkdir(parents=True)
+    (scenario / "n.md").write_text("---\ndescription: d\n---\n")
+    cwd = tmp_path / "cwd"
+    (cwd / ".agents" / "skills").mkdir(parents=True)
+    (cwd / ".agents" / "skills" / "other").symlink_to(scenario, target_is_directory=True)
+    with pytest.raises(ValueError, match="no 'name'"):
+        pi_skill_dirs([str(scenario)], str(cwd))

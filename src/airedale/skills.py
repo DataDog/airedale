@@ -172,7 +172,10 @@ def pi_skill_dirs(skill_dirs: list[str], cwd: str) -> list[str]:
     """
     scenario: list[str] = []
     names: dict[str, str] = {}
-    real_paths: dict[str, tuple[str, Path]] = {}  # Pi skips a skill file that it already loaded (a link to it) quietly.
+    real_paths: set[str] = set()  # Pi skips a skill file that it already loaded (a link to it) quietly.
+    #: The first alias of every file that was read, also when the skill was shadowed: the names that the links give
+    #: to one file are compared before any name is dropped (``_check_same_name_through_aliases``).
+    aliases: dict[str, tuple[str, Path]] = {}
     for skill_dir in skill_dirs:
         source_path = Path(skill_dir).resolve()
         if not source_path.exists():
@@ -181,13 +184,13 @@ def pi_skill_dirs(skill_dirs: list[str], cwd: str) -> list[str]:
             raise ValueError(f"Skill path is not a directory: {skill_dir}")
         for name, skill_file in _pi_skills(source_path):
             real = os.path.realpath(skill_file)
+            _check_aliases(aliases, real, name, skill_file)
             if real in real_paths:
-                _check_same_name_through_aliases(real_paths[real], name, skill_file)
                 continue
             if name in names:
                 raise ValueError(f"Skill '{name}' (scenario skill {skill_file}) collides with {names[name]}")
             names[name] = f"scenario skill {skill_file}"
-            real_paths[real] = (name, skill_file)
+            real_paths.add(real)
         scenario.append(str(source_path))
 
     workspace = Path(cwd)
@@ -206,9 +209,9 @@ def pi_skill_dirs(skill_dirs: list[str], cwd: str) -> list[str]:
             continue
         for name, skill_file in _pi_skills(path):
             real = os.path.realpath(skill_file)
+            _check_aliases(aliases, real, name, skill_file)
             if real in real_paths:
                 # The same file through a symlink: pi loads it once and does not report a collision.
-                _check_same_name_through_aliases(real_paths[real], name, skill_file)
                 continue
             if name in names:
                 raise ValueError(
@@ -220,7 +223,7 @@ def pi_skill_dirs(skill_dirs: list[str], cwd: str) -> list[str]:
                 logger.warning("Project skill %s shadowed by %s", skill_file, seen_project[name])
                 continue
             seen_project[name] = str(skill_file)
-            real_paths[real] = (name, skill_file)
+            real_paths.add(real)
         project.append(str(path))
     return [*scenario, *project]
 
@@ -261,6 +264,14 @@ def _expand_pi_home(entry: str) -> Path:
         # ``<home>/extra``; ``Path.home() / "/extra"`` would be ``/extra``).
         return Path(os.path.normpath(f"{Path.home()}{os.sep}{entry[2:]}"))
     return Path(entry)
+
+
+def _check_aliases(aliases: dict[str, tuple[str, Path]], real: str, name: str, skill_file: Path) -> None:
+    """Record the first alias of ``real`` and compare the later ones with it (see ``_check_same_name_through_aliases``)."""
+    if real in aliases:
+        _check_same_name_through_aliases(aliases[real], name, skill_file)
+    else:
+        aliases[real] = (name, skill_file)
 
 
 def _check_same_name_through_aliases(loaded: tuple[str, Path], name: str, skill_file: Path) -> None:
