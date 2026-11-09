@@ -320,7 +320,9 @@ class TestPiScenarioRefusedBeforeStart:
         assert "Scenario 's' cannot run with pi" in str(error.value)
         assert calls == []
 
-    @pytest.mark.parametrize("entry", ["read,bash", "*", "+bash", " read"])
+    @pytest.mark.parametrize(
+        "entry", ["read,bash", "*", "+bash", " read", "\ufeff+ls", "\ufeff+bash", "\ufeffread", "read\ufeff"]
+    )
     def test_builtin_tool_entry_with_pi_cli_syntax_starts_nothing(self, monkeypatch, entry):
         from airedale.experiment import run_experiments
 

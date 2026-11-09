@@ -1,6 +1,54 @@
 {
  "_comment": "Answers of pi to the requests of the tests. Record again: see tests/conftest.py (pi_reference).",
  "cases": {
+  "{\"action\":\"skill_tree\",\"files\":{\".agents/skills/00-first/SKILL.md\":\"---\\nname: a\\ndescription: d\\n---\\n\",\"shared/SKILL.md\":\"---\\ndescription: d\\n---\\n\"},\"links\":{\".agents/skills/a\":\"shared\",\".agents/skills/b\":\"shared\"}}": {
+   "1.4.0": {
+    "collisions": 1,
+    "skills": [
+     [
+      "a",
+      ".agents/skills/00-first/SKILL.md"
+     ]
+    ]
+   },
+   "1.5.0": {
+    "collisions": 1,
+    "skills": [
+     [
+      "a",
+      ".agents/skills/00-first/SKILL.md"
+     ]
+    ]
+   }
+  },
+  "{\"action\":\"skill_tree\",\"files\":{\".agents/skills/00-first/SKILL.md\":\"---\\nname: first\\ndescription: d\\n---\\n\",\"shared/SKILL.md\":\"---\\nname: target\\ndescription: d\\n---\\n\"},\"links\":{\".agents/skills/a\":\"shared\",\".agents/skills/b\":\"shared\"}}": {
+   "1.4.0": {
+    "collisions": 0,
+    "skills": [
+     [
+      "first",
+      ".agents/skills/00-first/SKILL.md"
+     ],
+     [
+      "target",
+      "shared/SKILL.md"
+     ]
+    ]
+   },
+   "1.5.0": {
+    "collisions": 0,
+    "skills": [
+     [
+      "first",
+      ".agents/skills/00-first/SKILL.md"
+     ],
+     [
+      "target",
+      "shared/SKILL.md"
+     ]
+    ]
+   }
+  },
   "{\"action\":\"skill_tree\",\"files\":{\".agents/skills/SKILL.md\":\"---\\nname: rootskill\\ndescription: d\\n---\\n\",\".agents/skills/other.md\":\"---\\nname: other\\ndescription: d\\n---\\n\"},\"links\":{\".agents/skills/loop\":\".agents/skills\"}}": {
    "1.4.0": {
     "collisions": 0,
@@ -249,6 +297,54 @@
      [
       "shared",
       "shared/m/x.md"
+     ]
+    ]
+   }
+  },
+  "{\"action\":\"skill_tree\",\"files\":{\".pi/skills/00-first/SKILL.md\":\"---\\nname: a\\ndescription: d\\n---\\n\",\"shared/SKILL.md\":\"---\\ndescription: d\\n---\\n\"},\"links\":{\".pi/skills/a\":\"shared\",\".pi/skills/b\":\"shared\"}}": {
+   "1.4.0": {
+    "collisions": 1,
+    "skills": [
+     [
+      "a",
+      ".pi/skills/00-first/SKILL.md"
+     ]
+    ]
+   },
+   "1.5.0": {
+    "collisions": 1,
+    "skills": [
+     [
+      "a",
+      ".pi/skills/00-first/SKILL.md"
+     ]
+    ]
+   }
+  },
+  "{\"action\":\"skill_tree\",\"files\":{\".pi/skills/00-first/SKILL.md\":\"---\\nname: first\\ndescription: d\\n---\\n\",\"shared/SKILL.md\":\"---\\nname: target\\ndescription: d\\n---\\n\"},\"links\":{\".pi/skills/a\":\"shared\",\".pi/skills/b\":\"shared\"}}": {
+   "1.4.0": {
+    "collisions": 0,
+    "skills": [
+     [
+      "first",
+      ".pi/skills/00-first/SKILL.md"
+     ],
+     [
+      "target",
+      "shared/SKILL.md"
+     ]
+    ]
+   },
+   "1.5.0": {
+    "collisions": 0,
+    "skills": [
+     [
+      "first",
+      ".pi/skills/00-first/SKILL.md"
+     ],
+     [
+      "target",
+      "shared/SKILL.md"
      ]
     ]
    }

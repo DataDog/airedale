@@ -2172,6 +2172,8 @@ class TestRunnerConfig:
             ",",
             "a,b,c",
             "\ufeff+bash",
+            "\ufeff+ls",
+            "\ufeff\ufeffread\ufeff",
             "\ufeffread",
             "read\ufeff",
             "\ufeff",
@@ -4144,3 +4146,51 @@ class TestEmptyNameIsNotTheToolCalledUnknown:
             {"type": "tool_execution_end", "toolCallId": "c1", "toolName": name, "result": "out", "isError": False}
         )
         assert [record.output_data for record in recorder.records] == ["out"]
+
+
+class TestAllEightNameMutations:
+    """Every change of a name between ``""`` and ``"unknown"`` (end record and transcript call, both ways), in a stream
+    with the collector and the span recorder together: malformed, no result attached, no span closed with the result."""
+
+    @staticmethod
+    def _stream(name):
+        events = _events_tool_run()
+        events[4]["message"]["content"][2]["name"] = name
+        for event in events:
+            if event["type"] in ("tool_execution_start", "tool_execution_end"):
+                event["toolName"] = name
+        return events
+
+    @pytest.mark.parametrize("name", ["", "unknown", "ls"])
+    def test_unchanged_names_are_matched_everywhere(self, name):
+        from airedale.harness.pi_spans import PiSpanRecorder
+
+        recorder = PiSpanRecorder(model=MODEL, sdk_name="pi", harness="h", prompt_version="v")
+        collector = _collect(self._stream(name), spans=recorder)
+        result = collector.result(model=MODEL, returncode=0, stderr_tail="")
+        assert result.error is None
+        assert [call.result for call in result.tool_calls] == ["(empty directory)"]
+        assert [record.output_data for record in recorder.records if record.kind == "tool"] == ["(empty directory)"]
+
+    @pytest.mark.parametrize(
+        ("name", "other"), [("", "unknown"), ("unknown", ""), ("ls", "write"), ("", "ls")], ids=lambda v: repr(v)
+    )
+    @pytest.mark.parametrize("where", ["end", "transcript"])
+    def test_changed_name_is_refused_everywhere(self, name, other, where):
+        from airedale.harness.pi_spans import PiSpanRecorder
+
+        events = self._stream(name)
+        if where == "end":
+            for event in events:
+                if event["type"] == "tool_execution_end":
+                    event["toolName"] = other
+        else:
+            events[4]["message"]["content"][2]["name"] = other
+        recorder = PiSpanRecorder(model=MODEL, sdk_name="pi", harness="h", prompt_version="v")
+        collector = _collect(events, spans=recorder)
+        result = collector.result(model=MODEL, returncode=0, stderr_tail="")
+        assert result.error is not None
+        assert all(call.result is None for call in result.tool_calls)
+        if where == "end":
+            # (A changed transcript name leaves the execution and its span right: the span has no transcript.)
+            assert all(not record.output_data for record in recorder.records if record.kind == "tool")

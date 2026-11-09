@@ -914,3 +914,46 @@ def test_scenario_alias_dropped_as_a_duplicate_still_counts(tmp_path):
     (cwd / ".agents" / "skills" / "other").symlink_to(scenario, target_is_directory=True)
     with pytest.raises(ValueError, match="no 'name'"):
         pi_skill_dirs([str(scenario)], str(cwd))
+
+
+@pytest.mark.parametrize("root", [".pi/skills", ".agents/skills"])
+def test_shadowed_alias_fixture_of_the_review_is_refused_and_pi_selects_only_the_first_skill(
+    pi_reference, tmp_path, root
+):
+    """``00-first`` is called ``a``; the links ``a`` and ``b`` lead to one skill file with no ``name``.
+
+    Pi 1.4.0 and 1.5.0 load only ``a``/``00-first`` (the alias ``a`` loses the name collision, and the file is not
+    loaded again as ``b``). The paths that airedale would pass to pi (and the names of the file through its links
+    differ, ``a`` and ``b``) are refused before the probe, so pi's choice does not depend on the order of the system.
+    """
+    files = {
+        f"{root}/00-first/SKILL.md": _md("a"),
+        "shared/SKILL.md": "---\ndescription: d\n---\n",
+    }
+    links = {f"{root}/a": "shared", f"{root}/b": "shared"}
+    cwd = tmp_path / "cwd"
+    _write_tree(cwd, files, links)
+    with pytest.raises(ValueError, match="no 'name'"):
+        pi_skill_dirs([], str(cwd))
+    request = {"action": "skill_tree", "files": files, "links": links}
+    for version, answer in pi_reference(request).items():
+        assert answer["skills"] == [["a", f"{root}/00-first/SKILL.md"]], version
+        assert answer["collisions"] == 1, version
+
+
+@pytest.mark.parametrize("root", [".pi/skills", ".agents/skills"])
+def test_aliases_with_an_explicit_target_name_are_kept(pi_reference, tmp_path, root):
+    # Control: the file has a ``name``, so every link gives it the same name and the links are not refused.
+    files = {
+        f"{root}/00-first/SKILL.md": _md("first"),
+        "shared/SKILL.md": _md("target"),
+    }
+    links = {f"{root}/a": "shared", f"{root}/b": "shared"}
+    cwd = tmp_path / "cwd"
+    _write_tree(cwd, files, links)
+    loaded = set()
+    for path in pi_skill_dirs([], str(cwd)):
+        for name, skill_file in _pi_skills(Path(path)):
+            loaded.add((name, os.path.relpath(os.path.realpath(skill_file), os.path.realpath(cwd))))
+    for version, answer in pi_reference({"action": "skill_tree", "files": files, "links": links}).items():
+        assert loaded == {tuple(pair) for pair in answer["skills"]}, version
