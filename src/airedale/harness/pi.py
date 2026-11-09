@@ -343,6 +343,7 @@ class PiRunner(DecoratorSpanAgentRunner):
         progress: ProgressCallback | None,
         spans: PiSpanRecorder | None = None,
     ) -> AgentRunResult:
+        self._check_builtin_tool_names()
         self._check_project_mcp_collisions(trace_headers)
         self._check_tool_name_collisions()
         skill_dirs = pi_skill_dirs(self.skills, self.cwd)
@@ -515,6 +516,34 @@ class PiRunner(DecoratorSpanAgentRunner):
                 "difference between '-' and '_') and pi would run only one of them. Rename the server(s)."
             )
 
+    def _check_builtin_tool_names(self) -> None:
+        """Raise when an ``allowed_builtin_tools`` entry is not an exact tool name.
+
+        The entries are joined into the value of ``--tools``. Pi splits that value at ``,``, trims each entry, reads
+        ``*`` as a pattern, and reads a leading ``+`` or ``-`` as a change to its default tools (pi 1.4.0 and 1.5.0:
+        ``cli/args.js``, ``getToolListError``, ``createToolNameMatcher``). ``"read,bash"`` would become two tools and
+        ``"*"`` every tool. An entry with one of these is refused, before any server is probed.
+        """
+        if self.allowed_builtin_tools is None:
+            return
+        for entry in self.allowed_builtin_tools:
+            reason = None
+            if not isinstance(entry, str) or not entry.strip():
+                reason = "it is empty"
+            elif "," in entry:
+                reason = "it has a ',' (pi would read several tools)"
+            elif "*" in entry:
+                reason = "it has a '*' (pi would read a pattern)"
+            elif entry != entry.strip():
+                reason = "it has leading or trailing whitespace (pi trims it)"
+            elif entry[0] in "+-":
+                reason = "it starts with '+' or '-' (pi would add or remove a default tool)"
+            if reason is not None:
+                raise ValueError(
+                    f"allowed_builtin_tools entry {entry!r} is not an exact tool name: {reason}. "
+                    "List one exact pi tool name per entry."
+                )
+
     def check_scenario(self) -> None:
         """Raise :class:`ValueError` when the scenario alone (no workspace) makes the run impossible for pi.
 
@@ -523,6 +552,7 @@ class PiRunner(DecoratorSpanAgentRunner):
         for every pi scenario **before** it starts a managed MCP server or an LLMObs experiment. The checks that
         need the repo (its ``.pi/mcp.json``, its skills) stay in the run (``_check_before_probe``).
         """
+        self._check_builtin_tool_names()
         self._check_scenario_server_names()
         self._scenario_pi_configs({}, strict=True)
         self._check_tool_name_collisions()
@@ -532,6 +562,7 @@ class PiRunner(DecoratorSpanAgentRunner):
 
     def _check_before_probe(self, trace_headers: Mapping[str, str]) -> None:
         """Run the local checks of the run before any MCP server is probed (the probe starts them)."""
+        self._check_builtin_tool_names()
         self._check_project_mcp_collisions(trace_headers)
         self._check_tool_name_collisions()
         # A skill name that collides (scenario skill and project skill) refuses the run too.

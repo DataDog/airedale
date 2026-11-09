@@ -139,7 +139,13 @@ def check_scenario_for_pi(scenario: ScenarioConfig) -> None:
     if scenario.harness != HARNESS_PI:
         return
     specs = [McpServerSpec.from_config(server) for server in scenario.mcp_servers]
-    runner = PiRunner(cwd=".", mcp_servers=specs, skills=list(scenario.skills), pi_command=["pi"])
+    runner = PiRunner(
+        cwd=".",
+        mcp_servers=specs,
+        skills=list(scenario.skills),
+        allowed_builtin_tools=scenario.allowed_builtin_tools,
+        pi_command=["pi"],
+    )
     try:
         runner.check_scenario()
     except ValueError as error:

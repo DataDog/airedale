@@ -2155,6 +2155,32 @@ class TestRunnerConfig:
             _run(PiRunner(cwd=tmp_path, pi_command=command, mcp_servers=servers))
         assert not record.exists()
 
+    @pytest.mark.parametrize(
+        "entry",
+        ["read,bash", "*", "mcp__*", "re*d", "+bash", "-read", " read", "read ", "", "  ", "read,", ",", "a,b,c"],
+    )
+    def test_builtin_tool_entry_with_pi_cli_syntax_is_refused_before_pi_starts(self, tmp_path, fake_pi, entry):
+        # Pi splits ``--tools`` at "," and trims, reads "*" as a pattern and a leading "+"/"-" as a change to its
+        # defaults: the entries must be exact names.
+        command, record = fake_pi(_events_tool_run())
+        with pytest.raises(ValueError, match="not an exact tool name"):
+            _run(PiRunner(cwd=tmp_path, pi_command=command, allowed_builtin_tools=["read", entry]))
+        assert not record.exists()
+
+    def test_builtin_tool_entry_with_pi_cli_syntax_is_refused_for_the_scenario_too(self, tmp_path):
+        with pytest.raises(ValueError, match="'read,bash'"):
+            PiRunner(cwd=tmp_path, allowed_builtin_tools=["read,bash"]).check_scenario()
+
+    @pytest.mark.parametrize("entry", ["read", "Bash", "my_extension_tool", "ext.tool", "a-b", "x+y", "mcp__docs__q"])
+    def test_exact_builtin_tool_names_are_accepted(self, tmp_path, entry):
+        runner = PiRunner(cwd=tmp_path, allowed_builtin_tools=[entry])
+        runner.check_scenario()
+        runner._check_before_probe({})
+
+    def test_no_builtin_tools_and_the_default_are_accepted(self, tmp_path):
+        PiRunner(cwd=tmp_path, allowed_builtin_tools=[]).check_scenario()
+        PiRunner(cwd=tmp_path, allowed_builtin_tools=None).check_scenario()
+
     def test_extension_tool_names_go_to_pi_unchanged(self, tmp_path):
         # Repo extension tools are declared only when the scenario names them.
         runner = PiRunner(cwd=tmp_path, allowed_builtin_tools=["Read", "my_extension_tool"])

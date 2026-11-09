@@ -320,6 +320,17 @@ class TestPiScenarioRefusedBeforeStart:
         assert "Scenario 's' cannot run with pi" in str(error.value)
         assert calls == []
 
+    @pytest.mark.parametrize("entry", ["read,bash", "*", "+bash", " read"])
+    def test_builtin_tool_entry_with_pi_cli_syntax_starts_nothing(self, monkeypatch, entry):
+        from airedale.experiment import run_experiments
+
+        calls = self._spy(monkeypatch)
+        servers = (McpServerConfig(name="ok", url="http://localhost:8000/mcp", command="serve"),)
+        scenario = ScenarioConfig(name="s", harness="pi", mcp_servers=servers, allowed_builtin_tools=("read", entry))
+        with pytest.raises(ValueError, match="not an exact tool name"):
+            asyncio.run(run_experiments(self._config(scenario), gateway=None, show_progress=False))
+        assert calls == []
+
     def test_possible_tool_name_collision_starts_nothing(self, monkeypatch):
         from airedale.experiment import run_experiments
 
