@@ -254,7 +254,9 @@ def _expand_pi_home(entry: str) -> Path:
     if entry == "~":
         return Path.home()
     if entry.startswith("~/") or (os.name == "nt" and entry.startswith("~\\")):
-        return Path.home() / entry[2:]
+        # Node's ``join(home, rest)``: separators are merged and ``.`` / ``..`` are resolved (``~//extra`` is
+        # ``<home>/extra``; ``Path.home() / "/extra"`` would be ``/extra``).
+        return Path(os.path.normpath(f"{Path.home()}{os.sep}{entry[2:]}"))
     return Path(entry)
 
 

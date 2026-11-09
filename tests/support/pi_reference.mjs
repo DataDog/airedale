@@ -70,6 +70,10 @@ if (request.action === "mcp") {
     }
   }
   console.log(JSON.stringify(result));
+} else if (request.action === "home_paths") {
+  // What pi's normalizePath makes of each entry of a skills list, with the given home directory.
+  const { normalizePath } = await load("utils/paths.js");
+  console.log(JSON.stringify(request.entries.map((entry) => normalizePath(entry, { homeDir: request.home }))));
 } else if (request.action === "json") {
   // What JSON.parse makes of each text: the string of a number, or "error".
   console.log(

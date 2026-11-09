@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -553,3 +554,45 @@ def test_broken_symlink_is_skipped(tmp_path):
     root.mkdir(parents=True)
     (root / "broken").symlink_to(tmp_path / "missing", target_is_directory=True)
     assert pi_skill_dirs([], str(cwd)) == [str(root)]
+
+
+HOME_ENTRIES = [
+    "~", "~/", "~//", "~/extra", "~//extra", "~///a//b", "~/./extra", "~/a/../extra", "~/../extra", "~/a/./b/", "~/a//",
+    "~x", "~x/skills", "~user/skills", "/abs/path", "rel/path", "./rel", "../up", "~.", "~~", " ~/extra", "~ /extra",
+]  # fmt: skip
+
+
+def test_home_paths_are_those_of_pi(pi_reference, tmp_path, monkeypatch):
+    """The skill paths of .pi/settings.json: same result as pi's normalizePath (with a fixed home)."""
+    from airedale.skills import _expand_pi_home
+
+    home = "/home/review"
+    monkeypatch.setenv("HOME", home)
+    monkeypatch.setenv("USERPROFILE", home)
+    for version, native in pi_reference({"action": "home_paths", "entries": HOME_ENTRIES, "home": home}).items():
+        for entry, expected in zip(HOME_ENTRIES, native, strict=True):
+            # (Pi gives a path string: compared as paths, so "./rel" and "rel" are the same.)
+            assert _expand_pi_home(entry) == Path(expected), (version, entry, expected)
+
+
+def test_tilde_slash_slash_keeps_the_home_directory(tmp_path, monkeypatch):
+    from airedale.skills import _pi_settings_skill_paths
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    cwd = _settings(tmp_path, ["~//extra", "~///a//b", "~/a/../c"])
+    assert _pi_settings_skill_paths(cwd) == [home / "extra", home / "a" / "b", home / "c"]
+
+
+def test_a_collision_below_tilde_slash_slash_is_found(tmp_path, monkeypatch):
+    # Pi reads <home>/extra for "~//extra", finds the skill there, and reports the collision with the scenario skill.
+    home = tmp_path / "home"
+    _skill(home / "extra" / "alpha", "alpha")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    scenario = _skill(tmp_path / "src" / "alpha", "alpha")
+    cwd = _settings(tmp_path, ["~//extra"])
+    with pytest.raises(ValueError, match="collides"):
+        pi_skill_dirs([str(scenario)], str(cwd))
