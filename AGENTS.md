@@ -312,7 +312,7 @@ Notes:
     run (a repo entry that repeats a server replaces it, and drops the
     headers); an explicit `"type": null` is not a missing type; the URLs are read
     like JavaScript's `URL` (`airedale.whatwg_url`: tabs and newlines removed,
-    `127.1` is `127.0.0.1`), and a host that the reader cannot decide in every
+    `127.1` is `127.0.0.1`; a `%` zone id in an IPv6 host fails, as in pi), and a host that the reader cannot decide in every
     detail (any non-ASCII host: IDNA removes and maps characters, odd IPv6) counts as accepted by pi, whatever else
     fails in it (only an ASCII character that no mapping removes, such as a space, is a sure failure).
     **Known limit:** the strict check of the *scenario* servers needs an exact answer, so a scenario MCP server whose URL has a

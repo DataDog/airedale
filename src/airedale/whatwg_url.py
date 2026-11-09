@@ -174,6 +174,10 @@ def _parse_host(text: str) -> tuple[str, bool] | None:
     if text.startswith("["):
         if not text.endswith("]"):
             return None
+        if "%" in text:
+            # A zone id (``[::1%lo0]``): ``ipaddress`` accepts and drops it, the Standard has no such syntax and the
+            # URL fails (so does pi).
+            return None
         try:
             address = ipaddress.IPv6Address(text[1:-1])
         except ValueError:

@@ -358,3 +358,48 @@ def test_server_names_are_ordered_like_object_entries():
         "4294967295",
         "a",
     ]
+
+
+#: URLs of a server and of its OAuth settings: pi 1.4.0 and 1.5.0 refuse the entry when one of them is not a valid URL.
+URL_ENTRIES = [
+    ("http://[::1]/mcp", True),
+    ("http://[::1%lo0]/mcp", False),
+    ("http://[::1%25lo0]/mcp", False),
+    ("http://[fe80::1%eth0]:8080/mcp", False),
+    ("http://[%]/mcp", False),
+    ("http://[::1%]/mcp", False),
+    ("https://example.test/mcp", True),
+    ("http://[not-an-ip]/mcp", False),
+    ("http://[1::2::3]/mcp", False),
+    ("http://a b/mcp", False),
+    ("ftp://example.test/mcp", False),
+]
+
+
+def _url_entries():
+    for url, _ in URL_ENTRIES:
+        yield f"server {url}", {"url": url}
+        yield f"callbackUrl {url}", {"url": "https://e.test", "oauth": {"callbackUrl": url}}
+        yield f"authServerMetadataUrl {url}", {"url": "https://e.test", "oauth": {"authServerMetadataUrl": url}}
+
+
+@pytest.mark.parametrize("entries", [dict(_url_entries())], ids=["urls"])
+def test_exact_validation_never_accepts_what_pi_refuses(pi_reference, entries):
+    """An exact accept (strict check of the scenario) is an accept of pi; the guard never rejects what pi accepts."""
+    from airedale.pi_mcp import validate_server_config
+
+    names = {f"s{index}": label for index, label in enumerate(entries)}
+    request = {
+        "action": "mcp",
+        "global_file": {"mcpServers": {name: entries[label] for name, label in names.items()}},
+        "project_b64": None,
+    }
+    for version, answer in pi_reference(request).items():
+        accepted_by_pi = {names[server["name"]] for server in answer["servers"]}
+        for label, config in entries.items():
+            strict = not isinstance(validate_server_config("x", config, exact=True), str)
+            guard = not isinstance(validate_server_config("x", config), str)
+            if strict:
+                assert label in accepted_by_pi, (version, label, "strict check accepts what pi refuses")
+            if label in accepted_by_pi:
+                assert guard, (version, label, "guard refuses what pi accepts")

@@ -31,6 +31,106 @@
     ]
    }
   },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"s0\":{\"url\":\"http://[::1]/mcp\"},\"s1\":{\"oauth\":{\"callbackUrl\":\"http://[::1]/mcp\"},\"url\":\"https://e.test\"},\"s10\":{\"oauth\":{\"callbackUrl\":\"http://[fe80::1%eth0]:8080/mcp\"},\"url\":\"https://e.test\"},\"s11\":{\"oauth\":{\"authServerMetadataUrl\":\"http://[fe80::1%eth0]:8080/mcp\"},\"url\":\"https://e.test\"},\"s12\":{\"url\":\"http://[%]/mcp\"},\"s13\":{\"oauth\":{\"callbackUrl\":\"http://[%]/mcp\"},\"url\":\"https://e.test\"},\"s14\":{\"oauth\":{\"authServerMetadataUrl\":\"http://[%]/mcp\"},\"url\":\"https://e.test\"},\"s15\":{\"url\":\"http://[::1%]/mcp\"},\"s16\":{\"oauth\":{\"callbackUrl\":\"http://[::1%]/mcp\"},\"url\":\"https://e.test\"},\"s17\":{\"oauth\":{\"authServerMetadataUrl\":\"http://[::1%]/mcp\"},\"url\":\"https://e.test\"},\"s18\":{\"url\":\"https://example.test/mcp\"},\"s19\":{\"oauth\":{\"callbackUrl\":\"https://example.test/mcp\"},\"url\":\"https://e.test\"},\"s2\":{\"oauth\":{\"authServerMetadataUrl\":\"http://[::1]/mcp\"},\"url\":\"https://e.test\"},\"s20\":{\"oauth\":{\"authServerMetadataUrl\":\"https://example.test/mcp\"},\"url\":\"https://e.test\"},\"s21\":{\"url\":\"http://[not-an-ip]/mcp\"},\"s22\":{\"oauth\":{\"callbackUrl\":\"http://[not-an-ip]/mcp\"},\"url\":\"https://e.test\"},\"s23\":{\"oauth\":{\"authServerMetadataUrl\":\"http://[not-an-ip]/mcp\"},\"url\":\"https://e.test\"},\"s24\":{\"url\":\"http://[1::2::3]/mcp\"},\"s25\":{\"oauth\":{\"callbackUrl\":\"http://[1::2::3]/mcp\"},\"url\":\"https://e.test\"},\"s26\":{\"oauth\":{\"authServerMetadataUrl\":\"http://[1::2::3]/mcp\"},\"url\":\"https://e.test\"},\"s27\":{\"url\":\"http://a b/mcp\"},\"s28\":{\"oauth\":{\"callbackUrl\":\"http://a b/mcp\"},\"url\":\"https://e.test\"},\"s29\":{\"oauth\":{\"authServerMetadataUrl\":\"http://a b/mcp\"},\"url\":\"https://e.test\"},\"s3\":{\"url\":\"http://[::1%lo0]/mcp\"},\"s30\":{\"url\":\"ftp://example.test/mcp\"},\"s31\":{\"oauth\":{\"callbackUrl\":\"ftp://example.test/mcp\"},\"url\":\"https://e.test\"},\"s32\":{\"oauth\":{\"authServerMetadataUrl\":\"ftp://example.test/mcp\"},\"url\":\"https://e.test\"},\"s4\":{\"oauth\":{\"callbackUrl\":\"http://[::1%lo0]/mcp\"},\"url\":\"https://e.test\"},\"s5\":{\"oauth\":{\"authServerMetadataUrl\":\"http://[::1%lo0]/mcp\"},\"url\":\"https://e.test\"},\"s6\":{\"url\":\"http://[::1%25lo0]/mcp\"},\"s7\":{\"oauth\":{\"callbackUrl\":\"http://[::1%25lo0]/mcp\"},\"url\":\"https://e.test\"},\"s8\":{\"oauth\":{\"authServerMetadataUrl\":\"http://[::1%25lo0]/mcp\"},\"url\":\"https://e.test\"},\"s9\":{\"url\":\"http://[fe80::1%eth0]:8080/mcp\"}}},\"project_b64\":null}": {
+   "1.4.0": {
+    "error_count": 28,
+    "servers": [
+     {
+      "config": {
+       "url": "http://[::1]/mcp"
+      },
+      "name": "s0",
+      "scope": "global"
+     },
+     {
+      "config": {
+       "oauth": {
+        "callbackUrl": "http://[::1]/mcp"
+       },
+       "url": "https://e.test"
+      },
+      "name": "s1",
+      "scope": "global"
+     },
+     {
+      "config": {
+       "oauth": {
+        "authServerMetadataUrl": "http://[::1]/mcp"
+       },
+       "url": "https://e.test"
+      },
+      "name": "s2",
+      "scope": "global"
+     },
+     {
+      "config": {
+       "url": "https://example.test/mcp"
+      },
+      "name": "s18",
+      "scope": "global"
+     },
+     {
+      "config": {
+       "oauth": {
+        "authServerMetadataUrl": "https://example.test/mcp"
+       },
+       "url": "https://e.test"
+      },
+      "name": "s20",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 28,
+    "servers": [
+     {
+      "config": {
+       "url": "http://[::1]/mcp"
+      },
+      "name": "s0",
+      "scope": "global"
+     },
+     {
+      "config": {
+       "oauth": {
+        "callbackUrl": "http://[::1]/mcp"
+       },
+       "url": "https://e.test"
+      },
+      "name": "s1",
+      "scope": "global"
+     },
+     {
+      "config": {
+       "oauth": {
+        "authServerMetadataUrl": "http://[::1]/mcp"
+       },
+       "url": "https://e.test"
+      },
+      "name": "s2",
+      "scope": "global"
+     },
+     {
+      "config": {
+       "url": "https://example.test/mcp"
+      },
+      "name": "s18",
+      "scope": "global"
+     },
+     {
+      "config": {
+       "oauth": {
+        "authServerMetadataUrl": "https://example.test/mcp"
+       },
+       "url": "https://e.test"
+      },
+      "name": "s20",
+      "scope": "global"
+     }
+    ]
+   }
+  },
   "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"77u/eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJjb21tYW5kIjogInByb2plY3QifX19\"}": {
    "1.4.0": {
     "error_count": 0,
