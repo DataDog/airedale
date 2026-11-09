@@ -172,7 +172,7 @@ def pi_skill_dirs(skill_dirs: list[str], cwd: str) -> list[str]:
     """
     scenario: list[str] = []
     names: dict[str, str] = {}
-    real_paths: set[str] = set()  # Pi skips a skill file that it already loaded (a symlink to it) without a word.
+    real_paths: dict[str, tuple[str, Path]] = {}  # Pi skips a skill file that it already loaded (a link to it) quietly.
     for skill_dir in skill_dirs:
         source_path = Path(skill_dir).resolve()
         if not source_path.exists():
@@ -182,11 +182,12 @@ def pi_skill_dirs(skill_dirs: list[str], cwd: str) -> list[str]:
         for name, skill_file in _pi_skills(source_path):
             real = os.path.realpath(skill_file)
             if real in real_paths:
+                _check_same_name_through_aliases(real_paths[real], name, skill_file)
                 continue
             if name in names:
                 raise ValueError(f"Skill '{name}' (scenario skill {skill_file}) collides with {names[name]}")
             names[name] = f"scenario skill {skill_file}"
-            real_paths.add(real)
+            real_paths[real] = (name, skill_file)
         scenario.append(str(source_path))
 
     workspace = Path(cwd)
@@ -206,7 +207,9 @@ def pi_skill_dirs(skill_dirs: list[str], cwd: str) -> list[str]:
         for name, skill_file in _pi_skills(path):
             real = os.path.realpath(skill_file)
             if real in real_paths:
-                continue  # The same file through a symlink: pi loads it once and does not report a collision.
+                # The same file through a symlink: pi loads it once and does not report a collision.
+                _check_same_name_through_aliases(real_paths[real], name, skill_file)
+                continue
             if name in names:
                 raise ValueError(
                     f"Skill '{name}' (project skill {skill_file}) collides with {names[name]}; "
@@ -217,7 +220,7 @@ def pi_skill_dirs(skill_dirs: list[str], cwd: str) -> list[str]:
                 logger.warning("Project skill %s shadowed by %s", skill_file, seen_project[name])
                 continue
             seen_project[name] = str(skill_file)
-            real_paths.add(real)
+            real_paths[real] = (name, skill_file)
         project.append(str(path))
     return [*scenario, *project]
 
@@ -258,6 +261,24 @@ def _expand_pi_home(entry: str) -> Path:
         # ``<home>/extra``; ``Path.home() / "/extra"`` would be ``/extra``).
         return Path(os.path.normpath(f"{Path.home()}{os.sep}{entry[2:]}"))
     return Path(entry)
+
+
+def _check_same_name_through_aliases(loaded: tuple[str, Path], name: str, skill_file: Path) -> None:
+    """Raise when one skill file, reached through two links, gets two names.
+
+    A skill without ``name`` takes the name of its parent directory. Pi loads the file once, from the alias that it
+    reads first, and the order in which the system lists a directory is not the same on every system: with different
+    names for the aliases, the skill that pi loads (and the collisions it reports) depend on the system. The run is
+    refused. Aliases with the same name are the same skill whichever one pi reads first.
+    """
+    loaded_name, loaded_file = loaded
+    if loaded_name != name:
+        raise ValueError(
+            f"Skill file {os.path.realpath(skill_file)} is reached through links as '{loaded_name}' "
+            f"({loaded_file}) and as '{name}' ({skill_file}). It has no 'name', so pi takes the name of the parent "
+            "directory of the link that it reads first, and the order of the directory listing depends on the "
+            "system. Give the skill a 'name' or remove one of the links"
+        )
 
 
 def _refuse_link_cycle(directory: Path, root: Path, ancestors: frozenset[str]) -> frozenset[str]:

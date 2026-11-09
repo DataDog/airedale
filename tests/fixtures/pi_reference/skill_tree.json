@@ -373,6 +373,26 @@
     ]
    }
   },
+  "{\"action\":\"skill_tree\",\"files\":{\"shared/B/zzzz.md\":\"---\\ndescription: d\\n---\\n\"},\"links\":{\".agents/skills/p/foo\":\"shared/B\",\".agents/skills/q/foo\":\"shared/B\"}}": {
+   "1.4.0": {
+    "collisions": 0,
+    "skills": [
+     [
+      "foo",
+      "shared/B/zzzz.md"
+     ]
+    ]
+   },
+   "1.5.0": {
+    "collisions": 0,
+    "skills": [
+     [
+      "foo",
+      "shared/B/zzzz.md"
+     ]
+    ]
+   }
+  },
   "{\"action\":\"skill_tree\",\"files\":{\"shared/beta/SKILL.md\":\"---\\nname: beta\\ndescription: d\\n---\\n\"},\"links\":{\".pi/skills/one\":\"shared/beta\",\".pi/skills/two\":\"shared/beta\"}}": {
    "1.4.0": {
     "collisions": 0,

@@ -657,17 +657,13 @@ SKILL_TREES = {
         {"shared/d/x.md": _md("x"), "shared/d/y/SKILL.md": _md("y")},
         {".agents/skills/one": "shared/d", ".pi/skills/two": "shared/d"},
     ),
-    "link to a directory of a skill with no name, by two aliases": (
-        {"shared/B/zzzz.md": "---\ndescription: d\n---\n"},
-        {".agents/skills/ax": "shared/B", ".agents/skills/by": "shared/B"},
-    ),
-    "link to a directory of a skill with no name, by two hops": (
-        {"shared/B/zzzz.md": "---\ndescription: d\n---\n"},
-        {"shared/b-alias": "shared/B", ".agents/skills/ax": "shared/b-alias", ".agents/skills/by": "shared/B"},
-    ),
     "link to the project (hidden directories are skipped)": (
         {".agents/skills/s/x.md": _md("x"), ".pi/skills/loose.md": _md("loose"), "docs/d/SKILL.md": _md("d")},
         {".agents/skills/s/home": "", ".pi/skills/home": ""},
+    ),
+    "nameless skill reached by links with the same name": (
+        {"shared/B/zzzz.md": "---\ndescription: d\n---\n"},
+        {".agents/skills/p/foo": "shared/B", ".agents/skills/q/foo": "shared/B"},
     ),
     "same name in two directories, one linked to the other (no cycle)": (
         {".agents/skills/a/zz-after.md": _md("shared", "A"), ".agents/skills/b/zz-after.md": _md("shared", "B")},
@@ -681,15 +677,6 @@ SKILL_TREES = {
         {"shared/p/SKILL.md": _md("shared", "P"), "shared/q/SKILL.md": _md("shared", "Q")},
         {".agents/skills/one": "shared/q", ".pi/skills/two": "shared/p", ".pi/skills/three": "shared/q"},
     ),
-    "links in a chain (no cycle), names from the directories": (
-        {"shared/z/n.md": "---\ndescription: d\n---\n"},
-        {
-            "shared/y": "shared/z",
-            "shared/x": "shared/y",
-            ".agents/skills/b": "shared/x",
-            ".agents/skills/a": "shared/y",
-        },
-    ),
     "same name in two files": (
         {".agents/skills/e/loose.md": _md("same"), ".agents/skills/d/SKILL.md": _md("same")},
         {},
@@ -699,6 +686,62 @@ SKILL_TREES = {
         {".agents/skills/one": "shared/one"},
     ),
 }
+
+#: Trees where a skill with no ``name`` is reached through links whose parent directories have different names: pi
+#: takes the name of the link that it reads first (the order of the listing of the system), so the run is refused.
+ALIAS_TREES = {
+    "link to a directory of a skill with no name, by two aliases": (
+        {"shared/B/zzzz.md": "---\ndescription: d\n---\n"},
+        {".agents/skills/ax": "shared/B", ".agents/skills/by": "shared/B"},
+    ),
+    "link to a directory of a skill with no name, by two hops": (
+        {"shared/B/zzzz.md": "---\ndescription: d\n---\n"},
+        {"shared/b-alias": "shared/B", ".agents/skills/ax": "shared/b-alias", ".agents/skills/by": "shared/B"},
+    ),
+    "links in a chain (no cycle), names from the directories": (
+        {"shared/z/n.md": "---\ndescription: d\n---\n"},
+        {
+            "shared/y": "shared/z",
+            "shared/x": "shared/y",
+            ".agents/skills/b": "shared/x",
+            ".agents/skills/a": "shared/y",
+        },
+    ),
+}
+
+
+@pytest.mark.parametrize("label", ALIAS_TREES)
+def test_skill_without_name_reached_by_links_with_different_names_is_refused(tmp_path, label):
+    files, links = ALIAS_TREES[label]
+    cwd = tmp_path / "cwd"
+    _write_tree(cwd, files, links)
+    with pytest.raises(ValueError, match="no 'name'") as error:
+        pi_skill_dirs([], str(cwd))
+    assert "ax" in str(error.value) or "a'" in str(error.value) or "b'" in str(error.value)
+
+
+def test_skill_without_name_in_the_scenario_and_in_the_project_under_two_names_is_refused(tmp_path):
+    scenario = tmp_path / "scenario" / "one"
+    scenario.mkdir(parents=True)
+    (scenario / "n.md").write_text("---\ndescription: d\n---\n")
+    cwd = tmp_path / "cwd"
+    (cwd / ".agents" / "skills").mkdir(parents=True)
+    (cwd / ".agents" / "skills" / "other").symlink_to(scenario, target_is_directory=True)
+    with pytest.raises(ValueError, match="no 'name'"):
+        pi_skill_dirs([str(scenario)], str(cwd))
+
+
+def test_skill_without_name_with_the_same_name_through_each_link_is_kept(tmp_path):
+    # Both links are called ``foo``: the skill is ``foo`` whichever link pi reads first.
+    files = {"shared/B/zzzz.md": "---\ndescription: d\n---\n"}
+    links = {".agents/skills/p/foo": "shared/B", ".agents/skills/q/foo": "shared/B"}
+    cwd = tmp_path / "cwd"
+    _write_tree(cwd, files, links)
+    assert pi_skill_dirs([], str(cwd)) == [
+        str(cwd / ".agents/skills/p/foo/zzzz.md"),
+        str(cwd / ".agents/skills/q/foo/zzzz.md"),
+    ]
+
 
 #: Trees with a cycle: refused before pi starts.
 CYCLIC_TREES = {
