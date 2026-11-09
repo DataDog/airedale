@@ -827,8 +827,10 @@ class TestLoadExperimentErrors:
         prompt = "p"
         criteria = ["c"]
         """
-        with pytest.raises(ConfigError, match="unsupported type"):
+        with pytest.raises(ConfigError, match="unsupported type") as error:
             load_experiment(write_toml(tmp_path, toml))
+        assert "sse" not in str(error.value)  # The value of the type is not echoed.
+        assert "'bad'" in str(error.value)
 
     def test_task_empty_criteria(self, tmp_path):
         toml = """

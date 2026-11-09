@@ -122,7 +122,7 @@ class McpServerSpec:
             return McpStdioServerConfig(
                 type="stdio", command=self._require_command(), args=list[str](self.args), env=dict[str, str](self.env)
             )
-        raise ValueError(f"MCP server {self.name!r} has unsupported type {self.type!r}")
+        raise ValueError(f"MCP server {self.name!r} has unsupported type (expected 'stdio' or 'http')")
 
     def to_codex_config_overrides(self, trace_headers: Mapping[str, str]) -> list[str]:
         """Render this spec as Codex CLI config override strings."""
@@ -141,7 +141,7 @@ class McpServerSpec:
             if self.env:
                 overrides.append(f"{key_prefix}.env={_toml_value(dict(self.env))}")
             return overrides
-        raise ValueError(f"MCP server {self.name!r} has unsupported type {self.type!r}")
+        raise ValueError(f"MCP server {self.name!r} has unsupported type (expected 'stdio' or 'http')")
 
     def to_pi_config(self, trace_headers: Mapping[str, str]) -> dict[str, Any]:
         """Render this spec as a pi ``mcp.json`` ``mcpServers`` entry.
@@ -168,7 +168,7 @@ class McpServerSpec:
             if self.env:
                 entry["env"] = {name: pi_literal(value) for name, value in self.env.items()}
         else:
-            raise ValueError(f"MCP server {self.name!r} has unsupported type {self.type!r}")
+            raise ValueError(f"MCP server {self.name!r} has unsupported type (expected 'stdio' or 'http')")
         tool_names = configured_tool_names(self)
         if any("*" in tool_name for tool_name in tool_names):
             # Pi reads `*` in a `toolExposure` key as a pattern; `tool_names`
@@ -553,7 +553,7 @@ async def _list_mcp_tools(
         ):
             await session.initialize()
             return await _list_all_tools(session) if all_pages else list((await session.list_tools()).tools)
-    raise ValueError(f"MCP server {server.name!r} has unsupported type {server.type!r}")
+    raise ValueError(f"MCP server {server.name!r} has unsupported type (expected 'stdio' or 'http')")
 
 
 #: Most ``tools/list`` pages read from one server (a bad server cannot loop).

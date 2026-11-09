@@ -148,6 +148,30 @@ class TestToClaudeConfig:
         with pytest.raises(ValueError, match="unsupported type"):
             spec.to_claude_config({})
 
+    @pytest.mark.parametrize("method", ["to_claude_config", "to_codex_config_overrides", "to_pi_config"])
+    def test_unsupported_type_error_does_not_quote_the_type(self, method):
+        # The value is not echoed: it can be anything the user wrote (a pasted token, a URL with a key).
+        marker = "SECRET-TYPE-MARKER-0123"
+        spec = McpServerSpec(name="bad", url="http://localhost/mcp")
+        object.__setattr__(spec, "type", marker)
+        with pytest.raises(ValueError, match="unsupported type") as error:
+            getattr(spec, method)({})
+        assert marker not in str(error.value)
+        assert "'bad'" in str(error.value)  # The server name stays.
+        assert "'stdio' or 'http'" in str(error.value)  # And the expected types.
+
+    def test_unsupported_type_error_of_the_tool_listing_does_not_quote_the_type(self):
+        import asyncio
+
+        from airedale.mcp import _list_mcp_tools
+
+        marker = "SECRET-TYPE-MARKER-0123"
+        spec = McpServerSpec(name="bad", url="http://localhost/mcp")
+        object.__setattr__(spec, "type", marker)
+        with pytest.raises(ValueError, match="unsupported type") as error:
+            asyncio.run(_list_mcp_tools(spec, {}))
+        assert marker not in str(error.value)
+
 
 # ---------------------------------------------------------------------------
 # to_codex_config_overrides

@@ -70,9 +70,7 @@ class McpServerConfig:
         has_command = self.command is not None
 
         if self.type is not None and self.type not in ("stdio", "http"):
-            raise ConfigError(
-                f"MCP server '{self.name}' has unsupported type '{self.type}' (expected 'stdio' or 'http')"
-            )
+            raise ConfigError(f"MCP server '{self.name}' has unsupported type (expected 'stdio' or 'http')")
 
         if self.type is not None:
             resolved = self.type
