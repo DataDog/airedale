@@ -4052,3 +4052,61 @@ class TestTranscriptCallNamesTheSameTool:
         for version, events in pi_reference({"action": "parallel"}).items():
             error = _collect(events).result(model=MODEL, returncode=0, stderr_tail="").error
             assert error is not None and "at the same time" in str(error), version
+
+
+class TestEmptyNameIsNotTheToolCalledUnknown:
+    """An empty name is shown as "unknown", but it is not the tool that is literally called "unknown"."""
+
+    @staticmethod
+    def _events(start, end, block):
+        events = _events_tool_run()
+        events[4]["message"]["content"][2]["name"] = block
+        for event in events:
+            if event["type"] == "tool_execution_start":
+                event["toolName"] = start
+            elif event["type"] == "tool_execution_end":
+                event["toolName"] = end
+        return events
+
+    @pytest.mark.parametrize(("start", "end"), [("unknown", ""), ("", "unknown")])
+    def test_end_record_with_the_other_spelling_is_malformed(self, start, end):
+        collector = _collect(self._events(start, end, start))
+        assert collector.invalid_lines == 1
+        assert not collector.tool_executions[0].finished
+        assert "malformed JSONL" in str(collector.result(model=MODEL, returncode=0, stderr_tail="").error)
+
+    @pytest.mark.parametrize(("execution", "block"), [("unknown", ""), ("", "unknown")])
+    def test_transcript_call_with_the_other_spelling_does_not_take_the_result(self, execution, block):
+        result = _collect(self._events(execution, execution, block)).result(model=MODEL, returncode=0, stderr_tail="")
+        assert result.error is not None and "not the one of the same call" in str(result.error)
+        assert [call.result for call in result.tool_calls] == [None]
+
+    @pytest.mark.parametrize("name", ["", "unknown", "ls"])
+    def test_the_same_name_in_the_three_places_is_matched(self, name):
+        result = _collect(self._events(name, name, name)).result(model=MODEL, returncode=0, stderr_tail="")
+        assert result.error is None
+        assert [call.result for call in result.tool_calls] == ["(empty directory)"]
+
+    @pytest.mark.parametrize(("start", "end"), [("unknown", ""), ("", "unknown")])
+    def test_span_recorder_does_not_give_the_result_to_the_other_spelling(self, start, end):
+        from airedale.harness.pi_spans import PiSpanRecorder
+
+        recorder = PiSpanRecorder(model=MODEL, sdk_name="pi", harness="h", prompt_version="v")
+        recorder.feed({"type": "tool_execution_start", "toolCallId": "c1", "toolName": start, "args": {}})
+        recorder.feed(
+            {"type": "tool_execution_end", "toolCallId": "c1", "toolName": end, "result": "SECRET", "isError": False}
+        )
+        recorder.close_tool("c1", 1)
+        assert [record.name for record in recorder.records] == ["unknown"]
+        assert not recorder.records[0].output_data
+
+    @pytest.mark.parametrize("name", ["", "unknown"])
+    def test_span_recorder_matches_the_same_spelling(self, name):
+        from airedale.harness.pi_spans import PiSpanRecorder
+
+        recorder = PiSpanRecorder(model=MODEL, sdk_name="pi", harness="h", prompt_version="v")
+        recorder.feed({"type": "tool_execution_start", "toolCallId": "c1", "toolName": name, "args": {}})
+        recorder.feed(
+            {"type": "tool_execution_end", "toolCallId": "c1", "toolName": name, "result": "out", "isError": False}
+        )
+        assert [record.output_data for record in recorder.records] == ["out"]

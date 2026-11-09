@@ -356,6 +356,9 @@ class _OpenTool:
     #: End of the model call that asked for the tool: the tool cannot start
     #: before it (``None`` when not known).
     earliest_start_ns: int | None = None
+    #: ``toolName`` as pi wrote it. The span name is "unknown" for an empty name, but a tool that is literally called
+    #: "unknown" is another tool: the end record is compared with this value.
+    raw_name: str = ""
 
 
 @dataclass
@@ -647,6 +650,7 @@ class PiSpanRecorder:
             self.close_tool(tool_id, now, error="tool started again before it ended")
         parent_record, fallback = self._parent_at_start(parent_id)
         self._open_tools[tool_id] = _OpenTool(
+            raw_name=str(event.get("toolName")),
             record=record,
             parent_id=parent_id,
             parent_record=parent_record,
@@ -660,7 +664,7 @@ class PiSpanRecorder:
     def _on_tool_end(self, event: dict[str, Any], now: int) -> None:
         tool_id = str(event.get("toolCallId") or "")
         open_tool = self._open_tools.get(tool_id)
-        if open_tool is not None and open_tool.record.name != str(event.get("toolName") or "unknown"):
+        if open_tool is not None and open_tool.raw_name != event.get("toolName"):
             # Pi repeats the name of the start record in the end record (the run fails on a record that does not):
             # the result is not given to the span of another tool.
             logger.debug("Ignoring the end record of tool call %r: the tool name is not the one of its start", tool_id)
@@ -680,6 +684,7 @@ class PiSpanRecorder:
                 record.metadata["parent_tool_id"] = parent_id
             parent_record, fallback = self._parent_at_start(parent_id)
             open_tool = _OpenTool(
+                raw_name=str(event.get("toolName")),
                 record=record,
                 parent_id=parent_id,
                 parent_record=parent_record,

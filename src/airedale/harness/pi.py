@@ -1442,6 +1442,9 @@ def _signal_group(process: asyncio.subprocess.Process, sig: int) -> None:
 @dataclass(eq=False)  # Compared by identity: pi can reuse a ``toolCallId``.
 class _ToolExecution:
     tool_name: str
+    #: ``toolName`` as pi wrote it. ``tool_name`` shows "unknown" for an empty name, but a tool that is literally
+    #: called "unknown" is another tool: matches by name compare this value.
+    raw_name: str = ""
     #: ``toolCallId`` as pi sent it (can be "": pi can use it as an id).
     tool_id: str = ""
     args: Any = None
@@ -1652,8 +1655,8 @@ class _PiEventCollector:
         if not open_executions:
             return False
         # (With several open calls of one id the run fails anyway, as the results cannot be matched: see ``_end_execution``.)
-        name = str(event.get("toolName") or "unknown")
-        return all(execution.tool_name != name for execution in open_executions)
+        name = event.get("toolName")
+        return all(execution.raw_name != name for execution in open_executions)
 
     def _end_execution(self, tool_id: str) -> _ToolExecution | None:
         """Return the open execution that an end record closes (``None``: no start record).
@@ -1687,6 +1690,7 @@ class _PiEventCollector:
         tool_id = str(event.get("toolCallId") or "")
         execution = _ToolExecution(
             tool_name=str(event.get("toolName") or "unknown"),
+            raw_name=str(event.get("toolName")),
             tool_id=tool_id,
             args=args,
             parent_id=_parent_tool_id(event),
@@ -1830,7 +1834,7 @@ class _PiEventCollector:
                         next_index[tool_id] = position + 1
                         candidates = by_id.get(tool_id, [])
                         execution = candidates[position] if position < len(candidates) else None
-                        if execution is not None and execution.tool_name != str(block.get("name") or "unknown"):
+                        if execution is not None and execution.raw_name != block.get("name"):
                             # Pi runs the tool calls of the message it wrote, and writes ``toolCall.name`` in
                             # both places (``agent-loop.js``, pi 1.4.0 and 1.5.0): another name is a damaged
                             # record. The result is not given to a call with another name.
