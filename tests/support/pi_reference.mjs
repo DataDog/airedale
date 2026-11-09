@@ -101,8 +101,7 @@ if (request.action === "mcp") {
     .filter((skill) => !skill.file.startsWith(".."));
   console.log(
     JSON.stringify({
-      files: inside.map((skill) => skill.file).sort(),
-      names: inside.map((skill) => skill.name).sort(),
+      skills: inside.map((skill) => [skill.name, skill.file]).sort(),
       collisions: result.diagnostics.filter((item) => item.type === "collision").length,
     }),
   );

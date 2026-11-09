@@ -69,6 +69,26 @@
     ]
    }
   },
+  "{\"action\":\"skill_tree\",\"files\":{\".agents/skills/d/SKILL.md\":\"---\\nname: same\\ndescription: d\\n---\\n\",\".agents/skills/e/loose.md\":\"---\\nname: same\\ndescription: d\\n---\\n\"},\"links\":{}}": {
+   "1.4.0": {
+    "collisions": 1,
+    "skills": [
+     [
+      "same",
+      ".agents/skills/d/SKILL.md"
+     ]
+    ]
+   },
+   "1.5.0": {
+    "collisions": 1,
+    "skills": [
+     [
+      "same",
+      ".agents/skills/d/SKILL.md"
+     ]
+    ]
+   }
+  },
   "{\"action\":\"skill_tree\",\"files\":{\".agents/skills/d/SKILL.md\":\"---\\nname: same\\ndescription: d\\n---\\n\",\".agents/skills/loose.md\":\"---\\nname: same\\ndescription: d\\n---\\n\"},\"links\":{\".agents/skills/loop\":\".agents/skills\"}}": {
    "1.4.0": {
     "collisions": 1,
@@ -106,6 +126,42 @@
     ],
     "names": [
      "loose"
+    ]
+   }
+  },
+  "{\"action\":\"skill_tree\",\"files\":{\".agents/skills/s/x.md\":\"---\\nname: x\\ndescription: d\\n---\\n\",\".pi/skills/loose.md\":\"---\\nname: loose\\ndescription: d\\n---\\n\",\"docs/d/SKILL.md\":\"---\\nname: d\\ndescription: d\\n---\\n\"},\"links\":{\".agents/skills/s/home\":\"\",\".pi/skills/home\":\"\"}}": {
+   "1.4.0": {
+    "collisions": 0,
+    "skills": [
+     [
+      "d",
+      "docs/d/SKILL.md"
+     ],
+     [
+      "loose",
+      ".pi/skills/loose.md"
+     ],
+     [
+      "x",
+      ".agents/skills/s/x.md"
+     ]
+    ]
+   },
+   "1.5.0": {
+    "collisions": 0,
+    "skills": [
+     [
+      "d",
+      "docs/d/SKILL.md"
+     ],
+     [
+      "loose",
+      ".pi/skills/loose.md"
+     ],
+     [
+      "x",
+      ".agents/skills/s/x.md"
+     ]
     ]
    }
   },
@@ -197,43 +253,131 @@
     ]
    }
   },
+  "{\"action\":\"skill_tree\",\"files\":{\".pi/skills/two/SKILL.md\":\"---\\nname: same\\ndescription: d\\n---\\n\",\"shared/one/SKILL.md\":\"---\\nname: same\\ndescription: d\\n---\\n\"},\"links\":{\".agents/skills/one\":\"shared/one\"}}": {
+   "1.4.0": {
+    "collisions": 1,
+    "skills": [
+     [
+      "same",
+      ".pi/skills/two/SKILL.md"
+     ]
+    ]
+   },
+   "1.5.0": {
+    "collisions": 1,
+    "skills": [
+     [
+      "same",
+      ".pi/skills/two/SKILL.md"
+     ]
+    ]
+   }
+  },
   "{\"action\":\"skill_tree\",\"files\":{\"notes/n.md\":\"---\\nname: n\\ndescription: d\\n---\\n\"},\"links\":{\".agents/skills/d/link.md\":\"notes/n.md\",\".pi/skills/link.md\":\"notes/n.md\"}}": {
    "1.4.0": {
     "collisions": 0,
-    "files": [
-     "notes/n.md"
-    ],
-    "names": [
-     "n"
+    "skills": [
+     [
+      "n",
+      "notes/n.md"
+     ]
     ]
    },
    "1.5.0": {
     "collisions": 0,
-    "files": [
-     "notes/n.md"
-    ],
-    "names": [
-     "n"
+    "skills": [
+     [
+      "n",
+      "notes/n.md"
+     ]
+    ]
+   }
+  },
+  "{\"action\":\"skill_tree\",\"files\":{\"shared/B/zzzz.md\":\"---\\ndescription: d\\n---\\n\"},\"links\":{\".agents/skills/ax\":\"shared/B\",\".agents/skills/by\":\"shared/B\"}}": {
+   "1.4.0": {
+    "collisions": 0,
+    "skills": [
+     [
+      "ax",
+      "shared/B/zzzz.md"
+     ]
+    ]
+   },
+   "1.5.0": {
+    "collisions": 0,
+    "skills": [
+     [
+      "ax",
+      "shared/B/zzzz.md"
+     ]
+    ]
+   }
+  },
+  "{\"action\":\"skill_tree\",\"files\":{\"shared/B/zzzz.md\":\"---\\ndescription: d\\n---\\n\"},\"links\":{\".agents/skills/ax\":\"shared/b-alias\",\".agents/skills/by\":\"shared/B\",\"shared/b-alias\":\"shared/B\"}}": {
+   "1.4.0": {
+    "collisions": 0,
+    "skills": [
+     [
+      "ax",
+      "shared/B/zzzz.md"
+     ]
+    ]
+   },
+   "1.5.0": {
+    "collisions": 0,
+    "skills": [
+     [
+      "ax",
+      "shared/B/zzzz.md"
+     ]
     ]
    }
   },
   "{\"action\":\"skill_tree\",\"files\":{\"shared/beta/SKILL.md\":\"---\\nname: beta\\ndescription: d\\n---\\n\"},\"links\":{\".pi/skills/one\":\"shared/beta\",\".pi/skills/two\":\"shared/beta\"}}": {
    "1.4.0": {
     "collisions": 0,
-    "files": [
-     "shared/beta/SKILL.md"
-    ],
-    "names": [
-     "beta"
+    "skills": [
+     [
+      "beta",
+      "shared/beta/SKILL.md"
+     ]
     ]
    },
    "1.5.0": {
     "collisions": 0,
-    "files": [
-     "shared/beta/SKILL.md"
-    ],
-    "names": [
-     "beta"
+    "skills": [
+     [
+      "beta",
+      "shared/beta/SKILL.md"
+     ]
+    ]
+   }
+  },
+  "{\"action\":\"skill_tree\",\"files\":{\"shared/d/x.md\":\"---\\nname: x\\ndescription: d\\n---\\n\",\"shared/d/y/SKILL.md\":\"---\\nname: y\\ndescription: d\\n---\\n\"},\"links\":{\".agents/skills/one\":\"shared/d\",\".pi/skills/two\":\"shared/d\"}}": {
+   "1.4.0": {
+    "collisions": 0,
+    "skills": [
+     [
+      "x",
+      "shared/d/x.md"
+     ],
+     [
+      "y",
+      "shared/d/y/SKILL.md"
+     ]
+    ]
+   },
+   "1.5.0": {
+    "collisions": 0,
+    "skills": [
+     [
+      "x",
+      "shared/d/x.md"
+     ],
+     [
+      "y",
+      "shared/d/y/SKILL.md"
+     ]
     ]
    }
   }

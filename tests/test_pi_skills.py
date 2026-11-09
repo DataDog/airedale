@@ -537,16 +537,54 @@ def test_two_links_to_one_project_skill_load_it_once(tmp_path, caplog):
     assert "shadowed" not in caplog.text
 
 
-def test_symlink_to_a_directory_above_does_not_loop(tmp_path):
+def test_symlink_to_a_directory_above_is_refused(tmp_path):
     cwd = tmp_path / "cwd"
     root = cwd / ".pi" / "skills"
     _skill(root / "team" / "gamma", "gamma")
-    (root / "team" / "up").symlink_to(root, target_is_directory=True)  # A link to an ancestor.
-    (root / "team" / "up2").symlink_to(cwd, target_is_directory=True)
+    link = root / "team" / "up"
+    link.symlink_to(root, target_is_directory=True)  # A link to an ancestor.
+    with pytest.raises(ValueError, match="symbolic link cycle") as error:
+        pi_skill_dirs([], str(cwd))
+    assert str(root) in str(error.value)
+    assert str(link) in str(error.value)
+
+
+def test_link_to_the_project_is_not_a_cycle_because_hidden_directories_are_skipped(tmp_path):
+    # The walk of the project does not enter ``.agents`` or ``.pi``, so it never comes back: pi loads the same files.
+    cwd = tmp_path / "cwd"
     agents = cwd / ".agents" / "skills"
     _skill(agents / "team" / "delta", "delta")
-    (agents / "team" / "up").symlink_to(agents, target_is_directory=True)
-    assert pi_skill_dirs([], str(cwd)) == [str(root), str(agents / "team" / "delta" / "SKILL.md")]
+    (agents / "team" / "up").symlink_to(cwd, target_is_directory=True)
+    assert pi_skill_dirs([], str(cwd)) == [str(agents / "team" / "delta" / "SKILL.md")]
+
+
+def test_cycle_in_a_scenario_skill_directory_is_refused(tmp_path):
+    scenario = tmp_path / "scenario"
+    _skill(scenario / "one", "one")
+    (scenario / "back").symlink_to(scenario, target_is_directory=True)
+    with pytest.raises(ValueError, match="symbolic link cycle") as error:
+        pi_skill_dirs([str(scenario)], str(tmp_path / "cwd"))
+    assert str(scenario) in str(error.value)
+
+
+def test_cycle_below_a_skill_directory_is_not_walked_and_not_refused(tmp_path):
+    # Pi does not go below a directory with SKILL.md, so the link is never followed.
+    cwd = tmp_path / "cwd"
+    root = cwd / ".pi" / "skills"
+    skill = _skill(root / "gamma", "gamma")
+    (skill / "back").symlink_to(root, target_is_directory=True)
+    assert pi_skill_dirs([], str(cwd)) == [str(root)]
+
+
+def test_the_error_of_a_cycle_has_no_file_content(tmp_path):
+    cwd = tmp_path / "cwd"
+    root = cwd / ".agents" / "skills"
+    root.mkdir(parents=True)
+    (root / "loose.md").write_text("---\nname: x\ndescription: SECRET-BODY\n---\n")
+    (root / "loop").symlink_to(root, target_is_directory=True)
+    with pytest.raises(ValueError) as error:
+        pi_skill_dirs([], str(cwd))
+    assert "SECRET-BODY" not in str(error.value)
 
 
 def test_broken_symlink_is_skipped(tmp_path):
@@ -603,77 +641,135 @@ def _md(name):
     return f"---\nname: {name}\ndescription: d\n---\n"
 
 
-#: Trees with links (path -> content, path -> target): what pi loads from them, by the real path of each file.
+#: Trees with links but no cycle (path -> content, path -> target): the skills that pi loads from them, as pairs of a
+#: name and a real file. Trees with a cycle are refused (see above): pi follows them until the system refuses, and
+#: the aliases that it meets first depend on the system.
 SKILL_TREES = {
-    "agents loose file and a link to the root": (
-        {".agents/skills/loose.md": _md("loose")},
-        {".agents/skills/loop": ".agents/skills"},
-    ),
-    "agents loose file, link below a directory": (
-        {".agents/skills/loose.md": _md("loose"), ".agents/skills/a/x.md": _md("x")},
-        {".agents/skills/a/back": ".agents/skills"},
-    ),
-    "pi loose file and a link to the root": (
-        {".pi/skills/loose.md": _md("loose")},
-        {".pi/skills/loop": ".pi/skills"},
-    ),
-    "pi skill directory and links above": (
-        {".pi/skills/team/gamma/SKILL.md": _md("gamma")},
-        {".pi/skills/team/up": ".pi/skills", ".pi/skills/team/up2": ""},
-    ),
-    "agents skill directory and a link above": (
-        {".agents/skills/team/delta/SKILL.md": _md("delta"), ".agents/skills/top.md": _md("top")},
-        {".agents/skills/team/up": ".agents/skills"},
-    ),
-    "agents root skill and a link": (
-        {".agents/skills/SKILL.md": _md("rootskill"), ".agents/skills/other.md": _md("other")},
-        {".agents/skills/loop": ".agents/skills"},
-    ),
-    "two links that point to each other": (
-        {".agents/skills/a/one.md": _md("one"), ".agents/skills/b/two.md": _md("two")},
-        {".agents/skills/a/to-b": ".agents/skills/b", ".agents/skills/b/to-a": ".agents/skills/a"},
-    ),
-    "link to the project": (
-        {".agents/skills/s/x.md": _md("x"), ".pi/skills/loose.md": _md("loose")},
-        {".agents/skills/s/home": "", ".pi/skills/home": ""},
+    "link to a markdown file": (
+        {"notes/n.md": _md("n")},
+        {".agents/skills/d/link.md": "notes/n.md", ".pi/skills/link.md": "notes/n.md"},
     ),
     "two links to one skill": (
         {"shared/beta/SKILL.md": _md("beta")},
         {".pi/skills/one": "shared/beta", ".pi/skills/two": "shared/beta"},
     ),
+    "two links to one directory in two roots": (
+        {"shared/d/x.md": _md("x"), "shared/d/y/SKILL.md": _md("y")},
+        {".agents/skills/one": "shared/d", ".pi/skills/two": "shared/d"},
+    ),
+    "link to a directory of a skill with no name, by two aliases": (
+        {"shared/B/zzzz.md": "---\ndescription: d\n---\n"},
+        {".agents/skills/ax": "shared/B", ".agents/skills/by": "shared/B"},
+    ),
+    "link to a directory of a skill with no name, by two hops": (
+        {"shared/B/zzzz.md": "---\ndescription: d\n---\n"},
+        {"shared/b-alias": "shared/B", ".agents/skills/ax": "shared/b-alias", ".agents/skills/by": "shared/B"},
+    ),
+    "link to the project (hidden directories are skipped)": (
+        {".agents/skills/s/x.md": _md("x"), ".pi/skills/loose.md": _md("loose"), "docs/d/SKILL.md": _md("d")},
+        {".agents/skills/s/home": "", ".pi/skills/home": ""},
+    ),
     "same name in two files": (
-        {".agents/skills/loose.md": _md("same"), ".agents/skills/d/SKILL.md": _md("same")},
+        {".agents/skills/e/loose.md": _md("same"), ".agents/skills/d/SKILL.md": _md("same")},
+        {},
+    ),
+    "link to a directory with a collision": (
+        {"shared/one/SKILL.md": _md("same"), ".pi/skills/two/SKILL.md": _md("same")},
+        {".agents/skills/one": "shared/one"},
+    ),
+}
+
+#: Trees with a cycle: refused before pi starts.
+CYCLIC_TREES = {
+    "agents loose file and a link to the root": (
+        {".agents/skills/loose.md": _md("loose")},
         {".agents/skills/loop": ".agents/skills"},
     ),
-    "link to a markdown file": (
-        {"notes/n.md": _md("n")},
-        {".agents/skills/d/link.md": "notes/n.md", ".pi/skills/link.md": "notes/n.md"},
+    "pi loose file and a link to the root": (
+        {".pi/skills/loose.md": _md("loose")},
+        {".pi/skills/loop": ".pi/skills"},
+    ),
+    "link below a directory": (
+        {".agents/skills/a/x.md": _md("x")},
+        {".agents/skills/a/back": ".agents/skills"},
+    ),
+    "two links that point to each other": (
+        {".agents/skills/a/one.md": _md("one"), ".agents/skills/b/two.md": _md("two")},
+        {".agents/skills/a/to-b": ".agents/skills/b", ".agents/skills/b/to-a": ".agents/skills/a"},
+    ),
+    "root skill and a link": (
+        {".agents/skills/team/y.md": _md("y")},
+        {".agents/skills/team/loop": ".agents/skills"},
+    ),
+    "cycle by two hops (the tree of the review)": (
+        {"shared/A/00.md": _md("alpha"), "shared/B/zzzz.md": "---\ndescription: d\n---\n"},
+        {
+            "shared/b-alias": "shared/B",
+            "shared/A/ax": "shared/b-alias",
+            "shared/A/by": "shared/B",
+            "shared/B/aa": "shared/A",
+            ".agents/skills/start": "shared/A",
+        },
     ),
 }
 
 
-@pytest.mark.parametrize("label", SKILL_TREES)
-def test_skills_of_a_tree_with_links_are_those_of_pi(pi_reference, tmp_path, label):
-    files, links = SKILL_TREES[label]
-    cwd = tmp_path / "cwd"
-    cwd.mkdir()
+def _write_tree(cwd, files, links):
+    cwd.mkdir(exist_ok=True)
     for path, content in files.items():
         (cwd / path).parent.mkdir(parents=True, exist_ok=True)
         (cwd / path).write_text(content)
-    for path, target in links.items():
+    for path in links:
         (cwd / path).parent.mkdir(parents=True, exist_ok=True)
-        (cwd / path).symlink_to(cwd / target, target_is_directory=(cwd / target).is_dir())
-    names: dict[str, str] = {}  # Pi keeps the first skill of a name (and loads a real file once).
+    for path, target in links.items():
+        (cwd / path).symlink_to(cwd / target, target_is_directory=not target.endswith(".md"))
+
+
+@pytest.mark.parametrize("label", CYCLIC_TREES)
+def test_trees_with_a_link_cycle_are_refused(tmp_path, label):
+    files, links = CYCLIC_TREES[label]
+    cwd = tmp_path / "cwd"
+    _write_tree(cwd, files, links)
+    with pytest.raises(ValueError, match="symbolic link cycle"):
+        pi_skill_dirs([], str(cwd))
+
+
+def test_the_collision_of_the_review_with_a_cycle_is_refused_not_missed(tmp_path):
+    # Pi names a skill with no ``name`` from the parent directory of the alias that it meets first: ``ax`` or ``by``
+    # depending on the system. A scenario skill ``by`` must not make the result depend on it: refuse.
+    files, links = CYCLIC_TREES["cycle by two hops (the tree of the review)"]
+    cwd = tmp_path / "cwd"
+    _write_tree(cwd, files, links)
+    scenario = _skill(tmp_path / "scenario" / "by", "by")
+    with pytest.raises(ValueError, match="symbolic link cycle"):
+        pi_skill_dirs([str(scenario)], str(cwd))
+
+
+@pytest.mark.parametrize("label", SKILL_TREES)
+def test_skills_of_a_tree_with_links_are_those_of_pi(pi_reference, tmp_path, label):
+    """Same ``(name, real file)`` pairs as pi 1.4.0 and 1.5.0 (or both fail on a name collision)."""
+    files, links = SKILL_TREES[label]
+    cwd = tmp_path / "cwd"
+    _write_tree(cwd, files, links)
+    real_cwd = os.path.realpath(cwd)
+    loaded: set[tuple[str, str]] = set()
+    ours_collides = False
+    seen_names: set[str] = set()
+    seen_files: set[str] = set()
     try:
         for path in pi_skill_dirs([], str(cwd)):
             for name, skill_file in _pi_skills(Path(path)):
-                names.setdefault(name, os.path.relpath(os.path.realpath(skill_file), os.path.realpath(cwd)))
-        loaded, ours_collides = set(names.values()), False
+                real = os.path.realpath(skill_file)
+                if real in seen_files or name in seen_names:  # Pi keeps the first file, and the first name.
+                    continue
+                seen_files.add(real)
+                seen_names.add(name)
+                loaded.add((name, os.path.relpath(real, real_cwd)))
     except ValueError:
-        loaded, ours_collides = set(), True
+        ours_collides = True
     request = {"action": "skill_tree", "files": files, "links": links}
     for version, answer in pi_reference(request).items():
         if ours_collides:
             assert answer["collisions"], version
             continue
-        assert loaded == set(answer["files"]), version
+        assert loaded == {tuple(pair) for pair in answer["skills"]}, version

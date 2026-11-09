@@ -260,8 +260,26 @@ def _expand_pi_home(entry: str) -> Path:
     return Path(entry)
 
 
+def _refuse_link_cycle(directory: Path, root: Path, ancestors: frozenset[str]) -> frozenset[str]:
+    """Return ``ancestors`` with ``directory``; raise when ``directory`` is already on the path of the walk.
+
+    A symbolic link that leads back to a directory that is being read is a cycle. Pi follows it until the system
+    refuses (the limit of links of the OS), and then takes the skills, and for a skill with no ``name`` the name of
+    the parent directory, from the alias that it meets first: this depends on the system and cannot be copied. The run
+    is refused before pi starts. The message has the skill root and the link, never the content of a file.
+    """
+    real = os.path.realpath(directory)
+    if real in ancestors:
+        raise ValueError(
+            f"Skill directory {root} has a symbolic link cycle: {directory} leads back to a directory that is "
+            "already being read. Remove the link; pi would follow it until the system refuses, and choose the "
+            "skill names from the link that it meets first"
+        )
+    return ancestors | {real}
+
+
 def _pi_skill_entries(
-    directory: Path, mode: str, root: Path | None = None, ancestors: frozenset[tuple[str, bool]] = frozenset()
+    directory: Path, mode: str, root: Path | None = None, ancestors: frozenset[str] = frozenset()
 ) -> list[Path]:
     """Return the skill files that pi's automatic discovery finds in ``directory``.
 
@@ -269,21 +287,16 @@ def _pi_skill_entries(
     gives that file and pi does not go deeper; else pi goes into the
     subdirectories (not ``.*``, not ``node_modules``). Standalone ``.md``
     files count only at the root in ``pi`` mode (``.pi/skills``) and only
-    below the root in ``agents`` mode (``.agents/skills``). Not reproduced:
+    below the root in ``agents`` mode (``.agents/skills``). Directory symlinks
+    are followed; one that leads back to a directory of the current path raises
+    ``ValueError`` (see ``_refuse_link_cycle``). Not reproduced:
     ``.gitignore``-style ignore files.
     """
     root = root or directory
     if not directory.is_dir():
         return []
     at_root = directory == root
-    # The state of the walk is the real directory **and** whether pi sees it as the root (the root takes the loose
-    # ``.md`` files in ``pi`` mode, a child in ``agents`` mode): a link to the root is a child by path, and finds files
-    # that the root does not. Only a directory seen again in the same state is a loop: pi would follow the link until
-    # the system refuses and find the same files again, which the real-path rule of its loader drops.
-    state = (os.path.realpath(directory), at_root)
-    if state in ancestors:
-        return []
-    ancestors = ancestors | {state}
+    ancestors = _refuse_link_cycle(directory, root, ancestors)
     if (directory / "SKILL.md").is_file():
         return [directory / "SKILL.md"]
     entries: list[Path] = []
@@ -317,16 +330,13 @@ def _pi_skills(path: Path) -> list[tuple[str, Path]]:
     if path.is_file():
         name = _pi_skill_name(path)
         return [(name, path)] if name else []
-    return _pi_skills_in_dir(path, top_level=True)
+    return _pi_skills_in_dir(path, top_level=True, root=path)
 
 
 def _pi_skills_in_dir(
-    directory: Path, *, top_level: bool, ancestors: frozenset[tuple[str, bool]] = frozenset()
+    directory: Path, *, top_level: bool, root: Path, ancestors: frozenset[str] = frozenset()
 ) -> list[tuple[str, Path]]:
-    state = (os.path.realpath(directory), top_level)  # (See ``_pi_skill_entries``.)
-    if state in ancestors:
-        return []
-    ancestors = ancestors | {state}
+    ancestors = _refuse_link_cycle(directory, root, ancestors)
     skill_file = directory / "SKILL.md"
     if skill_file.is_file():
         name = _pi_skill_name(skill_file)
@@ -340,7 +350,7 @@ def _pi_skills_in_dir(
         if entry.name.startswith(".") or entry.name in _PI_SKIPPED_SKILL_DIRS:
             continue
         if entry.is_dir():
-            found.extend(_pi_skills_in_dir(entry, top_level=False, ancestors=ancestors))
+            found.extend(_pi_skills_in_dir(entry, top_level=False, root=root, ancestors=ancestors))
         elif top_level and entry.is_file() and entry.suffix == ".md":
             name = _pi_skill_name(entry)
             if name:
