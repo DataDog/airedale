@@ -113,6 +113,7 @@ import contextlib
 import heapq
 import json
 import logging
+import math
 import os
 import re
 import shlex
@@ -1681,10 +1682,16 @@ class _PiEventCollector:
 
     def _add_usage(self, usage: Any, source: str) -> None:
         """Count a ``usage`` record; remember a record that is damaged."""
-        if is_valid_pi_usage(usage):
-            self.usage.add(UsageMetrics.from_pi(usage))
-        else:
+        if not is_valid_pi_usage(usage):
             self.damaged_usage.append(source)
+            return
+        metrics = UsageMetrics.from_pi(usage)
+        # Each cost is finite, but the sum of several can pass the range of a float (two times the largest float is
+        # infinity). The total cost of the run must be finite: the record is damaged, and not added.
+        if not math.isfinite(self.usage.estimated_cost_usd + metrics.estimated_cost_usd):
+            self.damaged_usage.append(f"{source} (the total cost is not finite)")
+            return
+        self.usage.add(metrics)
 
     def _begin_execution(self, event: dict[str, Any], *, args: Any = None, track_open: bool = True) -> _ToolExecution:
         tool_id = str(event.get("toolCallId") or "")

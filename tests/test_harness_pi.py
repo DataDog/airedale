@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
 import sys
 import textwrap
@@ -4223,3 +4224,47 @@ class TestAllEightNameMutations:
         if where == "end":
             # (A changed transcript name leaves the execution and its span right: the span has no transcript.)
             assert all(not record.output_data for record in recorder.records if record.kind == "tool")
+
+
+class TestSumOfCostsMustBeFinite:
+    """Each cost can be finite and the sum of several infinite: the total cost of the run is damaged usage."""
+
+    @staticmethod
+    def _with_costs(first, second):
+        events = _events_tool_run()
+        for event in events:
+            message = event.get("message") if event.get("type") == "message_end" else None
+            if message and message.get("role") == "assistant":
+                message["usage"]["cost"] = {"total": first if message["stopReason"] == "toolUse" else second}
+        return events
+
+    def test_two_costs_that_add_up_to_infinity_fail_the_run(self):
+        import sys
+
+        events = self._with_costs(sys.float_info.max, sys.float_info.max)
+        collector = _collect(events)
+        result = collector.result(model=MODEL, returncode=0, stderr_tail="")
+        assert result.error is not None and "damaged token usage" in str(result.error)
+        assert "total cost is not finite" in str(result.error)
+        assert math.isfinite(result.usage.estimated_cost_usd)
+        assert "inf" not in json.dumps(result.usage.to_llmobs_metrics(), default=str).lower()
+
+    def test_costs_that_fit_are_added(self):
+        import sys
+
+        events = self._with_costs(sys.float_info.max / 4, sys.float_info.max / 4)
+        result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
+        assert result.error is None
+        assert math.isfinite(result.usage.estimated_cost_usd)
+        assert result.usage.estimated_cost_usd == sys.float_info.max / 2
+
+    def test_three_records_cannot_sneak_in_after_the_overflow(self):
+        import sys
+
+        events = self._with_costs(sys.float_info.max, sys.float_info.max)
+        events.insert(
+            -1, {"type": "entry_appended", "entry": {"type": "usage", "usage": _usage(1, 1, cost=sys.float_info.max)}}
+        )
+        result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
+        assert result.error is not None
+        assert math.isfinite(result.usage.estimated_cost_usd)
