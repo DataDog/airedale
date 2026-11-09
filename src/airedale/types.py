@@ -211,7 +211,11 @@ def is_valid_pi_usage(usage: Any) -> bool:
     model with an unknown price has ``total`` 0: zeros are data). A record is
     damaged when it is not an object, lacks ``input`` or ``output``, has a count
     that is not a finite non-negative whole number (a missing optional count is
-    fine, a null, text, boolean, fraction or nested value is not), or has no
+    fine, a null, text, boolean, fraction or nested value is not), has more
+    ``reasoning`` tokens than ``output`` tokens (``reasoning`` is a subset of
+    ``output`` in every provider of pi-ai 1.4.0 and 1.5.0: Anthropic and the OpenAI
+    APIs report the thinking tokens inside the output tokens, and the Google adapter
+    adds them to ``output`` and copies them to ``reasoning``), or has no
     ``cost`` object with a finite non-negative ``total``: without it the cost of
     the run would be recorded as zero.
     :meth:`UsageMetrics.from_pi` turns such values into zero, which hides the
@@ -220,6 +224,8 @@ def is_valid_pi_usage(usage: Any) -> bool:
     if not isinstance(usage, dict) or "input" not in usage or "output" not in usage:
         return False
     if not all(key not in usage or _is_count(usage[key]) for key in PI_USAGE_COUNT_KEYS):
+        return False
+    if usage.get("reasoning", 0) > usage["output"]:
         return False
     cost = usage.get("cost")
     return isinstance(cost, dict) and _is_cost(cost.get("total"))

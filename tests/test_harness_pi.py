@@ -144,6 +144,28 @@ class TestUsageFromPi:
         # The record is not counted: the cost is not replaced by 0 for a call that holds a cost.
         assert collector.usage.estimated_cost_usd == pytest.approx(0.001)
 
+    @pytest.mark.parametrize(
+        ("usage", "valid"),
+        [
+            ({"input": 1, "output": 10, "reasoning": 10}, True),  # All the output is thinking: a subset, equal.
+            ({"input": 1, "output": 10, "reasoning": 4}, True),
+            ({"input": 1, "output": 10, "reasoning": 0}, True),
+            ({"input": 1, "output": 10}, True),  # No reasoning field (Bedrock and others).
+            ({"input": 1, "output": 0, "reasoning": 0}, True),
+            ({"input": 1, "output": 10, "reasoning": 11}, False),
+            ({"input": 1, "output": 1, "reasoning": 100}, False),
+        ],
+    )
+    def test_reasoning_tokens_are_a_subset_of_output_tokens(self, usage, valid):
+        # Anthropic (thinking_tokens), OpenAI completions and responses (reasoning_tokens inside completion_tokens /
+        # output_tokens) and Google (thoughts added to output) all give reasoning <= output.
+        usage = {**usage, "cost": {"total": 0.0}}
+        assert is_valid_pi_usage(usage) is valid
+
+    def test_google_shape_of_pi_has_reasoning_inside_output(self):
+        usage = {"input": 10, "output": 8, "reasoning": 3, "totalTokens": 18, "cost": {"total": 0.0}}
+        assert is_valid_pi_usage(usage)
+
     def test_cost_above_the_float_range_is_damaged_and_does_not_raise(self):
         usage = {"input": 1, "output": 1, "cost": {"total": 10**400}}
         assert not is_valid_pi_usage(usage)
@@ -1300,6 +1322,8 @@ class TestEventCollector:
             {"input": 1, "output": 1, "cacheWrite": "x"},
             {"input": 1, "output": 1, "totalTokens": None},
             {"input": 1, "output": 1, "reasoning": []},
+            {"input": 1, "output": 1, "reasoning": 100},  # More thinking tokens than output tokens.
+            {"input": 1, "output": 0, "reasoning": 1},
             {"input": 1, "output": 1},  # no cost
             {"input": 1, "output": 1, "cost": {}},  # no cost.total
             {"input": 1, "output": 1, "cost": {"input": 0.1, "output": 0.2}},
@@ -3802,6 +3826,11 @@ class TestStrictScenarioValidation:
     @pytest.mark.parametrize("url", ["https://example.test/mcp", "http://127.0.0.1:8080/mcp", "http://[::1]:9/mcp"])
     def test_urls_that_are_decided_exactly_are_accepted(self, tmp_path, url):
         runner = PiRunner(cwd=tmp_path, mcp_servers=[McpServerSpec(name="docs", url=url)])
+        assert list(runner._scenario_pi_configs({}, strict=True)) == ["docs"]
+
+    def test_the_punycode_form_of_an_idna_host_is_accepted(self, tmp_path):
+        # The documented way around the limit: the ASCII form of the host.
+        runner = PiRunner(cwd=tmp_path, mcp_servers=[McpServerSpec(name="docs", url="http://xn--exmple-cua.test/mcp")])
         assert list(runner._scenario_pi_configs({}, strict=True)) == ["docs"]
 
     def test_undecided_url_is_refused_in_strict_mode_only(self, tmp_path):

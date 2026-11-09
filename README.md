@@ -54,6 +54,12 @@ set `AIREDALE_PI_COMMAND` (for example `AIREDALE_PI_COMMAND="npx -y
 @earendil-works/pi-coding-agent"`). See [Pi isolation](#pi-isolation) for how a
 run is kept hermetic.
 
+**MCP server URLs with the pi harness.** Before a run starts, Airedale checks the MCP servers
+of the scenario the way pi will read them. A URL whose host it cannot check exactly is refused
+with a clear message, before any server is contacted: a non-ASCII (IDNA) host name such as
+`http://exämple.test/mcp`, or an IPv6 literal it cannot decide. Write the host in ASCII
+(`http://xn--exmple-cua.test/mcp`). The same limit does not apply to the other harnesses.
+
 When an MCP server is itself LLMObs-instrumented, its spans link back to the
 experiment so the tokens it consumes are rolled into the experiment's total. See
 [How distributed tracing works](#how-distributed-tracing-works) for details.
