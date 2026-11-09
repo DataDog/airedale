@@ -637,8 +637,8 @@ def test_a_collision_below_tilde_slash_slash_is_found(tmp_path, monkeypatch):
         pi_skill_dirs([str(scenario)], str(cwd))
 
 
-def _md(name):
-    return f"---\nname: {name}\ndescription: d\n---\n"
+def _md(name, body="d"):
+    return f"---\nname: {name}\ndescription: {body}\n---\n"
 
 
 #: Trees with links but no cycle (path -> content, path -> target): the skills that pi loads from them, as pairs of a
@@ -668,6 +668,27 @@ SKILL_TREES = {
     "link to the project (hidden directories are skipped)": (
         {".agents/skills/s/x.md": _md("x"), ".pi/skills/loose.md": _md("loose"), "docs/d/SKILL.md": _md("d")},
         {".agents/skills/s/home": "", ".pi/skills/home": ""},
+    ),
+    "same name in two directories, one linked to the other (no cycle)": (
+        {".agents/skills/a/zz-after.md": _md("shared", "A"), ".agents/skills/b/zz-after.md": _md("shared", "B")},
+        {".agents/skills/a/to-b": ".agents/skills/b"},
+    ),
+    "same name, links that come before and after the real directory": (
+        {"shared/m/x.md": _md("shared", "M"), ".agents/skills/zz/x.md": _md("shared", "Z")},
+        {".agents/skills/aa-link": "shared/m", ".agents/skills/zz-link": "shared/m"},
+    ),
+    "same name, two linked directories in the two roots": (
+        {"shared/p/SKILL.md": _md("shared", "P"), "shared/q/SKILL.md": _md("shared", "Q")},
+        {".agents/skills/one": "shared/q", ".pi/skills/two": "shared/p", ".pi/skills/three": "shared/q"},
+    ),
+    "links in a chain (no cycle), names from the directories": (
+        {"shared/z/n.md": "---\ndescription: d\n---\n"},
+        {
+            "shared/y": "shared/z",
+            "shared/x": "shared/y",
+            ".agents/skills/b": "shared/x",
+            ".agents/skills/a": "shared/y",
+        },
     ),
     "same name in two files": (
         {".agents/skills/e/loose.md": _md("same"), ".agents/skills/d/SKILL.md": _md("same")},
@@ -700,6 +721,19 @@ CYCLIC_TREES = {
     "root skill and a link": (
         {".agents/skills/team/y.md": _md("y")},
         {".agents/skills/team/loop": ".agents/skills"},
+    ),
+    "two directories with links to each other, same name (round 16)": (
+        {".agents/skills/a/zz-after.md": _md("shared", "A"), ".agents/skills/b/zz-after.md": _md("shared", "B")},
+        {".agents/skills/a/to-b": ".agents/skills/b", ".agents/skills/b/to-a": ".agents/skills/a"},
+    ),
+    "two directories with links to each other, no names (round 16)": (
+        {
+            ".agents/skills/a/zz-after.md": "---\ndescription: A\n---\n",
+            ".agents/skills/b/zz-after.md": "---\ndescription: B\n---\n",
+            ".agents/skills/a/before.md": "---\ndescription: A\n---\n",
+            ".agents/skills/b/before.md": "---\ndescription: B\n---\n",
+        },
+        {".agents/skills/a/to-b": ".agents/skills/b", ".agents/skills/b/to-a": ".agents/skills/a"},
     ),
     "cycle by two hops (the tree of the review)": (
         {"shared/A/00.md": _md("alpha"), "shared/B/zzzz.md": "---\ndescription: d\n---\n"},
@@ -743,6 +777,20 @@ def test_the_collision_of_the_review_with_a_cycle_is_refused_not_missed(tmp_path
     scenario = _skill(tmp_path / "scenario" / "by", "by")
     with pytest.raises(ValueError, match="symbolic link cycle"):
         pi_skill_dirs([str(scenario)], str(cwd))
+
+
+def test_the_graph_of_round_16_is_refused_with_a_scenario_skill_too(tmp_path):
+    # ``a/to-b -> b`` and ``b/to-a -> a``: which of the two same-name files wins depends on where the system stops
+    # the cycle. Refused, whatever the scenario skills are.
+    files, links = CYCLIC_TREES["two directories with links to each other, same name (round 16)"]
+    cwd = tmp_path / "cwd"
+    _write_tree(cwd, files, links)
+    scenario = _skill(tmp_path / "scenario" / "shared", "shared")
+    with pytest.raises(ValueError, match="symbolic link cycle") as error:
+        pi_skill_dirs([str(scenario)], str(cwd))
+    assert str(cwd / ".agents" / "skills") in str(error.value)
+    with pytest.raises(ValueError, match="symbolic link cycle"):
+        pi_skill_dirs([], str(cwd))
 
 
 @pytest.mark.parametrize("label", SKILL_TREES)

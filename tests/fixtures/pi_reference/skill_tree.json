@@ -69,6 +69,26 @@
     ]
    }
   },
+  "{\"action\":\"skill_tree\",\"files\":{\".agents/skills/a/zz-after.md\":\"---\\nname: shared\\ndescription: A\\n---\\n\",\".agents/skills/b/zz-after.md\":\"---\\nname: shared\\ndescription: B\\n---\\n\"},\"links\":{\".agents/skills/a/to-b\":\".agents/skills/b\"}}": {
+   "1.4.0": {
+    "collisions": 1,
+    "skills": [
+     [
+      "shared",
+      ".agents/skills/b/zz-after.md"
+     ]
+    ]
+   },
+   "1.5.0": {
+    "collisions": 1,
+    "skills": [
+     [
+      "shared",
+      ".agents/skills/b/zz-after.md"
+     ]
+    ]
+   }
+  },
   "{\"action\":\"skill_tree\",\"files\":{\".agents/skills/d/SKILL.md\":\"---\\nname: same\\ndescription: d\\n---\\n\",\".agents/skills/e/loose.md\":\"---\\nname: same\\ndescription: d\\n---\\n\"},\"links\":{}}": {
    "1.4.0": {
     "collisions": 1,
@@ -210,6 +230,26 @@
     "names": [
      "delta",
      "top"
+    ]
+   }
+  },
+  "{\"action\":\"skill_tree\",\"files\":{\".agents/skills/zz/x.md\":\"---\\nname: shared\\ndescription: Z\\n---\\n\",\"shared/m/x.md\":\"---\\nname: shared\\ndescription: M\\n---\\n\"},\"links\":{\".agents/skills/aa-link\":\"shared/m\",\".agents/skills/zz-link\":\"shared/m\"}}": {
+   "1.4.0": {
+    "collisions": 1,
+    "skills": [
+     [
+      "shared",
+      "shared/m/x.md"
+     ]
+    ]
+   },
+   "1.5.0": {
+    "collisions": 1,
+    "skills": [
+     [
+      "shared",
+      "shared/m/x.md"
+     ]
     ]
    }
   },
@@ -377,6 +417,46 @@
      [
       "y",
       "shared/d/y/SKILL.md"
+     ]
+    ]
+   }
+  },
+  "{\"action\":\"skill_tree\",\"files\":{\"shared/p/SKILL.md\":\"---\\nname: shared\\ndescription: P\\n---\\n\",\"shared/q/SKILL.md\":\"---\\nname: shared\\ndescription: Q\\n---\\n\"},\"links\":{\".agents/skills/one\":\"shared/q\",\".pi/skills/three\":\"shared/q\",\".pi/skills/two\":\"shared/p\"}}": {
+   "1.4.0": {
+    "collisions": 1,
+    "skills": [
+     [
+      "shared",
+      "shared/q/SKILL.md"
+     ]
+    ]
+   },
+   "1.5.0": {
+    "collisions": 1,
+    "skills": [
+     [
+      "shared",
+      "shared/q/SKILL.md"
+     ]
+    ]
+   }
+  },
+  "{\"action\":\"skill_tree\",\"files\":{\"shared/z/n.md\":\"---\\ndescription: d\\n---\\n\"},\"links\":{\".agents/skills/a\":\"shared/y\",\".agents/skills/b\":\"shared/x\",\"shared/x\":\"shared/y\",\"shared/y\":\"shared/z\"}}": {
+   "1.4.0": {
+    "collisions": 0,
+    "skills": [
+     [
+      "a",
+      "shared/z/n.md"
+     ]
+    ]
+   },
+   "1.5.0": {
+    "collisions": 0,
+    "skills": [
+     [
+      "a",
+      "shared/z/n.md"
      ]
     ]
    }
