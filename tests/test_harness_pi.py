@@ -1074,8 +1074,8 @@ class TestEventCollector:
         # A nested call that came while the first "" call ran stays with it,
         # even when a second "" call starts later.
         events = _events_tool_run()
-        events[4]["message"]["content"].append({"type": "toolCall", "id": "", "name": "read", "arguments": {}})
-        events[4]["message"]["content"][2]["id"] = ""
+        events[4]["message"]["content"].append({"type": "toolCall", "id": "", "name": "second", "arguments": {}})
+        events[4]["message"]["content"][2].update({"id": "", "name": "first"})
         events[5:7] = [
             {"type": "tool_execution_start", "toolCallId": "", "toolName": "first"},
             {"type": "tool_execution_start", "toolCallId": "/1", "toolName": "child1", "parentToolCallId": ""},
@@ -1086,7 +1086,7 @@ class TestEventCollector:
         ]
         result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
         # Each nested call follows the execution that it started under.
-        assert [call.name for call in result.tool_calls] == ["ls", "child1", "read", "child2"]
+        assert [call.name for call in result.tool_calls] == ["first", "child1", "second", "child2"]
 
     def _parallel_calls(self, ids, ends):
         """A turn with parallel calls: all starts, then the ends in the order of ``ends``."""
@@ -3943,6 +3943,13 @@ class TestEndRecordNamesTheSameTool:
     def test_end_without_a_start_keeps_its_own_name(self):
         events, _, end = self._events("write")
         events = [event for event in events if event["type"] != "tool_execution_start"]
+        events[
+            next(
+                i
+                for i, e in enumerate(events)
+                if e.get("type") == "message_end" and e["message"].get("stopReason") == "toolUse"
+            )
+        ]["message"]["content"][2]["name"] = "write"
         collector = _collect(events)
         assert collector.result(model=MODEL, returncode=0, stderr_tail="").error is None
         assert [call.tool_name for call in collector.tool_executions] == ["write"]
@@ -3959,3 +3966,41 @@ class TestEndRecordNamesTheSameTool:
         recorder.close_tool("c1", 1)
         assert [record.name for record in recorder.records] == ["read"]
         assert not recorder.records[0].output_data
+
+
+class TestTranscriptCallNamesTheSameTool:
+    """The tool call of the assistant message and its execution (same id) have the same name in pi 1.4.0 and 1.5.0."""
+
+    def test_a_transcript_call_with_another_name_than_its_execution_fails_the_run(self):
+        events = _events_tool_run()
+        events[4]["message"]["content"][2]["name"] = "read"  # The execution is "ls".
+        result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
+        assert result.error is not None
+        assert "not the one of the same call" in str(result.error)
+
+    def test_the_result_of_the_execution_is_not_given_to_the_call_with_another_name(self):
+        events = _events_tool_run()
+        events[4]["message"]["content"][2]["name"] = "read"
+        result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
+        [call] = [call for call in result.tool_calls if call.name == "read"]
+        assert call.result is None
+        assert call.error == "tool did not run"
+        assert "(empty directory)" not in str(call.result)
+
+    def test_same_names_are_matched(self):
+        result = _collect(_events_tool_run()).result(model=MODEL, returncode=0, stderr_tail="")
+        assert result.error is None
+        assert [(call.name, call.result) for call in result.tool_calls] == [("ls", "(empty directory)")]
+
+    def test_a_call_without_a_name_matches_an_execution_without_a_name(self):
+        events = _events_tool_run()
+        events[4]["message"]["content"][2]["name"] = ""
+        for event in events:
+            if event["type"].startswith("tool_execution"):
+                event["toolName"] = ""
+        assert _collect(events).result(model=MODEL, returncode=0, stderr_tail="").error is None
+
+    def test_parallel_calls_with_one_id_keep_their_own_message(self, pi_reference):
+        for version, events in pi_reference({"action": "parallel"}).items():
+            error = _collect(events).result(model=MODEL, returncode=0, stderr_tail="").error
+            assert error is not None and "at the same time" in str(error), version

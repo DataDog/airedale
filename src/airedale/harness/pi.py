@@ -1799,6 +1799,15 @@ class _PiEventCollector:
                         next_index[tool_id] = position + 1
                         candidates = by_id.get(tool_id, [])
                         execution = candidates[position] if position < len(candidates) else None
+                        if execution is not None and execution.tool_name != str(block.get("name") or "unknown"):
+                            # Pi runs the tool calls of the message it wrote, and writes ``toolCall.name`` in
+                            # both places (``agent-loop.js``, pi 1.4.0 and 1.5.0): another name is a damaged
+                            # record. The result is not given to a call with another name.
+                            self.fail(
+                                "pi ran a tool call under a name that is not the one of the same call (same id) "
+                                "in the assistant message; the results cannot be matched to the calls"
+                            )
+                            execution = None
                     executions.append(execution)
                     segments.append(self._tool_call(block, execution))
         return segments, executions
