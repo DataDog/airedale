@@ -102,7 +102,9 @@ def _reportable_command(command: Any) -> str:
     from airedale.mcp import REDACTED
 
     text = str(command)
-    if any(char.isspace() or char in "=\"'`" or ord(char) < 32 or ord(char) == 127 for char in text):
+    if any(char.isspace() or char in "=\"'`?#" or ord(char) < 32 or ord(char) == 127 for char in text):
+        return REDACTED
+    if "://" in text:  # A URL is not an executable path: its last segment can be a token.
         return REDACTED
     name = text.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
     return name if _PLAIN_COMMAND.fullmatch(name) else REDACTED
