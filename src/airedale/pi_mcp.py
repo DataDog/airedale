@@ -95,11 +95,16 @@ def _reportable_command(command: Any) -> str:
     """Return the file name of ``command`` for reports, or ``<redacted>``.
 
     The repo file can write a credential in a directory of the path (``/opt/<token>/bin/server``) or in a
-    command line (``node --token=abc``); only a plain file name is kept.
+    command line (``node --token=/<token>``, where the part after the last ``/`` is the token). The file name is
+    kept only when the whole ``command`` is **one path**: no whitespace of any kind, no ``=``, no quote, no
+    control character. Any other value is not reported.
     """
     from airedale.mcp import REDACTED
 
-    name = str(command).replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+    text = str(command)
+    if any(char.isspace() or char in "=\"'`" or ord(char) < 32 or ord(char) == 127 for char in text):
+        return REDACTED
+    name = text.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
     return name if _PLAIN_COMMAND.fullmatch(name) else REDACTED
 
 
