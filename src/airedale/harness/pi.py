@@ -363,7 +363,7 @@ class PiRunner(DecoratorSpanAgentRunner):
                     collector_extension=collector_extension,
                 )
                 collector = _PiEventCollector(max_turns=self.max_turns, spans=spans)
-                returncode, stderr_tail = await self._run_process(
+                returncode, stderr_tail, extension_failed = await self._run_process(
                     command,
                     user_prompt=user_prompt,
                     env=self._env(agent_dir, model=model),
@@ -371,7 +371,7 @@ class PiRunner(DecoratorSpanAgentRunner):
                     model=model,
                     progress=progress,
                 )
-                if not (collector_extension and _collector_extension_failed(collector, returncode, stderr_tail)):
+                if not (collector_extension and extension_failed):
                     break
                 # Pi stops at startup when it cannot load an extension, before
                 # any model call: run it again without the collector, so that
@@ -851,8 +851,10 @@ class PiRunner(DecoratorSpanAgentRunner):
         collector: _PiEventCollector,
         model: ModelSpec,
         progress: ProgressCallback | None,
-    ) -> tuple[int | None, str]:
-        """Run pi, feed its events to ``collector``; return (exit code, stderr tail).
+    ) -> tuple[int | None, str, bool]:
+        """Run pi, feed its events to ``collector``; return (exit code, redacted stderr tail, extension load failed).
+
+        The last value is read in the raw stderr (see the end of the method).
 
         The process group of pi is always stopped and pi is always reaped before
         this returns, also on error or cancellation.
@@ -900,8 +902,11 @@ class PiRunner(DecoratorSpanAgentRunner):
                 raise reader.exception()  # type: ignore[misc]
         finally:
             await _finish_cleanup(_cleanup_process(process, tasks))
-        # The tail goes into the error of the run, the logs and the spans: no credential in it.
-        return process.returncode, stderr_tail.redacted_text(self._secret_values(env))
+        # The load failure of the collector is read in the raw text: the redaction can hide the words or the path
+        # that identify it (a credential that is part of the path). Only the text that is shown is redacted: the
+        # tail goes into the error of the run, the logs and the spans, and has no credential in it.
+        extension_failed = _collector_extension_failed(collector, process.returncode, stderr_tail.text())
+        return process.returncode, stderr_tail.redacted_text(self._secret_values(env)), extension_failed
 
 
 async def _cleanup_process(process: asyncio.subprocess.Process, tasks: list[asyncio.Task[Any]]) -> None:

@@ -3375,6 +3375,35 @@ class TestPiSpans:
         # The spans use the stream data only.
         assert [span.kind for span in fake_span_llmobs.spans] == ["llm", "tool", "llm"]
 
+    def test_load_failure_is_found_in_the_raw_stderr_when_the_redaction_hides_the_path(
+        self, tmp_path, fake_pi, monkeypatch, fake_span_llmobs, caplog
+    ):
+        import airedale.harness.base as base
+        from airedale.harness.pi import PI_LLMOBS_EXTENSION_PATH
+
+        monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
+        monkeypatch.setattr(base, "agent", lambda **kwargs: lambda func: func)
+
+        async def _no_catalog(servers, headers):
+            return {}
+
+        monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _no_catalog)
+        command, record = fake_pi(_events_tool_run(), FAKE_PI_REJECT_EXTENSION="1")
+        # A credential that is part of the path of the extension: the redacted text has no path in it.
+        secret = PI_LLMOBS_EXTENSION_PATH.name
+        assert len(secret) >= 8
+        with caplog.at_level("WARNING"):
+            result = _bounded(
+                PiRunner(
+                    cwd=tmp_path, pi_command=command, gateway_base_url="https://gw.example", gateway_api_key=secret
+                ).run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h")
+            )
+        assert result.answer == "The directory is empty."
+        runs = [json.loads(line) for line in Path(str(record) + ".runs").read_text().splitlines()]
+        assert ["--extension" in argv for argv in runs] == [True, False]
+        # What is shown has no credential.
+        assert secret not in caplog.text
+
     def test_other_startup_failures_are_not_run_again(self, tmp_path, fake_pi, monkeypatch, fake_span_llmobs):
         import airedale.harness.base as base
 
