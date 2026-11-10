@@ -3535,10 +3535,11 @@ def test_tool_list_follows_every_page():
     assert calls == [None, "p2", "p3"]
 
 
-def test_tool_list_stops_on_a_repeated_cursor():
+def test_tool_list_with_a_repeated_cursor_fails_and_gives_no_partial_catalog(monkeypatch):
     from types import SimpleNamespace
 
-    from airedale.mcp import _list_all_tools
+    import airedale.mcp as mcp_module
+    from airedale.mcp import McpToolListIncompleteError, _list_all_tools
 
     class _Session:
         calls = 0
@@ -3547,8 +3548,16 @@ def test_tool_list_stops_on_a_repeated_cursor():
             self.calls += 1
             return SimpleNamespace(tools=[self.calls], nextCursor="same")
 
-    session = _Session()
-    assert _bounded(_list_all_tools(session)) == [1, 2]  # type: ignore[arg-type]
+    with pytest.raises(McpToolListIncompleteError, match="repeated"):
+        _bounded(_list_all_tools(_Session()))  # type: ignore[arg-type]
+
+    # The probe of the metadata catalog treats it as a failure: nothing of that server is in the catalog.
+    async def fake_list(server, headers, *, all_pages=False):
+        return await _list_all_tools(_Session())  # type: ignore[arg-type]
+
+    monkeypatch.setattr(mcp_module, "_list_mcp_tools", fake_list)
+    server = McpServerSpec(name="s", url="http://localhost/mcp")
+    assert _bounded(mcp_module._mcp_tool_metadata_catalog([server], {})) == {}
 
 
 def test_tool_list_with_more_pages_than_the_cap_fails_and_gives_no_partial_catalog(monkeypatch):

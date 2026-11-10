@@ -563,15 +563,16 @@ MCP_TOOL_LIST_MAX_PAGES = 50
 
 
 class McpToolListIncompleteError(RuntimeError):
-    """The server has more ``tools/list`` pages than Airedale reads."""
+    """The ``tools/list`` of a server cannot be read to its end (too many pages, or a repeated cursor)."""
 
 
 async def _list_all_tools(session: ClientSession) -> list[Any]:
     """Return the tools of every ``tools/list`` page (follows ``nextCursor``).
 
     The complete list is necessary: pi names tools from all the tools of the
-    server. After :data:`MCP_TOOL_LIST_MAX_PAGES` pages with a next cursor left, it raises
-    :class:`McpToolListIncompleteError`. The caller's timeout also bounds this.
+    server. It never returns a partial list: it raises :class:`McpToolListIncompleteError` when
+    :data:`MCP_TOOL_LIST_MAX_PAGES` pages leave a next cursor, or when a cursor repeats. The caller's timeout
+    also bounds this.
     """
     tools: list[Any] = []
     cursor: str | None = None
@@ -580,8 +581,11 @@ async def _list_all_tools(session: ClientSession) -> list[Any]:
         result = await session.list_tools(cursor=cursor) if cursor is not None else await session.list_tools()
         tools.extend(result.tools)
         cursor = getattr(result, "nextCursor", None)
-        if not cursor or cursor in seen:
+        if not cursor:
             return tools
+        if cursor in seen:
+            # A server that repeats a cursor never ends its list: what was read is not the whole list.
+            raise McpToolListIncompleteError("the MCP server repeated a tools/list cursor; the tool list is incomplete")
         seen.add(cursor)
     # A partial list would give wrong tool names (pi names a tool from the whole list) and a catalog without the later
     # tools: the listing fails, like any other failure of the probe.
