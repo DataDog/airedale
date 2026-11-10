@@ -675,7 +675,10 @@ class TestTools:
             [(1, _tool_start("a")), (2, _tool_start("b")), (3, _tool_end("b", error=True)), (4, _tool_end("a"))],
         )
         assert [record.metadata["tool_id"] for record in recorder.records] == ["b", "a"]
-        assert recorder.records[0].error == "out"
+        assert recorder.records[0].error == "tool call failed"
+        assert recorder.records[0].output_data == "out"  # The span output is unchanged.
+        assert any(note.endswith(": out") for note in recorder.private_notes)
+        assert "out" not in recorder.records[0].error and "out" not in recorder.records[0].metadata["error"]
         assert all(not record.children for record in recorder.records)
 
     def test_nested_calls_are_children(self):
@@ -1090,7 +1093,7 @@ class TestEmit:
         assert llm_span.annotations["prompt"]["version"] == "v"
         assert llm_span.annotations["tags"]["sdk"] == "pi"
         assert child.error == 1
-        assert child.tags["error.message"] == "out"
+        assert child.tags["error.message"] == "tool call failed"
         assert fake_span_llmobs.active == []
 
     def test_parent_covers_late_children(self, fake_span_llmobs):
