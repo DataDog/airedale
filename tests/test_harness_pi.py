@@ -4248,6 +4248,7 @@ class TestNoRawValues:
         self, tmp_path, fake_pi, monkeypatch, fake_span_llmobs, caplog, private_report_dir, telemetry
     ):
         secret = "call_MIXED-ID-0123456789"
+        names = ("sk-NAME-ONE-SECRET-0123", "sk-NAME-TWO-SECRET-0123")  # (Pi controls tool names too.)
         if telemetry:
             import airedale.harness.base as base
 
@@ -4261,15 +4262,15 @@ class TestNoRawValues:
         events = _events_tool_run()
         start = next(e for e in events if e["type"] == "tool_execution_start")
         end = next(e for e in events if e["type"] == "tool_execution_end")
-        events.insert(events.index(start) + 1, {**start, "toolName": "bash", "args": {"command": "ls"}})
+        events.insert(events.index(start) + 1, {**start, "toolName": names[1], "args": {"command": "ls"}})
         for event in (start, end):
-            event["toolName"] = "read"
+            event["toolName"] = names[0]
         for event in events:
             if event["type"].startswith("tool_execution"):
                 event["toolCallId"] = secret
         for block in events[4]["message"]["content"]:
             if block.get("type") == "toolCall":
-                block["id"], block["name"] = secret, "read"
+                block["id"], block["name"] = secret, names[0]
         command, _ = fake_pi(events)
         runner = PiRunner(cwd=tmp_path, pi_command=command)
         with caplog.at_level("DEBUG"):
@@ -4285,8 +4286,8 @@ class TestNoRawValues:
         shown = caplog.text + str(error)
         if telemetry:
             shown += json.dumps([(span.error, span.tags) for span in fake_span_llmobs.spans], default=str)
-            assert "Ignoring an end record of the tool" in caplog.text  # The log line of the span recorder ran.
-        assert secret not in shown
+            assert "Ignoring an end record whose tool name is not" in caplog.text  # The span recorder logged it.
+        assert secret not in shown and "NAME-ONE-SECRET" not in shown and "NAME-TWO-SECRET" not in shown
         [report] = _report_files(private_report_dir)
         assert secret in report.read_text()
 
