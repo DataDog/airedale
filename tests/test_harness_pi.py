@@ -3324,6 +3324,10 @@ class TestWindowsStop:
             raise FileNotFoundError(argv[0])
 
         monkeypatch.setattr(pi_module.asyncio, "create_subprocess_exec", fake_exec)
+        # The Windows lookup needs a program to find: a fake ``pi.cmd`` on a test ``PATH`` (no real pi is needed).
+        (tmp_path / "pi.cmd").write_text("@echo off\n")
+        monkeypatch.setenv("PATH", str(tmp_path))
+        monkeypatch.setenv("PATHEXT", ".cmd")
         with pytest.raises(RuntimeError, match="pi executable not found"):
             _run(PiRunner(cwd=tmp_path, pi_command=["pi"]))
         assert seen["start_new_session"] is False
