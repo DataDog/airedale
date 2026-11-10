@@ -1673,8 +1673,10 @@ class _PiEventCollector:
         if not open_executions:
             return None
         if len(open_executions) > 1:
+            # The id comes from the provider: it is in the private report only, not in the error.
+            self.private_notes.append(f"tool calls open together with the id {_raw(tool_id)!r}")
             self.fail(
-                f"pi ran {len(open_executions)} tool calls with the id {tool_id!r} at the same time; "
+                f"pi ran {len(open_executions)} tool calls with the same id at the same time; "
                 "their results cannot be matched to the calls"
             )
         execution = open_executions.pop(0)

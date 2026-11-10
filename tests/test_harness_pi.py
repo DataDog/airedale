@@ -4046,6 +4046,57 @@ class TestNoRawValues:
         text = report.read_text()
         assert "unsupported" in text and "SECOND-ATTEMPT-ERROR-0123" in text
 
+    @staticmethod
+    def _events_with_a_duplicate_tool_id(tool_id):
+        events = _events_tool_run()
+        start = next(e for e in events if e["type"] == "tool_execution_start")
+        first_call = events[4]["message"]["content"][2]
+        second_call = {**first_call, "arguments": {"path": "other"}}
+        events[4]["message"]["content"].append(second_call)
+        for block in (first_call, second_call):
+            block["id"] = tool_id
+        for event in events:
+            if event["type"].startswith("tool_execution"):
+                event["toolCallId"] = tool_id
+        events.insert(events.index(start) + 1, {**start, "args": {"path": "other"}})
+        return events
+
+    @pytest.mark.parametrize("telemetry", [False, True], ids=["telemetry-off", "telemetry-on"])
+    def test_a_duplicate_tool_call_id_is_only_in_the_private_file(
+        self, tmp_path, fake_pi, monkeypatch, fake_span_llmobs, caplog, private_report_dir, telemetry
+    ):
+        secret = "call_SECRET-ID-0123456789"
+        if telemetry:
+            import airedale.harness.base as base
+
+            monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
+            monkeypatch.setattr(base, "agent", lambda **kwargs: lambda func: func)
+
+            async def _no_catalog(servers, headers):
+                return {}
+
+            monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _no_catalog)
+        command, _ = fake_pi(self._events_with_a_duplicate_tool_id(secret))
+        runner = PiRunner(cwd=tmp_path, pi_command=command)
+        with caplog.at_level("DEBUG"):
+            if telemetry:
+                with pytest.raises(RuntimeError) as raised:
+                    _bounded(
+                        runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h")
+                    )
+                error = raised.value
+            else:
+                error = _run(runner).error
+        # The error, the logs and the error data of the spans. (The tool call id is ordinary data of the tool call
+        # itself, like its name and arguments; it is not in an error.)
+        everything = caplog.text + str(error)
+        if telemetry:
+            everything += json.dumps([(span.error, span.tags) for span in fake_span_llmobs.spans], default=str)
+        assert "pi ran 2 tool calls with the same id" in str(error)
+        assert secret not in everything
+        [report] = _report_files(private_report_dir)
+        assert secret in report.read_text()
+
     def test_the_old_redaction_code_is_gone(self):
         import airedale.harness.pi as pi_module
 
