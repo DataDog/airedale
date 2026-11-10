@@ -4067,3 +4067,138 @@ class TestProjectEnablesCodemode:
             a["metadata"].get("project_auto_enable_codemode") for a in fake_span_llmobs.annotations if "metadata" in a
         ]
         assert (True in flags) is enabled
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX owner and mode checks")
+class TestPrivateReportDirectory:
+    """The directory of the private report is checked, and used through its descriptor (items 90, 92)."""
+
+    @staticmethod
+    def _write(tmp_path, env=None):
+        import airedale.harness.pi as pi_module
+
+        runner = pi_module.PiRunner(cwd=tmp_path)
+        return runner._write_private_report(MODEL, 3, "DUMMY-RAW-0123456789", [])
+
+    @pytest.mark.parametrize(("mode", "written"), [(0o700, True), (0o755, False), (0o777, False), (0o770, False)])
+    def test_configured_directory_must_be_closed_to_others(self, tmp_path, monkeypatch, mode, written):
+        directory = tmp_path / "out"
+        directory.mkdir()
+        directory.chmod(mode)
+        monkeypatch.setenv("AIREDALE_OUTPUT_DIR", str(directory))
+        result = self._write(tmp_path)
+        assert (result is not None) is written
+        assert bool(list(directory.glob("pi-run-*.log"))) is written
+
+    def test_new_configured_directory_is_created_closed(self, tmp_path, monkeypatch):
+        directory = tmp_path / "a" / "b"
+        monkeypatch.setenv("AIREDALE_OUTPUT_DIR", str(directory))
+        result = self._write(tmp_path)
+        assert result is not None and result.parent == directory
+        assert directory.stat().st_mode & 0o077 == 0
+        assert result.stat().st_mode & 0o777 == 0o600
+
+    def test_configured_directory_that_is_a_link_is_refused(self, tmp_path, monkeypatch):
+        target = tmp_path / "target"
+        target.mkdir(mode=0o700)
+        link = tmp_path / "link"
+        link.symlink_to(target, target_is_directory=True)
+        monkeypatch.setenv("AIREDALE_OUTPUT_DIR", str(link))
+        assert self._write(tmp_path) is None
+        assert list(target.iterdir()) == []
+
+    def test_unsafe_default_directory_is_refused(self, tmp_path, monkeypatch):
+        import airedale.harness.pi as pi_module
+
+        monkeypatch.delenv("AIREDALE_OUTPUT_DIR")
+        monkeypatch.setattr(pi_module.tempfile, "gettempdir", lambda: str(tmp_path))
+        directory = tmp_path / f"airedale-{os.getuid()}"
+        directory.mkdir()
+        directory.chmod(0o755)
+        assert self._write(tmp_path) is None
+
+    def test_default_directory_that_is_a_link_is_refused(self, tmp_path, monkeypatch):
+        import airedale.harness.pi as pi_module
+
+        monkeypatch.delenv("AIREDALE_OUTPUT_DIR")
+        monkeypatch.setattr(pi_module.tempfile, "gettempdir", lambda: str(tmp_path))
+        target = tmp_path / "elsewhere"
+        target.mkdir(mode=0o700)
+        (tmp_path / f"airedale-{os.getuid()}").symlink_to(target, target_is_directory=True)
+        assert self._write(tmp_path) is None
+        assert list(target.iterdir()) == []
+
+    def test_existing_file_or_link_of_that_name_is_not_opened(self, tmp_path, monkeypatch):
+        import airedale.harness.pi as pi_module
+
+        directory = tmp_path / "out"
+        directory.mkdir(mode=0o700)
+        victim = tmp_path / "victim"
+        victim.write_text("unchanged")
+        (directory / "pi-run-fixed-12345678.log").symlink_to(victim)
+        monkeypatch.setenv("AIREDALE_OUTPUT_DIR", str(directory))
+        monkeypatch.setattr(pi_module.time, "strftime", lambda *args: "fixed")
+        monkeypatch.setattr(pi_module.uuid, "uuid4", lambda: type("U", (), {"hex": "12345678"})())
+        assert self._write(tmp_path) is None
+        assert victim.read_text() == "unchanged"
+
+    def test_directory_replaced_by_a_link_after_the_check_changes_nothing(self, tmp_path, monkeypatch):
+        import airedale.harness.pi as pi_module
+
+        parent = tmp_path / "parent"
+        parent.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        outside.chmod(0o777)
+        directory = parent / f"airedale-{os.getuid()}"
+        monkeypatch.delenv("AIREDALE_OUTPUT_DIR")
+        monkeypatch.setattr(pi_module.tempfile, "gettempdir", lambda: str(parent))
+        real_open = os.open
+
+        def swap(path, flags, mode=0o777, **kwargs):
+            if Path(path).name.startswith("pi-run-"):  # Between the check of the directory and the file.
+                directory.rename(parent / "saved")
+                directory.symlink_to(outside, target_is_directory=True)
+            return real_open(path, flags, mode, **kwargs)
+
+        monkeypatch.setattr(pi_module.os, "open", swap)
+        result = self._write(tmp_path)
+        assert list(outside.iterdir()) == []  # Nothing outside the directory that was checked.
+        assert result is not None and (parent / "saved").glob("pi-run-*.log")
+
+    def test_system_without_dir_fd_writes_nothing_and_warns(self, tmp_path, monkeypatch, caplog):
+        import airedale.harness.pi as pi_module
+
+        monkeypatch.setattr(pi_module, "_OPEN_TAKES_DIR_FD", False)
+        monkeypatch.setenv("AIREDALE_OUTPUT_DIR", str(tmp_path / "out"))
+        with caplog.at_level("WARNING"):
+            assert self._write(tmp_path) is None
+        assert not (tmp_path / "out").exists()
+        assert "Unable to write the private report of the failed pi run" in caplog.text
+        assert "DUMMY-RAW" not in caplog.text
+
+    def test_unknown_user_in_the_directory_keeps_the_run_error(self, tmp_path, fake_pi, monkeypatch, caplog):
+        monkeypatch.setenv("AIREDALE_OUTPUT_DIR", "~airedale-user-that-does-not-exist/out")
+        command, _ = fake_pi([], FAKE_PI_EXIT="3", FAKE_PI_STDERR="boom DUMMY-RAW-0123456789\n")
+        with caplog.at_level("WARNING"):
+            result = _run(PiRunner(cwd=tmp_path, pi_command=command))
+        assert "status 3" in str(result.error) and type(result.error) is RuntimeError
+        assert "private file" not in str(result.error)
+        assert "Unable to write the private report" in caplog.text
+        assert "DUMMY-RAW" not in caplog.text and "airedale-user-that-does-not-exist" not in caplog.text
+
+    def test_other_exception_types_are_caught_too_but_not_base_exceptions(self, tmp_path, monkeypatch):
+        import airedale.harness.pi as pi_module
+
+        def boom(name):
+            raise ValueError("odd")
+
+        monkeypatch.setattr(pi_module, "open_private_report", boom)
+        assert self._write(tmp_path) is None
+
+        def interrupted(name):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(pi_module, "open_private_report", interrupted)
+        with pytest.raises(KeyboardInterrupt):
+            self._write(tmp_path)

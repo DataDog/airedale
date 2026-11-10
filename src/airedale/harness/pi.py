@@ -432,17 +432,15 @@ class PiRunner(DecoratorSpanAgentRunner):
     ) -> Path | None:
         """Write the raw values of a failed run to one private file; return its path (``None``: nothing to write).
 
-        The file is in the output directory of Airedale (:func:`private_report_dir`), is only readable by the user (mode
+        The file is in the output directory of Airedale (:func:`open_private_report`), is only readable by the user (mode
         0600), is not deleted after the run, and is written only for a run that failed and has something to say. It
-        can hold credentials: pi, a provider, a gateway or an extension wrote these values. A failure to write it never
-        hides the error of the run.
+        can hold credentials: pi, a provider, a gateway or an extension wrote these values. Any failure to write it
+        (``Exception``, whatever its type) is logged as a fixed warning and never hides the error of the run.
         """
         if not stderr_tail and not notes:
             return None
         try:
-            directory = private_report_dir()
             name = f"pi-run-{time.strftime('%Y%m%dT%H%M%S', time.gmtime())}-{uuid.uuid4().hex[:8]}.log"
-            path = directory / name
             lines = [
                 "Raw output of a failed pi run. It can hold credentials: keep this file private.",
                 f"model: {model.label}",
@@ -455,11 +453,11 @@ class PiRunner(DecoratorSpanAgentRunner):
                 *notes,
                 "",
             ]
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+            fd, path = open_private_report(name)
             with os.fdopen(fd, "w", encoding="utf-8", errors="backslashreplace") as handle:
                 handle.write("\n".join(lines))
             return path
-        except OSError:
+        except Exception:  # noqa: BLE001 - the report must never hide the error of the run (not BaseException)
             logger.warning("Unable to write the private report of the failed pi run", exc_info=False)
             return None
 
@@ -1018,25 +1016,44 @@ async def _read_events(
 PI_OUTPUT_DIR_ENV = "AIREDALE_OUTPUT_DIR"
 
 
-def private_report_dir() -> Path:
-    """Return the output directory of Airedale for the private reports of failed runs, and create it (mode 0700).
+#: Whether ``os.open`` takes ``dir_fd`` on this system (it does not on Windows). Read once, at import.
+_OPEN_TAKES_DIR_FD = os.open in os.supports_dir_fd
 
-    ``$AIREDALE_OUTPUT_DIR`` when it is set; else ``airedale-<uid>`` in the temporary directory of the system. The
-    default must be a real directory (not a link) owned by the user and closed to others, or an ``OSError`` is raised:
-    another user must not be able to read the reports or to put a link in their place.
+
+def open_private_report(name: str) -> tuple[int, Path]:
+    """Create the private report ``name`` in the output directory and return its file descriptor and its path.
+
+    The directory is ``$AIREDALE_OUTPUT_DIR`` when it is set, else ``airedale-<uid>`` in the temporary directory of the
+    system. Either way it is checked the same way, and without a gap between the check and the use:
+
+    1. the directory is created (mode 0700) if it does not exist;
+    2. it is **opened** with ``O_DIRECTORY | O_NOFOLLOW`` (a link in the last place is refused);
+    3. owner and mode are checked with ``fstat`` on that descriptor: it must be a directory of the user, with no
+       access for the group or others;
+    4. the file is created **through that descriptor** (``dir_fd``), with ``O_CREAT | O_EXCL | O_NOFOLLOW`` and mode
+       0600: replacing the directory by a link afterwards changes nothing, and an existing file or link is never opened.
+
+    Where ``os.open`` does not take ``dir_fd`` (Windows), no file is written: an ``OSError`` is raised. Raise
+    ``OSError`` for every refusal.
     """
+    needed = ("O_DIRECTORY", "O_NOFOLLOW")
+    if not _OPEN_TAKES_DIR_FD or any(not hasattr(os, flag) for flag in needed):
+        raise OSError("this system cannot open the output directory safely (no dir_fd): no report is written")
     configured = os.environ.get(PI_OUTPUT_DIR_ENV)
-    if configured:
-        directory = Path(configured).expanduser()
-        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-        return directory
-    uid = os.getuid() if hasattr(os, "getuid") else 0
-    directory = Path(tempfile.gettempdir()) / f"airedale-{uid}"
+    uid = os.getuid()
+    directory = (
+        Path(configured).expanduser() if configured else Path(tempfile.gettempdir()) / f"airedale-{uid}"
+    )  # (``expanduser`` raises RuntimeError for an unknown ``~user``: the caller catches it.)
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    info = directory.lstat()
-    if not stat.S_ISDIR(info.st_mode) or (hasattr(os, "getuid") and (info.st_uid != uid or info.st_mode & 0o077)):
-        raise OSError(f"{directory} is not a private directory of the user")
-    return directory
+    directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(directory_fd)
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != uid or info.st_mode & 0o077:
+            raise OSError(f"{directory} is not a directory of the user that is closed to others (mode 0700)")
+        fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory_fd)
+    finally:
+        os.close(directory_fd)
+    return fd, directory / name
 
 
 def _collector_extension_failed(collector: _PiEventCollector, returncode: int | None, stderr_tail: str) -> bool:
