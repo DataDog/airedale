@@ -25,6 +25,8 @@ from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamablehttp_client
 
+from airedale.safe_log import exception_summary
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -250,8 +252,8 @@ def _parse_mcp_json(path: Path) -> list[McpServerSpec]:
         return []
     try:
         data = json.loads(path.read_text())
-    except (OSError, ValueError):
-        logger.warning("Ignoring unreadable project MCP config at %s", path, exc_info=True)
+    except (OSError, ValueError) as error:
+        logger.warning("Ignoring unreadable project MCP config at %s (%s)", path, exception_summary(error))
         return []
 
     servers_raw = data.get("mcpServers") if isinstance(data, Mapping) else None
@@ -544,8 +546,10 @@ async def _mcp_server_tool_metadata(
         tools = await asyncio.wait_for(
             _list_mcp_tools(server, trace_headers, all_pages=True), timeout=MCP_TOOL_METADATA_TIMEOUT_SECONDS
         )
-    except Exception:
-        logger.debug("Unable to fetch MCP tool metadata for server %s", server.name, exc_info=True)
+    except Exception as error:
+        # Fixed text: the message of the error (the validation error of the MCP SDK holds the whole tool object
+        # that the server sent) and its traceback are not logged.
+        logger.debug("Unable to fetch MCP tool metadata for server %s (%s)", server.name, exception_summary(error))
         return {}
 
     catalog: dict[tuple[str, str], McpToolMetadata] = {}

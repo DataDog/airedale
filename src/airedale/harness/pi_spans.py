@@ -88,6 +88,7 @@ from airedale.harness.base import (
     json_dumps_compact,
     json_safe,
 )
+from airedale.safe_log import exception_summary
 from airedale.types import UsageMetrics, is_valid_pi_usage
 
 if TYPE_CHECKING:
@@ -476,8 +477,9 @@ class PiSpanRecorder:
         now = received_ns if received_ns is not None else time.time_ns()
         try:
             self._feed(event, now)
-        except Exception:  # noqa: BLE001 - telemetry must never break a run
-            logger.warning("Ignoring a pi event that the span recorder cannot use", exc_info=True)
+        except Exception as error:  # noqa: BLE001 - telemetry must never break a run
+            # (No message and no traceback values: they can hold data of the pi event.)
+            logger.warning("Ignoring a pi event that the span recorder cannot use (%s)", exception_summary(error))
         finally:
             self._last_event_ns = now
 
