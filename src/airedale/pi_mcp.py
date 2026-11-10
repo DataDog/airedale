@@ -61,6 +61,8 @@ class PiMcpMerge:
     errors: list[str] = field(default_factory=list)
     #: Scenario servers that the repo file replaces or changes.
     changed: list[str] = field(default_factory=list)
+    #: ``autoEnableCodemode`` of the repo file (a boolean), else ``None``.
+    auto_enable_codemode: bool | None = None
 
     @property
     def project_servers(self) -> dict[str, dict[str, Any]]:
@@ -76,7 +78,7 @@ def merge_project_mcp_config(project_file: Path, scenario: Mapping[str, Mapping[
     """
     merge = PiMcpMerge(servers={name: PiMcpEntry(dict(config), "global") for name, config in scenario.items()})
     before = {name: dict(config) for name, config in scenario.items()}
-    apply_project_config(project_file, merge.servers, merge.errors)
+    merge.auto_enable_codemode = apply_project_config(project_file, merge.servers, merge.errors)
     # A scenario server is changed when its config differs (an override, a replacement) or when the repo
     # file defines it again, even with the same config: the entry is then a repo entry for pi.
     merge.changed = [

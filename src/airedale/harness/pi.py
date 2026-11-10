@@ -278,6 +278,8 @@ class PiRunner(DecoratorSpanAgentRunner):
         self.pi_models = [dict(model) for model in pi_models]
         #: The servers of the repo ``.pi/mcp.json`` as they were when the run started (see ``_project_servers``).
         self._project_snapshot: list[McpServerSpec] | None = None
+        #: True when the repo ``.pi/mcp.json`` turns ``autoEnableCodemode`` on over the scenario's setting (``False``).
+        self._project_enables_codemode = False
         self.pi_command = list(pi_command) if pi_command is not None else _default_pi_command()
 
     def _effective_builtin_tools(self) -> tuple[str, ...]:
@@ -354,6 +356,7 @@ class PiRunner(DecoratorSpanAgentRunner):
         self._check_project_mcp_collisions(trace_headers)
         self._check_tool_name_collisions()
         skill_dirs = pi_skill_dirs(self.skills, self.cwd)
+        self._project_enables_codemode = self._warn_if_project_enables_codemode()
         agent_dir = _make_private_agent_dir(Path(self.cwd))
         try:
             system_prompt_path = self._write_agent_dir(
@@ -401,6 +404,27 @@ class PiRunner(DecoratorSpanAgentRunner):
                     f"{result.error}\nthe raw output of pi (stderr, provider messages) is in the private file {report}"
                 )
         return result
+
+    def _warn_if_project_enables_codemode(self) -> bool:
+        """Warn (once, before pi starts) when the repo ``.pi/mcp.json`` sets ``autoEnableCodemode`` to true.
+
+        With scenario MCP servers, Airedale writes ``autoEnableCodemode: false`` and the repo value replaces it (pi
+        merges the project file over the global one). The project configuration is part of the experiment, so the
+        run goes on; the warning gives the cause and the consequence. Return True when the setting changed.
+        """
+        if not self.mcp_servers:
+            return False  # Nothing was set by Airedale: pi's default (true) applies with or without the repo file.
+        project_file = Path(self.cwd) / ".pi" / "mcp.json"
+        if merge_project_mcp_config(project_file, {}).auto_enable_codemode is not True:
+            return False
+        logger.warning(
+            "repository .pi/mcp.json sets autoEnableCodemode=true: pi enables codemode for this run, so the agent can "
+            "call other models; results may differ from runs without it"
+        )
+        return True
+
+    def _run_metadata(self) -> dict[str, Any]:
+        return {"project_auto_enable_codemode": True} if self._project_enables_codemode else {}
 
     def _write_private_report(
         self, model: ModelSpec, returncode: int | None, stderr_tail: str, notes: list[str]

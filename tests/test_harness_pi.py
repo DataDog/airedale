@@ -3993,3 +3993,77 @@ class TestNoRawValues:
         for name in ("_redact_secrets", "_redact_bytes", "_drop_cut_secret", "_byte_forms", "_secret_strings_of_json"):
             assert not hasattr(pi_module, name), name
         assert not hasattr(pi_module.PiRunner, "_secret_values")
+
+
+class TestProjectEnablesCodemode:
+    """A repo ``.pi/mcp.json`` with ``autoEnableCodemode: true`` replaces the ``false`` of the scenario: warn once."""
+
+    @staticmethod
+    def _project(tmp_path, value):
+        (tmp_path / ".pi").mkdir(exist_ok=True)
+        text = json.dumps({"autoEnableCodemode": value, "mcpServers": {}})
+        (tmp_path / ".pi" / "mcp.json").write_text(text)
+
+    SERVERS = (McpServerSpec(name="docs", url="http://localhost/mcp"),)
+
+    def test_true_in_the_repo_warns_once_with_cause_and_consequence(self, tmp_path, fake_pi, caplog):
+        self._project(tmp_path, True)
+        command, _ = fake_pi(_events_tool_run())
+        with caplog.at_level("WARNING"):
+            result = _run(PiRunner(cwd=tmp_path, pi_command=command, mcp_servers=list(self.SERVERS)))
+        assert result.error is None
+        messages = [r.getMessage() for r in caplog.records if "autoEnableCodemode" in r.getMessage()]
+        assert messages == [
+            "repository .pi/mcp.json sets autoEnableCodemode=true: pi enables codemode for this run, so the agent can "
+            "call other models; results may differ from runs without it"
+        ]
+
+    @pytest.mark.parametrize("value", [False, None, "yes", 1])
+    def test_other_values_do_not_warn(self, tmp_path, fake_pi, caplog, value):
+        self._project(tmp_path, value)
+        command, _ = fake_pi(_events_tool_run())
+        with caplog.at_level("WARNING"):
+            _run(PiRunner(cwd=tmp_path, pi_command=command, mcp_servers=list(self.SERVERS)))
+        assert "autoEnableCodemode" not in caplog.text
+
+    def test_no_scenario_server_means_no_change_and_no_warning(self, tmp_path, fake_pi, caplog):
+        self._project(tmp_path, True)  # Pi's own default is true: nothing changes.
+        command, _ = fake_pi(_events_tool_run())
+        with caplog.at_level("WARNING"):
+            _run(PiRunner(cwd=tmp_path, pi_command=command))
+        assert "autoEnableCodemode" not in caplog.text
+
+    def test_no_repo_file_does_not_warn(self, tmp_path, fake_pi, caplog):
+        command, _ = fake_pi(_events_tool_run())
+        with caplog.at_level("WARNING"):
+            _run(PiRunner(cwd=tmp_path, pi_command=command, mcp_servers=list(self.SERVERS)))
+        assert "autoEnableCodemode" not in caplog.text
+
+    def test_the_run_still_goes_on_and_the_scenario_file_says_false(self, tmp_path, fake_pi):
+        self._project(tmp_path, True)
+        command, record = fake_pi(_events_tool_run())
+        _run(PiRunner(cwd=tmp_path, pi_command=command, mcp_servers=list(self.SERVERS)))
+        assert json.loads(json.loads(record.read_text())["files"]["mcp.json"])["autoEnableCodemode"] is False
+
+    @pytest.mark.parametrize("enabled", [True, False])
+    def test_flag_in_the_metadata_of_the_agent_span(self, tmp_path, fake_pi, monkeypatch, fake_span_llmobs, enabled):
+        import airedale.harness.base as base
+
+        monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
+        monkeypatch.setattr(base, "agent", lambda **kwargs: lambda func: func)
+
+        async def _no_catalog(servers, headers):
+            return {}
+
+        monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _no_catalog)
+        self._project(tmp_path, enabled)
+        command, _ = fake_pi(_events_tool_run())
+        _bounded(
+            PiRunner(cwd=tmp_path, pi_command=command, mcp_servers=list(self.SERVERS)).run(
+                model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"
+            )
+        )
+        flags = [
+            a["metadata"].get("project_auto_enable_codemode") for a in fake_span_llmobs.annotations if "metadata" in a
+        ]
+        assert (True in flags) is enabled

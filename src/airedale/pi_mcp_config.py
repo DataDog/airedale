@@ -72,15 +72,20 @@ def mcp_namespace(server: str) -> str:
     return "mcp__" + server.replace("-", "_")
 
 
-def apply_project_config(project_file: Path, servers: dict[str, PiMcpEntry], errors: list[str]) -> None:
+def apply_project_config(project_file: Path, servers: dict[str, PiMcpEntry], errors: list[str]) -> bool | None:
     """Merge the repo file ``project_file`` into ``servers`` (the global servers), as pi does.
 
     ``servers`` is changed in place; the diagnostics of pi for the entries that
     it does not load are added to ``errors``. A missing file changes nothing.
+    Return the top-level ``autoEnableCodemode`` of the file when it is a boolean (pi lets the repo value replace the
+    global one), else ``None``.
     """
     parsed = _read_json_object(project_file, errors)
-    if parsed is not None:
-        _apply_project_entries(project_file, parsed, servers, errors)
+    if parsed is None:
+        return None
+    _apply_project_entries(project_file, parsed, servers, errors)
+    value = parsed.get("autoEnableCodemode")
+    return value if isinstance(value, bool) else None
 
 
 # --------------------------------------------------------------------------- #

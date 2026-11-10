@@ -475,6 +475,7 @@ def _annotate_agent_loop_span(
     allowed_builtin_tools: Iterable[str] | None = None,
     max_turns: int | None = None,
     mcp_tool_metadata: Mapping[tuple[str, str], McpToolMetadata] | None = None,
+    extra_metadata: Mapping[str, Any] | None = None,
 ) -> None:
     """Annotate the outer ``agent`` span to match the native Claude agent span.
 
@@ -492,6 +493,7 @@ def _annotate_agent_loop_span(
         "sdk": sdk_name,
         "mcp_servers": [server.to_safe_dict() for server in mcp_servers],
         "tool_call_count": len(tool_calls),
+        **(extra_metadata or {}),
     }
     manifest = _agent_manifest(
         framework=framework,
@@ -691,6 +693,7 @@ class DecoratorSpanAgentRunner(AgentRunner):
             allowed_builtin_tools=self._effective_builtin_tools(),
             max_turns=self.max_turns,
             mcp_tool_metadata=run_result.mcp_tool_metadata,
+            extra_metadata=self._run_metadata(),
         )
         if run_result.error is not None:
             raise run_result.error
@@ -735,6 +738,10 @@ class DecoratorSpanAgentRunner(AgentRunner):
         # `agent -> llm + tool...` topology.
         _emit_tool_spans(run_result.tool_calls)
         return run_result, missing_usage_error
+
+    def _run_metadata(self) -> dict[str, Any]:
+        """Return extra flags for the metadata of the ``agent`` span. Default: none."""
+        return {}
 
     def _reported_mcp_servers(self) -> list[McpServerSpec]:
         """Return the MCP servers to report in the span metadata and the agent manifest.
