@@ -345,7 +345,18 @@ Notes:
   `.pi/mcp.json` (its `direct` tools stay available; for its `codemode`
   tools, add `codemode` to `allowed_builtin_tools`). Because
   pi lets a project server replace a same-named scenario server, such a name
-  collision fails the run. **Trust:** with `--approve`, a cloned repo's
+  collision fails the run. **The boundary:** the project configuration is
+  **part of the experiment**, and the user configuration is not. Everything
+  that the evaluated repo carries loads and counts: `.pi/extensions` and the
+  tools they register (also tools with the name of an MCP tool), `.pi/mcp.json`
+  servers, `.pi/skills`, `.agents/skills` and `.pi/settings.json`. Airedale does
+  not filter those tools, so a repo extension can add tools to the run. The
+  operator's own configuration never loads: `~/.pi/agent` extensions, skills,
+  prompt templates, themes, settings, packages and `mcp.json`, `~/.agents/skills`
+  and context files above the workspace. `tests/test_pi_isolation.py` checks
+  this against the installed `pi` (it lists what pi loads for a fake home and a
+  project that both have extensions, skills, prompt templates and MCP servers).
+  **Trust:** with `--approve`, a cloned repo's
   `.pi/extensions` and project packages run inside the pi process with its
   environment (as `.claude/settings.json` hooks do for Claude). Only
   evaluate repositories you trust. The pi process gets **no** Datadog variable
