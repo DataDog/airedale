@@ -12,6 +12,7 @@ then prints a scripted JSONL event stream.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import math
 import os
@@ -4497,6 +4498,29 @@ class TestNoRawValues:
         from airedale.harness.pi_spans import COMPACTION_REASONS
 
         assert {"manual", "threshold", "overflow"} == COMPACTION_REASONS
+
+    def test_stderr_of_a_failed_mcp_probe_is_in_the_report_of_a_failed_run_only(
+        self, tmp_path, fake_pi, monkeypatch, fake_span_llmobs, capfd, private_report_dir
+    ):
+        import airedale.harness.base as base
+
+        monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
+        monkeypatch.setattr(base, "agent", lambda **kwargs: lambda func: func)
+        script = "import sys; sys.stderr.write('PROBE-STDERR-SECRET-0123456789'); sys.exit(1)"
+        server = McpServerSpec(name="noisy", command=sys.executable, args=("-c", script))
+        for status, expect_report in (("3", True), ("0", False)):
+            command, _ = fake_pi(_events_tool_run(), FAKE_PI_EXIT=status)
+            runner = PiRunner(cwd=tmp_path, pi_command=command, mcp_servers=[server])
+            for old in _report_files(private_report_dir):
+                old.unlink()
+            with contextlib.suppress(RuntimeError):
+                _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
+            out, err = capfd.readouterr()
+            assert "PROBE-STDERR-SECRET" not in out + err
+            reports = _report_files(private_report_dir)
+            assert bool(reports) is expect_report
+            if expect_report:
+                assert "PROBE-STDERR-SECRET-0123456789" in reports[0].read_text()
 
     def test_the_old_redaction_code_is_gone(self):
         import airedale.harness.pi as pi_module
