@@ -110,6 +110,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import fnmatch
 import heapq
 import json
 import logging
@@ -374,7 +375,9 @@ class PiRunner(DecoratorSpanAgentRunner):
                     skill_dirs=skill_dirs,
                     collector_extension=collector_extension,
                 )
-                collector = _PiEventCollector(max_turns=self.max_turns, spans=spans)
+                collector = _PiEventCollector(
+                    max_turns=self.max_turns, spans=spans, tool_names=tuple(self._tool_entries())
+                )
                 returncode, stderr_tail, extension_failed = await self._run_process(
                     command,
                     user_prompt=user_prompt,
@@ -1096,6 +1099,13 @@ def _cut_utf8(text: str, limit: int) -> str:
     return "".join(parts)
 
 
+_SAFE_TOOL_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}")
+
+
+def _is_small_count(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 1000
+
+
 def _raw(value: Any) -> str:
     """Return ``value`` as text for the private report, cut at :data:`_MAX_RAW_VALUE` characters."""
     text = str(value)
@@ -1500,6 +1510,8 @@ class _PiEventCollector:
     """Accumulate pi JSON-mode events into an :class:`AgentRunResult`."""
 
     max_turns: int | None = None
+    #: The ``--tools`` entries of the run (names and ``*`` patterns): the only tool names shown in the progress.
+    tool_names: tuple[str, ...] = ()
     session_id: str | None = None
     turns: int = 0
     assistant_messages: list[dict[str, Any]] = field(default_factory=list)
@@ -1585,7 +1597,7 @@ class _PiEventCollector:
         event_type = event.get("type")
         if event_type == "session":
             self.session_id = str(event.get("id") or "") or None
-            return f"session {self.session_id or '<unknown>'}"
+            return "session started"  # (Not the id: it comes from pi, and the progress goes to terminals and CI logs.)
         if event_type == "turn_start":
             self.turns += 1
             if self.max_turns and self.turns > self.max_turns:
@@ -1630,7 +1642,7 @@ class _PiEventCollector:
             # A start record for an id that is still open begins a new
             # execution: the earlier one stays, unfinished.
             self._begin_execution(event, args=event.get("args"))
-            return f"tool {name}"
+            return f"tool {self._progress_tool_name(name)}"
         if event_type == "tool_execution_end":
             tool_id = str(event.get("toolCallId") or "")
             # The end record belongs to the open execution of this id. With no
@@ -1675,7 +1687,10 @@ class _PiEventCollector:
                 self.private_notes.append(f"auto_retry_end.finalError: {_raw(event.get('finalError'))}")
             return None
         if event_type == "auto_retry_start":
-            return f"retry {event.get('attempt')}/{event.get('maxAttempts')}"
+            attempt, maximum = event.get("attempt"), event.get("maxAttempts")
+            if _is_small_count(attempt) and _is_small_count(maximum):
+                return f"retry {attempt}/{maximum}"
+            return "retry"
         if event_type == "agent_settled":
             aborted = event.get("aborted")
             if not isinstance(aborted, bool):
@@ -1707,6 +1722,17 @@ class _PiEventCollector:
         values = [f"{name}={_raw(message[name])!r}" for name in fields if message.get(name) not in (None, "")]
         if values:
             self.private_notes.append(f"assistant message {len(self.assistant_messages)}: " + ", ".join(values))
+
+    def _progress_tool_name(self, name: str) -> str:
+        """Return ``name`` if it is a tool of this run (an entry of ``--tools``, or matched by a pattern), else ``<other>``.
+
+        The name comes from pi, and the progress goes to terminals and CI logs.
+        """
+        if _SAFE_TOOL_NAME.fullmatch(name) and any(
+            name == entry or ("*" in entry and fnmatch.fnmatchcase(name, entry)) for entry in self.tool_names
+        ):
+            return name
+        return "<other>"
 
     def _end_names_another_tool(self, event: dict[str, Any]) -> bool:
         """Return True for an end record with the id of an open execution but the name of another tool.

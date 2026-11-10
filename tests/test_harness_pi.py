@@ -4356,6 +4356,37 @@ class TestNoRawValues:
         assert _cut_utf8("a\ud800b", 100) == "a\\ud800b"
         assert _cut_utf8("é😀", 100) == "é😀"
 
+    def test_progress_has_no_session_id_and_no_tool_name_that_is_not_of_the_run(self, tmp_path, fake_pi):
+        session_secret, tool_secret = "sess-SECRET-0123456789", "sk-TOOL-SECRET-0123456789"
+        events = _events_tool_run()
+        events[0]["id"] = session_secret
+        for event in events:
+            if event["type"].startswith("tool_execution"):
+                event["toolName"] = tool_secret
+        events[4]["message"]["content"][2]["name"] = tool_secret
+        command, _ = fake_pi(events)
+        progress: list[str] = []
+
+        async def receive(message):
+            progress.append(message)
+
+        _bounded(
+            PiRunner(cwd=tmp_path, pi_command=command)._run_agent(
+                model=MODEL, system_prompt="S", user_prompt="Q", trace_headers={}, progress=receive
+            )
+        )
+        text = "\n".join(progress)
+        assert "session started" in text and "tool <other>" in text
+        assert "SECRET" not in text
+
+    def test_progress_shows_a_tool_name_of_the_run(self):
+        collector = _PiEventCollector(tool_names=("read", "bash", "mcp__*"))
+        start = {"type": "tool_execution_start", "toolCallId": "1", "args": {}}
+        shown = {name: collector.feed({**start, "toolName": name}) for name in ("read", "mcp__srv_tool", "other")}
+        assert shown == {"read": "tool read", "mcp__srv_tool": "tool mcp__srv_tool", "other": "tool <other>"}
+        assert collector.feed({"type": "auto_retry_start", "attempt": 1, "maxAttempts": 3}) == "retry 1/3"
+        assert collector.feed({"type": "auto_retry_start", "attempt": "SECRET", "maxAttempts": 3}) == "retry"
+
     def test_the_old_redaction_code_is_gone(self):
         import airedale.harness.pi as pi_module
 
