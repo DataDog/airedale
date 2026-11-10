@@ -15,6 +15,14 @@ from pathlib import Path
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def private_report_dir(tmp_path_factory, monkeypatch) -> Path:
+    """Send the private reports of failed pi runs to a temporary directory (and give the tests its path)."""
+    directory = tmp_path_factory.mktemp("airedale-output")
+    monkeypatch.setenv("AIREDALE_OUTPUT_DIR", str(directory))
+    return directory
+
+
 @pytest.fixture
 def clear_credential_cache():
     """Clear the gateway credential cache before and after each test.

@@ -314,19 +314,21 @@ class TestEventCollector:
         other = ModelSpec.parse("anthropic/claude-sonnet-4-5")
         result = _collect(_events_tool_run(model=other)).result(model=MODEL, returncode=0, stderr_tail="")
         assert result.error is not None
-        assert "instead of anthropic/claude-sonnet-4-6" in str(result.error)
+        assert "another model than anthropic/claude-sonnet-4-6" in str(result.error)
+        assert "claude-sonnet-4-5" not in str(result.error)  # What pi ran is a private note, not part of the error.
 
     def test_failed_final_message_is_an_error(self):
         events = _events_tool_run()
         events[9]["message"]["stopReason"] = "error"
         events[9]["message"]["errorMessage"] = "529 overloaded"
         result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
-        assert "529 overloaded" in str(result.error)
+        assert "provider error (stopReason=error)" in str(result.error)
+        assert "529 overloaded" not in str(result.error)
 
-    def test_non_zero_exit_includes_stderr(self):
+    def test_non_zero_exit_does_not_include_stderr(self):
         result = _collect(_events_tool_run()).result(model=MODEL, returncode=2, stderr_tail="bad flag")
         assert "status 2" in str(result.error)
-        assert "bad flag" in str(result.error)
+        assert "bad flag" not in str(result.error)
 
     def test_no_assistant_message(self):
         result = _collect([{"type": "agent_settled"}]).result(model=MODEL, returncode=0, stderr_tail="")
@@ -588,214 +590,6 @@ class TestEventCollector:
         _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
         assert len(probed) == 1
 
-    def test_stderr_tail_of_a_failed_run_has_no_credential(self, tmp_path, fake_pi, monkeypatch):
-        """Pi, an extension or a child can print the gateway token to stderr: the error must not have it."""
-        token = "tok-GATEWAY-secret-0123456789"
-        key = "sk-GATEWAY-key-abcdef0123456789"
-        other = "provider-NATIVE-key-ABCDEF123456"
-        monkeypatch.setenv("ANTHROPIC_API_KEY", other)
-        monkeypatch.setenv("MY_CUSTOM_TOKEN", "custom-TOKEN-value-123456")
-        events = [{"type": "agent_start"}, {"type": "agent_settled", "aborted": False}]
-        command, _ = fake_pi(
-            events,
-            FAKE_PI_STDERR=f"boom {token} and {key} and {other} and custom-TOKEN-value-123456\n"
-            f"Authorization: Bearer unknown-bearer-value-9999\n",
-            FAKE_PI_EXIT="3",
-        )
-        runner = PiRunner(
-            cwd=tmp_path,
-            pi_command=command,
-            gateway_base_url="https://gw.example",
-            gateway_bearer_token=token,
-            gateway_api_key=key,
-        )
-        with pytest.raises(RuntimeError) as error:
-            _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
-        text = str(error.value)
-        assert "boom" in text  # The rest of the message is kept.
-        for secret in (token, key, other, "custom-TOKEN-value-123456", "unknown-bearer-value-9999"):
-            assert secret not in text
-        assert text.count("<redacted>") >= 5
-
-    def test_stderr_tail_has_no_value_of_the_copied_auth_json(self, tmp_path, fake_pi, monkeypatch, caplog):
-        """The copy of the operator's auth.json holds the tokens of every provider: none may reach the error or the log."""
-        operator = tmp_path / "operator"
-        operator.mkdir()
-        secrets = {
-            "access": "ACCESS-anthropic-0123456789abcdef",
-            "refresh": "REFRESH-anthropic-0123456789abcdef",
-            "openai_key": "sk-openai-0123456789abcdef0123",
-            "short_key": "k-12345",
-            "other_token": "TOKEN-google-0123456789abcdef",
-        }
-        auth = {
-            "anthropic": {"type": "oauth", "access": secrets["access"], "refresh": secrets["refresh"], "expires": 1},
-            "openai": {"type": "api_key", "key": secrets["openai_key"]},
-            "google": {"type": "api_key", "token": secrets["other_token"], "apiKey": secrets["short_key"]},
-        }
-        (operator / "auth.json").write_text(json.dumps(auth))
-        monkeypatch.setenv("PI_CODING_AGENT_DIR", str(operator))
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-        workspace = tmp_path / "workspace"
-        workspace.mkdir()
-        printed = "\n".join(f"{name}={value}" for name, value in secrets.items())
-        command, _ = fake_pi(
-            [{"type": "agent_start"}, {"type": "agent_settled", "aborted": False}],
-            FAKE_PI_STDERR=f"cat auth.json: oauth api_key {printed}\n",
-            FAKE_PI_EXIT="3",
-        )
-        runner = PiRunner(cwd=workspace, pi_command=command)
-        with caplog.at_level("DEBUG"), pytest.raises(RuntimeError) as error:
-            _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
-        text = str(error.value)
-        assert "cat auth.json: oauth api_key" in text  # Ordinary words are kept.
-        for value in secrets.values():
-            assert value not in text
-            assert value not in caplog.text
-
-    def test_short_and_refreshed_values_of_the_copied_auth_json_are_removed(self, tmp_path, monkeypatch):
-        """Credentials of any length under a credential key, and a token that pi writes into the copy during the run."""
-        operator = tmp_path / "operator"
-        operator.mkdir()
-        (operator / "auth.json").write_text(
-            json.dumps(
-                {
-                    "anthropic": {"type": "api_key", "key": "k-1"},
-                    "openai": {"type": "oauth", "access": "ab", "refresh": "r-0123456789-old-refresh-token"},
-                }
-            )
-        )
-        child = tmp_path / "child.py"
-        child.write_text(
-            "import json, os, pathlib, sys\n"
-            "path = pathlib.Path(os.environ['PI_CODING_AGENT_DIR']) / 'auth.json'\n"
-            "data = json.loads(path.read_text())\n"
-            "data['openai']['access'] = 'NEW-refreshed-access-token-0123'\n"  # Pi refreshes an OAuth token.
-            "path.write_text(json.dumps(data))\n"
-            "print(json.dumps({'type': 'agent_start'}), flush=True)\n"
-            "print(json.dumps({'type': 'agent_settled', 'aborted': False}), flush=True)\n"
-            "sys.stderr.write('printed ' + path.read_text() + ' fixture failure\\n')\n"
-            "raise SystemExit(3)\n"
-        )
-        monkeypatch.setenv("PI_CODING_AGENT_DIR", str(operator))
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-        runner = PiRunner(cwd=tmp_path, pi_command=[sys.executable, str(child)])
-        with pytest.raises(RuntimeError) as error:
-            _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
-        text = str(error.value)
-        assert "fixture failure" in text
-        for value in ("k-1", "r-0123456789-old-refresh-token", "NEW-refreshed-access-token-0123"):
-            assert value not in text
-        assert '"ab"' not in text  # An access token of two characters, under a credential key.
-
-    @pytest.mark.parametrize(
-        ("label", "options", "secret"),
-        [
-            ("gateway header", {"gateway_headers": {"X-Api-Key": "gk-1"}}, "gk-1"),
-            (
-                "gateway authorization",
-                {"gateway_headers": {"Authorization": "Basic dXNlcjpwYXNz"}},
-                "Basic dXNlcjpwYXNz",
-            ),
-            (
-                "gateway header, other name, long",
-                {"gateway_headers": {"X-Custom": "custom-0123456789abcdef"}},
-                "custom-0123456789abcdef",
-            ),
-            (
-                "mcp header",
-                {"mcp_servers": [McpServerSpec(name="demo", url="https://mcp.invalid", headers={"X-Api-Key": "m1"})]},
-                "m1",
-            ),
-            (
-                "mcp env",
-                {"mcp_servers": [McpServerSpec(name="demo", command="x", env={"DEMO_API_KEY": "e5"})]},
-                "e5",
-            ),
-            (
-                "mcp env, other name, long",
-                {"mcp_servers": [McpServerSpec(name="demo", command="x", env={"DEMO": "value-0123456789-abcdef"})]},
-                "value-0123456789-abcdef",
-            ),
-        ],
-        ids=lambda value: value if isinstance(value, str) and " " in value else None,
-    )
-    def test_credentials_of_the_run_config_are_removed_from_stderr(
-        self, tmp_path, fake_pi, monkeypatch, label, options, secret
-    ):
-        """Header and environment values that Airedale writes into models.json and mcp.json, at any length."""
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        command, _ = fake_pi(
-            [{"type": "agent_start"}, {"type": "agent_settled", "aborted": False}],
-            FAKE_PI_STDERR=f"fixture failure value={secret} end\n",
-            FAKE_PI_EXIT="3",
-        )
-        options = {"gateway_base_url": "https://gw.example", **options}
-        runner = PiRunner(cwd=tmp_path, pi_command=command, **options)
-        with pytest.raises(RuntimeError) as error:
-            _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
-        text = str(error.value)
-        assert "fixture failure" in text, label
-        assert secret not in text, label
-
-    def test_short_ordinary_header_values_are_not_hidden(self, tmp_path):
-        runner = PiRunner(cwd=tmp_path, gateway_headers={"source": "evals", "provider": "openai", "org-id": "42"})
-        assert runner._configured_secrets() == []
-
-    def test_configured_secrets_of_headers_and_environment(self, tmp_path):
-        servers = [
-            McpServerSpec(name="a", url="https://x.invalid", headers={"Authorization": "t", "Accept": "json"}),
-            McpServerSpec(name="b", command="x", env={"GITHUB_TOKEN": "g", "LANG": "C.UTF-8"}),
-        ]
-        runner = PiRunner(cwd=tmp_path, gateway_headers={"X-Api-Key": "k"}, mcp_servers=servers)
-        assert sorted(runner._configured_secrets()) == ["g", "k", "t"]
-
-    def test_multiline_secret_that_ends_the_output_is_removed_with_its_newline(self, tmp_path, monkeypatch):
-        """A PEM key ends with a newline; the tail was stripped before the key was looked for, and the key stayed."""
-        pem = "-----BEGIN PRIVATE KEY-----\nDUMMY-KEY-MATERIAL-0123456789\n-----END PRIVATE KEY-----\n"
-        monkeypatch.setenv("DEMO_PRIVATE_KEY", pem)
-        program = (
-            "import os, sys\nsys.stdin.read()\n"
-            "sys.stderr.write('client diagnostic key=' + os.environ['DEMO_PRIVATE_KEY'])\n"  # The key ends the output.
-            'print(\'{"type": "agent_settled", "aborted": false}\', flush=True)\nsys.exit(3)\n'
-        )
-        runner = PiRunner(cwd=tmp_path, pi_command=[sys.executable, "-c", program])
-        with pytest.raises(RuntimeError) as error:
-            _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
-        text = str(error.value)
-        assert "client diagnostic key=" in text
-        assert "DUMMY-KEY-MATERIAL" not in text
-        assert "BEGIN PRIVATE KEY" not in text
-
-    @pytest.mark.parametrize(
-        "secret", ["éTOKEN-FRAGMENT-0123456789", "€TOKEN-FRAGMENT-0123456789", "😀TOKEN-FRAGMENT-0123456789"]
-    )
-    def test_window_inside_the_first_utf8_character_of_a_secret_through_a_public_run(
-        self, tmp_path, monkeypatch, secret
-    ):
-        from airedale.harness.pi import PI_STDERR_TAIL_BYTES
-
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        program = (
-            "import sys\nsys.stdin.read()\n"
-            f"raw = {secret!r}.encode()\n"
-            # The tail starts one byte after the first byte of the secret: inside its first character.
-            f"sys.stderr.buffer.write(b'prefix:' + raw + b'.' * ({PI_STDERR_TAIL_BYTES} + 1 - len(raw)))\n"
-            'print(\'{"type": "agent_settled", "aborted": false}\', flush=True)\nsys.exit(3)\n'
-        )
-        runner = PiRunner(
-            cwd=tmp_path,
-            pi_command=[sys.executable, "-c", program],
-            gateway_base_url="https://gw.example",
-            gateway_api_key=secret,
-        )
-        with pytest.raises(RuntimeError) as error:
-            _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
-        assert "TOKEN-FRAGMENT-0123456789" not in str(error.value)
-        assert "pi stderr (tail)" in str(error.value)
-
     def test_unused_auth_json_credential_with_an_unpaired_surrogate_does_not_crash_a_good_run(
         self, tmp_path, fake_pi, monkeypatch
     ):
@@ -809,73 +603,6 @@ class TestEventCollector:
         runner = PiRunner(cwd=tmp_path, pi_command=command)
         result = _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
         assert result.answer == "The directory is empty."
-
-    def test_surrogate_credential_is_removed_in_every_spelling_it_can_have(self, tmp_path, fake_pi, monkeypatch):
-        operator = tmp_path / "operator"
-        operator.mkdir()
-        (operator / "auth.json").write_text('{"openai": {"type": "api_key", "key": "sk-lone-\\ud800-surrogate-0123"}}')
-        monkeypatch.setenv("PI_CODING_AGENT_DIR", str(operator))
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        command, _ = fake_pi(
-            [{"type": "agent_start"}, {"type": "agent_settled", "aborted": False}],
-            # As Node prints it (U+FFFD), as JSON spells it, and passed through as bytes.
-            FAKE_PI_STDERR="fixture failure a=sk-lone-\ufffd-surrogate-0123 b=sk-lone-\\ud800-surrogate-0123\n",
-            FAKE_PI_EXIT="3",
-        )
-        runner = PiRunner(cwd=tmp_path, pi_command=command)
-        with pytest.raises(RuntimeError) as error:
-            _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
-        assert "fixture failure" in str(error.value)
-        assert "surrogate-0123" not in str(error.value)
-
-    @pytest.mark.skipif(os.name == "nt", reason="POSIX environment bytes")
-    def test_inherited_env_token_with_a_non_utf8_byte_does_not_crash_and_is_removed(self, tmp_path, fake_pi):
-        """os.environ decodes the byte with surrogateescape (\\udcff): UnicodeEncodeError crashed a good run."""
-        name, raw = b"DEMO_REVIEW_TOKEN", b"tok-\xff\xfe-0123456789"
-        os.environb[name] = raw
-        try:
-            command, _ = fake_pi(_events_tool_run())
-            runner = PiRunner(cwd=tmp_path, pi_command=command)
-            result = _bounded(
-                runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h")
-            )
-            assert result.answer == "The directory is empty."
-            program = (
-                "import os, sys\nsys.stdin.read()\n"
-                "sys.stderr.buffer.write(b'fixture failure ' + os.environb[b'DEMO_REVIEW_TOKEN'] + b' end\\n')\n"
-                'print(\'{"type": "agent_settled", "aborted": false}\', flush=True)\nsys.exit(3)\n'
-            )
-            failing = PiRunner(cwd=tmp_path, pi_command=[sys.executable, "-c", program])
-            with pytest.raises(RuntimeError) as error:
-                _bounded(failing.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
-            assert "fixture failure" in str(error.value)
-            assert "0123456789" not in str(error.value)
-        finally:
-            del os.environb[name]
-
-    def test_byte_forms_never_raise(self):
-        from airedale.harness.pi import _byte_forms
-
-        for secret in ["plain", "\ud800", "x\udcffy", "é", "😀", "a\udfffb\ud800"]:
-            assert _byte_forms(secret)  # No exception, at least one form.
-
-    def test_run_without_a_copy_of_auth_json_hides_nothing_of_the_file(self, tmp_path, monkeypatch):
-        operator = tmp_path / "operator"
-        operator.mkdir()
-        (operator / "auth.json").write_text(json.dumps({"anthropic": {"access": "ACCESS-0123456789abcdef0123"}}))
-        monkeypatch.setenv("PI_CODING_AGENT_DIR", str(operator))
-        assert PiRunner(cwd=tmp_path)._auth_file_secrets({"PI_CODING_AGENT_DIR": str(tmp_path / "empty")}) == []
-        assert PiRunner(cwd=tmp_path)._auth_file_secrets({}) == []
-
-    def test_secret_strings_of_a_credentials_file(self):
-        from airedale.harness.pi import _secret_strings_of_json
-
-        text = json.dumps(
-            {"a": {"type": "oauth", "access": "short", "list": ["x" * 25, "ok"], "expires": 5}, "b": ["y" * 20]}
-        )
-        assert sorted(_secret_strings_of_json(text)) == sorted(["short", "x" * 25, "y" * 20])
-        # A file that is not JSON gives its long tokens.
-        assert _secret_strings_of_json("not json: ABCDEFGHIJKLMNOPQRSTUV and word") == ["ABCDEFGHIJKLMNOPQRSTUV"]
 
     def test_empty_final_response_through_a_run(self, tmp_path, fake_pi):
         events = _events_tool_run()
@@ -2649,7 +2376,10 @@ class TestSubprocess:
         command, _ = fake_pi([], FAKE_PI_EXIT="3", FAKE_PI_STDERR="unknown model")
         result = _run(PiRunner(cwd=tmp_path, pi_command=command))
         assert "status 3" in str(result.error)
-        assert "unknown model" in str(result.error)
+        assert "unknown model" not in str(result.error)
+        # The raw stderr is in the private file that the error names.
+        report = Path(str(result.error).rsplit(" ", 1)[1])
+        assert "unknown model" in report.read_text()
 
     def test_max_turns_stops_hanging_process(self, tmp_path, fake_pi):
         events = [{"type": "turn_start"}, {"type": "turn_start"}, {"type": "turn_start"}]
@@ -2724,7 +2454,8 @@ class TestCompletionRules:
         with caplog.at_level("WARNING"):
             result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
         assert result.error is None
-        assert "claude-sonnet-4-6-20991231" in caplog.text
+        assert "claude-sonnet-4-6-20991231" not in caplog.text  # The value is not logged.
+        assert "response model that is not the configured one" in caplog.text
 
 
 class TestPiToolNames:
@@ -3778,162 +3509,6 @@ class TestPiCommandEnv:
         assert pi_module._default_pi_command() == ["[tools]/pi", "--x"]
 
 
-class TestRedactSecrets:
-    def test_secrets_are_replaced_longest_first(self):
-        from airedale.harness.pi import _redact_secrets
-
-        assert _redact_secrets("a SECRET-LONG-VALUE b SECRET-LONG c", ["SECRET-LONG", "SECRET-LONG-VALUE"]) == (
-            "a <redacted> b <redacted> c"
-        )
-
-    def test_bearer_token_is_removed_even_when_unknown(self):
-        from airedale.harness.pi import _redact_secrets
-
-        assert _redact_secrets("Authorization: Bearer abcdef0123456789xyz\n", []) == "Authorization: Bearer <redacted>"
-        assert _redact_secrets("Authorization: Bearer abc1234", []) == "Authorization: Bearer <redacted>"  # Any length.
-
-    @pytest.mark.parametrize("secret", ["a1b2c", "x", "ab", "tok-12", "a" * 3])
-    def test_a_short_known_credential_is_removed(self, secret):
-        from airedale.harness.pi import _redact_secrets
-
-        assert _redact_secrets(f"key={secret} end", [secret]) == "key=<redacted> end"
-
-    def test_empty_secrets_are_ignored(self):
-        from airedale.harness.pi import _redact_secrets
-
-        assert _redact_secrets("unchanged text", ["", ""]) == "unchanged text"
-
-    def test_short_gateway_token_and_bearer_through_a_failed_run(self, tmp_path, fake_pi, monkeypatch):
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        command, _ = fake_pi(
-            [{"type": "agent_start"}, {"type": "agent_settled", "aborted": False}],
-            FAKE_PI_STDERR="fixture failure token=a1b2c Authorization: Bearer abc1234\n",
-            FAKE_PI_EXIT="3",
-        )
-        runner = PiRunner(
-            cwd=tmp_path, pi_command=command, gateway_base_url="https://gw.example", gateway_bearer_token="a1b2c"
-        )
-        with pytest.raises(RuntimeError) as error:
-            _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
-        text = str(error.value)
-        assert "fixture failure" in text
-        assert "a1b2c" not in text
-        assert "abc1234" not in text
-
-    def test_a_short_value_of_a_variable_with_a_secret_name_is_not_hidden(self, tmp_path, monkeypatch):
-        # Only a *name* like a secret: a flag such as "1" would hide every "1" of a message.
-        monkeypatch.setenv("NO_AUTH", "1")
-        values = PiRunner(cwd=tmp_path)._secret_values({"NO_AUTH": "1", "MY_TOKEN": "tok-123456"})
-        assert "1" not in values
-        assert "tok-123456" in values
-
-    def test_a_secret_cut_by_the_window_is_removed(self):
-        from airedale.harness.pi import _redact_secrets
-
-        secret = "tok-0123456789-abcdefghij"
-        tail = secret[10:] + " rest of the line"  # The tail starts in the middle of the secret.
-        assert _redact_secrets(tail, [secret]) == "<redacted> rest of the line"
-        assert _redact_secrets("short", [secret]) == "short"
-
-    def test_cut_secret_with_a_shorter_known_value_inside_the_cut_part(self):
-        from airedale.harness.pi import _redact_secrets
-
-        long_secret = "PREFIX-private-secret-abcdefghijklmnopqrstuv"
-        short_secret = "private-secret"  # Inside the part that the window keeps.
-        tail = long_secret[7:] + " rest"
-        redacted = _redact_secrets(tail, [long_secret, short_secret])
-        assert "abcdefghijklmnopqrstuv" not in redacted
-        assert redacted == "<redacted> rest"
-
-    @pytest.mark.parametrize(
-        "secret",
-        ["é-password-0123456789abcdefghijklmnop", "€€-key-0123456789abcdefghij", "😀-token-0123456789abcdefghij"],
-    )
-    @pytest.mark.parametrize("cut", [1, 2, 3])
-    def test_window_that_starts_inside_a_utf8_character(self, secret, cut):
-        from airedale.harness.pi import _TailBuffer
-
-        payload = secret.encode() + b" rest"
-        first_character = len(secret[0].encode())
-        if cut >= first_character:
-            pytest.skip("the cut must be inside the first character")
-        buffer = _TailBuffer(len(payload) - cut)
-        buffer.append(payload)  # The tail starts inside the first character of the secret.
-        redacted = buffer.redacted_text([secret])
-        assert secret[1:] not in redacted
-        assert secret[2:] not in redacted
-        assert "0123456789" not in redacted
-        assert redacted.endswith("rest")
-
-    def test_cut_secret_through_the_tail_buffer_with_overlapping_values(self):
-        from airedale.harness.pi import _TailBuffer
-
-        long_secret = "tok-0123456789-abcdefghijklmnopqrstuvwx"
-        inner = "abcdefghijkl"  # A known value inside the long one.
-        payload = b"noise " * 20 + long_secret.encode() + b" end"
-        buffer = _TailBuffer(len(long_secret) - 5 + 4)
-        buffer.append(payload)
-        redacted = buffer.redacted_text([inner, long_secret])
-        assert "mnopqrstuvwx" not in redacted
-        assert "end" in redacted
-
-    def test_complete_key_at_the_start_of_an_untruncated_tail_is_removed_whole(self):
-        from airedale.harness.pi import _TailBuffer
-
-        key = "a1b2" * 8  # 32 characters; its last 4 characters are also its first 4.
-        buffer = _TailBuffer(16 * 1024)
-        buffer.append(f"{key} first line\nsecond line\n".encode())
-        assert not buffer.truncated
-        assert buffer.redacted_text([key]) == "<redacted> first line\nsecond line"
-
-    def test_truncated_flag_is_set_only_when_bytes_were_dropped(self):
-        from airedale.harness.pi import _TailBuffer
-
-        buffer = _TailBuffer(10)
-        buffer.append(b"0123456789")
-        assert not buffer.truncated
-        buffer.append(b"x")
-        assert buffer.truncated
-
-    def test_complete_key_wins_over_a_shorter_cut_match_in_a_truncated_tail(self):
-        from airedale.harness.pi import _redact_secrets
-
-        key = "a1b2" * 8
-        assert _redact_secrets(f"{key} tail", [key]) == "<redacted> tail"
-
-    def test_short_value_at_the_start_does_not_hide_a_longer_cut_secret(self):
-        from airedale.harness.pi import _redact_secrets
-
-        long_secret = "PREFIX-private-secret-abcdefghijklmnopqrstuv"
-        assert _redact_secrets(long_secret[7:] + " rest", [long_secret, "private-secret"]) == "<redacted> rest"
-
-    def test_full_key_as_the_first_stderr_line_through_a_public_run(self, tmp_path, monkeypatch):
-        """The review: a 32-character key printed first left 28 characters visible (no window was cut)."""
-        key = "a1b2" * 8
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        program = (
-            "import sys\nsys.stdin.read()\n"
-            f"sys.stderr.write({key!r} + ' first line\\nsecond line\\n')\n"
-            'print(\'{"type": "agent_settled", "aborted": false}\', flush=True)\nsys.exit(3)\n'
-        )
-        runner = PiRunner(
-            cwd=tmp_path,
-            pi_command=[sys.executable, "-c", program],
-            gateway_base_url="https://gw.example",
-            gateway_api_key=key,
-        )
-        with pytest.raises(RuntimeError) as error:
-            _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
-        text = str(error.value)
-        assert "a1b2a1b2" not in text
-        assert "<redacted> first line" in text
-
-    def test_text_without_secret_is_unchanged(self):
-        from airedale.harness.pi import _redact_secrets
-
-        assert _redact_secrets("pi: model not found\n", ["tok-0123456789"]) == "pi: model not found"
-
-
 class TestStrictScenarioValidation:
     """The strict check wants an exact accept; the guard for project entries keeps its fail-closed meaning."""
 
@@ -4268,3 +3843,153 @@ class TestSumOfCostsMustBeFinite:
         result = _collect(events).result(model=MODEL, returncode=0, stderr_tail="")
         assert result.error is not None
         assert math.isfinite(result.usage.estimated_cost_usd)
+
+
+# --------------------------------------------------------------------------- #
+# Option S: no raw value of pi, a provider or the model in an error, a log or a span
+# --------------------------------------------------------------------------- #
+SECRETS = {
+    "gateway key": "gw-key-0123456789abcdef",
+    "short token": "a1b2c",
+    "bearer": "Bearer tok-ABCDEFGHIJKLMNOP",
+    "url key": "https://user:URL-CRED-0123456789@host.example/v1?api_key=URL-QUERY-0123456789",
+    "escaped": "esc-\\u00e9-secret-0123456789",
+    "cut fragment": "FRAGMENT-0123456789",
+}
+
+
+def _all_text(result, caplog, fake_span_llmobs=None) -> str:
+    """Everything that a reader of the run can see: the error, the logs, the spans and the result."""
+    parts = [str(result.error), caplog.text, result.answer, repr(result.tool_calls), repr(result.segments)]
+    if fake_span_llmobs is not None:
+        for span in fake_span_llmobs.spans:
+            parts.append(
+                json.dumps({"tags": span.tags, "annotations": span.annotations, "error": span.error}, default=str)
+            )
+        parts.append(json.dumps(fake_span_llmobs.annotations, default=str))
+    return "\n".join(parts)
+
+
+def _report_files(directory):
+    return sorted(Path(directory).glob("pi-run-*.log"))
+
+
+class TestNoRawValues:
+    @pytest.mark.parametrize("secret", SECRETS.values(), ids=SECRETS.keys())
+    def test_stderr_of_a_failed_run_is_only_in_the_private_file(
+        self, tmp_path, fake_pi, caplog, private_report_dir, secret
+    ):
+        command, _ = fake_pi([], FAKE_PI_EXIT="3", FAKE_PI_STDERR=f"first line {secret} last line\n")
+        with caplog.at_level("DEBUG"):
+            result = _run(
+                PiRunner(cwd=tmp_path, pi_command=command, gateway_base_url="https://gw", gateway_api_key="x")
+            )
+        assert "status 3" in str(result.error)
+        assert secret not in _all_text(result, caplog)
+        [report] = _report_files(private_report_dir)
+        assert str(report) in str(result.error)
+        assert secret.encode("utf-8", "surrogatepass") in report.read_bytes() or secret in report.read_text(
+            errors="replace"
+        )
+        assert report.stat().st_mode & 0o777 == 0o600
+
+    def test_no_file_when_the_run_did_not_fail(self, tmp_path, fake_pi, private_report_dir):
+        command, _ = fake_pi(_events_tool_run(), FAKE_PI_STDERR="warning: something printed SECRET-NOISE\n")
+        result = _run(PiRunner(cwd=tmp_path, pi_command=command))
+        assert result.error is None
+        assert _report_files(private_report_dir) == []
+
+    def test_no_file_when_a_failed_run_has_nothing_raw_to_say(self, tmp_path, fake_pi, private_report_dir):
+        command, _ = fake_pi([], FAKE_PI_EXIT="3")  # No stderr, no provider message.
+        result = _run(PiRunner(cwd=tmp_path, pi_command=command))
+        assert "status 3" in str(result.error)
+        assert "private file" not in str(result.error)
+        assert _report_files(private_report_dir) == []
+
+    def test_provider_error_message_of_the_final_message_is_only_in_the_private_file(
+        self, tmp_path, fake_pi, caplog, private_report_dir
+    ):
+        secret = SECRETS["url key"]
+        events = _events_tool_run()
+        events[9]["message"]["stopReason"] = "error"
+        events[9]["message"]["errorMessage"] = f"401 for {secret}"
+        command, _ = fake_pi(events)
+        with caplog.at_level("DEBUG"):
+            result = _run(PiRunner(cwd=tmp_path, pi_command=command))
+        assert "provider error (stopReason=error)" in str(result.error)
+        assert "URL-CRED" not in _all_text(result, caplog) and "URL-QUERY" not in _all_text(result, caplog)
+        [report] = _report_files(private_report_dir)
+        assert secret in report.read_text()
+
+    def test_final_error_of_the_retries_is_only_in_the_private_file(
+        self, tmp_path, fake_pi, caplog, private_report_dir
+    ):
+        secret = "FINAL-ERROR-CRED-0123456789"
+        events = _events_tool_run()
+        events[9]["message"]["stopReason"] = "length"
+        events.insert(-1, {"type": "auto_retry_end", "success": False, "finalError": f"gateway said {secret}"})
+        command, _ = fake_pi(events)
+        with caplog.at_level("DEBUG"):
+            result = _run(PiRunner(cwd=tmp_path, pi_command=command))
+        assert "pi retries failed" in str(result.error)
+        assert secret not in _all_text(result, caplog)
+        [report] = _report_files(private_report_dir)
+        assert secret in report.read_text()
+
+    def test_unknown_stop_reason_is_not_shown(self, tmp_path, fake_pi, caplog):
+        events = _events_tool_run()
+        events[9]["message"]["stopReason"] = "SECRET-STOP-REASON-0123"
+        command, _ = fake_pi(events)
+        result = _run(PiRunner(cwd=tmp_path, pi_command=command))
+        assert "SECRET-STOP-REASON" not in str(result.error)
+        assert "stopReason='<other>'" in str(result.error)
+
+    def test_model_pi_ran_is_not_in_the_error(self, tmp_path, fake_pi, private_report_dir):
+        other = ModelSpec.parse("anthropic/SECRET-MODEL-0123456789")
+        command, _ = fake_pi(_events_tool_run(model=other))
+        result = _run(PiRunner(cwd=tmp_path, pi_command=command))
+        assert "SECRET-MODEL" not in str(result.error)
+        [report] = _report_files(private_report_dir)
+        assert "SECRET-MODEL-0123456789" in report.read_text()
+
+    def test_attempt_that_could_not_load_the_collector_goes_to_the_file_if_the_run_fails(
+        self, tmp_path, fake_pi, monkeypatch, fake_span_llmobs, caplog, private_report_dir
+    ):
+        import airedale.harness.base as base
+
+        monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
+        monkeypatch.setattr(base, "agent", lambda **kwargs: lambda func: func)
+
+        async def _no_catalog(servers, headers):
+            return {}
+
+        monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _no_catalog)
+        events = _events_tool_run()
+        events[9]["message"]["stopReason"] = "error"
+        events[9]["message"]["errorMessage"] = "SECOND-ATTEMPT-ERROR-0123"
+        command, record = fake_pi(events, FAKE_PI_REJECT_EXTENSION="1")
+        with caplog.at_level("DEBUG"), pytest.raises(RuntimeError) as error:
+            _bounded(
+                PiRunner(cwd=tmp_path, pi_command=command).run(
+                    model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"
+                )
+            )
+        runs = [json.loads(line) for line in Path(str(record) + ".runs").read_text().splitlines()]
+        assert ["--extension" in argv for argv in runs] == [True, False]
+        assert "pi cannot load the airedale collector extension" in caplog.text
+        everything = (
+            caplog.text
+            + str(error.value)
+            + json.dumps([(span.tags, span.annotations) for span in fake_span_llmobs.spans], default=str)
+        )
+        assert "unsupported" not in everything and "SECOND-ATTEMPT" not in everything
+        [report] = _report_files(private_report_dir)
+        text = report.read_text()
+        assert "unsupported" in text and "SECOND-ATTEMPT-ERROR-0123" in text
+
+    def test_the_old_redaction_code_is_gone(self):
+        import airedale.harness.pi as pi_module
+
+        for name in ("_redact_secrets", "_redact_bytes", "_drop_cut_secret", "_byte_forms", "_secret_strings_of_json"):
+            assert not hasattr(pi_module, name), name
+        assert not hasattr(pi_module.PiRunner, "_secret_values")

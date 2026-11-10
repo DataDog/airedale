@@ -119,8 +119,10 @@ import re
 import shlex
 import shutil
 import signal
+import stat
 import tempfile
 import time
+import uuid
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -139,8 +141,10 @@ from airedale.harness.base import (
     _notify,
 )
 from airedale.harness.pi_spans import (
+    PI_KNOWN_STOP_REASONS,
     PI_LLMOBS_EXTENSION_PATH,
     PiSpanRecorder,
+    known_value,
     message_text,
     tool_result_text,
 )
@@ -356,6 +360,7 @@ class PiRunner(DecoratorSpanAgentRunner):
                 agent_dir, model=model, system_prompt=system_prompt, trace_headers=trace_headers
             )
             collector_extension = spans is not None
+            earlier_attempts: list[str] = []
             while True:
                 command = self._command(
                     model=model,
@@ -377,11 +382,61 @@ class PiRunner(DecoratorSpanAgentRunner):
                 # Pi stops at startup when it cannot load an extension, before
                 # any model call: run it again without the collector, so that
                 # telemetry never fails a run. The spans then use the stream.
-                logger.warning("pi cannot load the airedale collector extension; running without it:\n%s", stderr_tail)
+                # (The stderr of that attempt is not shown: it goes to the private report if the run fails.)
+                logger.warning("pi cannot load the airedale collector extension; running without it")
+                earlier_attempts.append(
+                    f"stderr of the attempt that could not load the collector extension:\n{stderr_tail}"
+                )
                 collector_extension = False
         finally:
             shutil.rmtree(agent_dir, ignore_errors=True)
-        return collector.result(model=model, returncode=returncode, stderr_tail=stderr_tail)
+        result = collector.result(model=model, returncode=returncode, stderr_tail=stderr_tail)
+        if result.error is not None:
+            # No raw value of pi, a provider or the model is in the error, the logs or the spans: they go to a private
+            # file, and the error says where it is.
+            notes = [*earlier_attempts, *collector.private_notes, *(spans.private_notes if spans is not None else [])]
+            report = self._write_private_report(model, returncode, collector.raw_stderr, notes)
+            if report is not None:
+                result.error = RuntimeError(
+                    f"{result.error}\nthe raw output of pi (stderr, provider messages) is in the private file {report}"
+                )
+        return result
+
+    def _write_private_report(
+        self, model: ModelSpec, returncode: int | None, stderr_tail: str, notes: list[str]
+    ) -> Path | None:
+        """Write the raw values of a failed run to one private file; return its path (``None``: nothing to write).
+
+        The file is in the output directory of Airedale (:func:`private_report_dir`), is only readable by the user (mode
+        0600), is not deleted after the run, and is written only for a run that failed and has something to say. It
+        can hold credentials: pi, a provider, a gateway or an extension wrote these values. A failure to write it never
+        hides the error of the run.
+        """
+        if not stderr_tail and not notes:
+            return None
+        try:
+            directory = private_report_dir()
+            name = f"pi-run-{time.strftime('%Y%m%dT%H%M%S', time.gmtime())}-{uuid.uuid4().hex[:8]}.log"
+            path = directory / name
+            lines = [
+                "Raw output of a failed pi run. It can hold credentials: keep this file private.",
+                f"model: {model.label}",
+                f"pi exit status: {returncode}",
+                "",
+                "== pi stderr (last bytes) ==",
+                stderr_tail,
+                "",
+                "== values kept out of the error, the logs and the spans ==",
+                *notes,
+                "",
+            ]
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8", errors="backslashreplace") as handle:
+                handle.write("\n".join(lines))
+            return path
+        except OSError:
+            logger.warning("Unable to write the private report of the failed pi run", exc_info=False)
+            return None
 
     # ------------------------------------------------------------------ #
     # Isolated agent directory
@@ -696,65 +751,6 @@ class PiRunner(DecoratorSpanAgentRunner):
         env["PI_TELEMETRY"] = "0"
         return env
 
-    def _secret_values(self, env: Mapping[str, str]) -> list[str]:
-        """Return the credentials that the run can hold: the gateway token and key, the provider key variables, and the
-        value of any variable of the child environment that has a name like a secret (pi, an extension or a child
-        process can print any of them to stderr)."""
-        names = [*PI_PROVIDER_API_KEY_ENVS.values(), *self.other_gateway_api_key_envs]
-        if self.gateway_api_key_env:
-            names.append(self.gateway_api_key_env)
-        # Known credentials: removed whatever their length (a short token is still a credential).
-        values = [self.gateway_bearer_token, self.gateway_api_key]
-        values.extend(value for name in names for value in [os.environ.get(name), env.get(name)])
-        values.extend(self._auth_file_secrets(env))
-        values.extend(self._configured_secrets())
-        # Variables that only have a name like a secret: a short value (a flag such as ``1``) is more likely not one.
-        values.extend(
-            value
-            for name, value in env.items()
-            if _SECRET_ENV_NAME_RE.search(name) and len(value) >= _MIN_SECRET_LENGTH
-        )
-        return [value for value in dict.fromkeys(values) if value]
-
-    def _configured_secrets(self) -> list[str]:
-        """Return the credentials that Airedale writes into the private config of the run besides the token and the key.
-
-        The gateway headers (``models.json``) and the headers and environment of the scenario MCP servers (``mcp.json``)
-        can hold a credential (``X-Api-Key``, ``Authorization``, a ``*_TOKEN`` variable...), and pi, a server or a
-        child process can print them. A value under a name like a secret is removed whatever its length; another value
-        is removed from 8 characters (a short word such as ``evals`` is not a credential, and would hide itself in
-        messages).
-        """
-        mappings: list[Mapping[str, str]] = [self.gateway_headers]
-        for server in self.mcp_servers:
-            mappings.extend([server.headers, server.env])
-        values: list[str] = []
-        for mapping in mappings:
-            for name, value in mapping.items():
-                text = str(value)
-                if text and (_SECRET_ENV_NAME_RE.search(str(name)) or len(text) >= _MIN_CONFIG_VALUE_LENGTH):
-                    values.append(text)
-        return values
-
-    def _auth_file_secrets(self, env: Mapping[str, str]) -> list[str]:
-        """Return the secret values of the ``auth.json`` that was copied into the agent directory of the run.
-
-        The copy holds the credentials of every provider of the operator (access and refresh tokens, keys). Pi, an
-        extension or a tool can print the file. Pi can also write new tokens into the copy, so the copy and the file
-        it came from are both read. The values are only used to clean the text of the run: they are kept nowhere.
-        """
-        agent_dir = env.get("PI_CODING_AGENT_DIR")
-        if not agent_dir or not (Path(agent_dir) / "auth.json").is_file():
-            return []  # No copy was made (the run has a key in the environment): nothing of the file is in the run.
-        values: list[str] = []
-        for path in (Path(agent_dir) / "auth.json", _operator_agent_dir() / "auth.json"):
-            try:
-                text = path.read_bytes().decode("utf-8", errors="replace")
-            except OSError:
-                continue
-            values.extend(_secret_strings_of_json(text))
-        return values
-
     # ------------------------------------------------------------------ #
     # Command line
     # ------------------------------------------------------------------ #
@@ -853,9 +849,9 @@ class PiRunner(DecoratorSpanAgentRunner):
         model: ModelSpec,
         progress: ProgressCallback | None,
     ) -> tuple[int | None, str, bool]:
-        """Run pi, feed its events to ``collector``; return (exit code, redacted stderr tail, extension load failed).
+        """Run pi, feed its events to ``collector``; return (exit code, raw stderr tail, extension load failed).
 
-        The last value is read in the raw stderr (see the end of the method).
+        The raw stderr tail is for the private report only (``_write_private_report``).
 
         The process group of pi is always stopped and pi is always reaped before
         this returns, also on error or cancellation.
@@ -903,11 +899,9 @@ class PiRunner(DecoratorSpanAgentRunner):
                 raise reader.exception()  # type: ignore[misc]
         finally:
             await _finish_cleanup(_cleanup_process(process, tasks))
-        # The load failure of the collector is read in the raw text: the redaction can hide the words or the path
-        # that identify it (a credential that is part of the path). Only the text that is shown is redacted: the
-        # tail goes into the error of the run, the logs and the spans, and has no credential in it.
-        extension_failed = _collector_extension_failed(collector, process.returncode, stderr_tail.text())
-        return process.returncode, stderr_tail.redacted_text(self._secret_values(env)), extension_failed
+        # The raw tail is not shown anywhere: it goes to the private report of the run, when the run fails.
+        raw = stderr_tail.text()
+        return process.returncode, raw, _collector_extension_failed(collector, process.returncode, raw)
 
 
 async def _cleanup_process(process: asyncio.subprocess.Process, tasks: list[asyncio.Task[Any]]) -> None:
@@ -986,126 +980,29 @@ async def _read_events(
             return
 
 
-#: Names of environment variables that hold a credential.
-_SECRET_ENV_NAME_RE = re.compile(r"(?i)(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH)")
-#: A header or environment value of the run config under another name is removed from this many characters.
-_MIN_CONFIG_VALUE_LENGTH = 8
-#: Keys of a credentials file (``auth.json``) whose value is a credential.
-_SECRET_KEY_NAME_RE = re.compile(r"(?i)(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH|ACCESS|REFRESH)")
-#: A value shorter than this is not taken for a credential (it would also hide ordinary words in a message).
-_MIN_SECRET_LENGTH = 6
-#: ``Authorization: Bearer <token>`` or ``Bearer <token>``: the token is removed even when it is not a known value.
-_BEARER_RE = re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]+")
-_REDACTED = "<redacted>"
+#: The directory for the private reports of failed runs, when it is not the default.
+PI_OUTPUT_DIR_ENV = "AIREDALE_OUTPUT_DIR"
 
 
-def _secret_strings_of_json(text: str) -> list[str]:
-    """Return the strings of a credentials file that can be a credential: long ones, and any under a secret-like key.
+def private_report_dir() -> Path:
+    """Return the output directory of Airedale for the private reports of failed runs, and create it (mode 0700).
 
-    Short ordinary values (``"oauth"``, ``"api_key"``) are left out so that they are not hidden in messages. A file
-    that is not JSON gives its long tokens.
+    ``$AIREDALE_OUTPUT_DIR`` when it is set; else ``airedale-<uid>`` in the temporary directory of the system. The
+    default must be a real directory (not a link) owned by the user and closed to others, or an ``OSError`` is raised:
+    another user must not be able to read the reports or to put a link in their place.
     """
-    try:
-        data = js_json.loads(text.removeprefix("\ufeff"))
-    except ValueError:
-        return re.findall(r"[A-Za-z0-9._~+/=-]{16,}", text)
-    found: list[str] = []
-    stack: list[tuple[Any, str]] = [(data, "")]
-    while stack:
-        item, key = stack.pop()
-        if isinstance(item, dict):
-            stack.extend((child, str(name)) for name, child in item.items())
-        elif isinstance(item, list):
-            stack.extend((child, key) for child in item)
-        elif isinstance(item, str) and (len(item) >= _AUTH_LONG_VALUE or _SECRET_KEY_NAME_RE.search(key)):
-            found.append(item)
-    return found
-
-
-#: A string of a credentials file with at least this many characters is taken for a credential, whatever its key.
-_AUTH_LONG_VALUE = 20
-
-
-def _redact_secrets(text: str, secrets: Iterable[str]) -> str:
-    """Return ``text`` without the secrets (see :func:`_redact_bytes`) and without bearer tokens."""
-    return _finish_redaction(_redact_bytes(text.encode(), secrets))
-
-
-def _finish_redaction(data: bytes) -> str:
-    """Decode redacted bytes (replacement characters for what is not UTF-8), strip them, remove bearer tokens."""
-    return _BEARER_RE.sub(r"\1" + _REDACTED, data.decode("utf-8", errors="replace").strip())
-
-
-def _redact_bytes(data: bytes, secrets: Iterable[str], *, truncated: bool = True) -> bytes:
-    """Return ``data`` without the secrets (the longest first, whatever their length) and without a cut secret.
-
-    The work is done on the bytes, before any decoding or stripping: a decoding with replacement characters would change
-    a secret (a window that starts inside a UTF-8 character), and stripping would remove the newline that ends a
-    secret (a PEM key). The stderr tail is a window on the end of the output: it can start in the middle of a secret,
-    in the middle of one of its UTF-8 characters. The start is matched with the end of every secret *first*, before
-    any secret is replaced: a shorter secret inside the cut part would otherwise change the start. This applies only
-    when the window ``truncated`` the output, and not when a complete secret stands at the start.
-    """
-    encoded = sorted({form for secret in secrets if secret for form in _byte_forms(secret)}, key=len, reverse=True)
-    # A cut start only exists when the window dropped the beginning of the output.
-    if truncated:
-        data = _drop_cut_secret(data, encoded)
-    for secret in encoded:
-        data = data.replace(secret, _REDACTED.encode())
-    return data
-
-
-def _byte_forms(secret: str) -> set[bytes]:
-    """Return the byte strings in which ``secret`` can be printed. Never raises, never skips a value.
-
-    A secret can hold characters that UTF-8 cannot encode: an unpaired surrogate (a JSON string such as
-    ``"\\ud800"``), or the byte of an environment variable that the system could not decode (POSIX gives it as
-    ``\\udcXX``, from the original byte). The forms: UTF-8 with the surrogates passed through, the original bytes of
-    the environment (``os.fsencode``), what Node prints for an unpaired surrogate (U+FFFD), and the ASCII spelling of
-    JSON (``\\uXXXX``).
-    """
-    forms: set[bytes] = set()
-    encoders = (
-        lambda text: text.encode("utf-8"),
-        lambda text: text.encode("utf-8", "surrogatepass"),
-        lambda text: os.fsencode(text),
-        lambda text: _replace_surrogates(text).encode("utf-8"),
-        lambda text: json.dumps(text, ensure_ascii=True)[1:-1].encode("ascii"),
-    )
-    for encode in encoders:
-        try:
-            form = encode(secret)
-        except (UnicodeError, ValueError):
-            continue
-        if form:
-            forms.add(form)
-    return forms
-
-
-def _replace_surrogates(text: str) -> str:
-    """Replace each unpaired surrogate by U+FFFD, as Node does when it prints one."""
-    return "".join("\ufffd" if "\ud800" <= char <= "\udfff" else char for char in text)
-
-
-#: A start of the tail is taken for the cut end of a secret from this many bytes.
-_MIN_CUT_SECRET = 4
-
-
-def _drop_cut_secret(data: bytes, secrets: list[bytes]) -> bytes:
-    """Remove the start of ``data`` when it is the end of a secret that the window cut.
-
-    All the matches are looked for before any byte changes. A complete secret at the start wins over a cut that is not
-    longer than it: the first bytes of a complete key can also be the end of the key (a repeated pattern), and removing
-    only those would leave the rest of the key visible.
-    """
-    full = max((len(secret) for secret in secrets if data.startswith(secret)), default=0)
-    best = 0
-    for secret in secrets:
-        for size in range(min(len(secret) - 1, len(data)), max(_MIN_CUT_SECRET, best + 1) - 1, -1):
-            if data.startswith(secret[-size:]):
-                best = size
-                break
-    return _REDACTED.encode() + data[best:] if best > full else data
+    configured = os.environ.get(PI_OUTPUT_DIR_ENV)
+    if configured:
+        directory = Path(configured).expanduser()
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        return directory
+    uid = os.getuid() if hasattr(os, "getuid") else 0
+    directory = Path(tempfile.gettempdir()) / f"airedale-{uid}"
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    info = directory.lstat()
+    if not stat.S_ISDIR(info.st_mode) or (hasattr(os, "getuid") and (info.st_uid != uid or info.st_mode & 0o077)):
+        raise OSError(f"{directory} is not a private directory of the user")
+    return directory
 
 
 def _collector_extension_failed(collector: _PiEventCollector, returncode: int | None, stderr_tail: str) -> bool:
@@ -1329,7 +1226,7 @@ class _TailBuffer:
     def __init__(self, limit: int) -> None:
         self._limit = limit
         self._data = bytearray()
-        #: True once the start of the output was dropped: only then can the tail start inside a secret.
+        #: True once the start of the output was dropped.
         self.truncated = False
 
     def append(self, chunk: bytes) -> None:
@@ -1339,11 +1236,8 @@ class _TailBuffer:
             self.truncated = True
 
     def text(self) -> str:
+        """The raw tail. It goes to the private report of a failed run only: never to an error, a log or a span."""
         return self._data.decode("utf-8", errors="replace").strip()
-
-    def redacted_text(self, secrets: Iterable[str]) -> str:
-        """Return the tail without the secrets: they are removed from the raw bytes, then the text is made."""
-        return _finish_redaction(_redact_bytes(bytes(self._data), secrets, truncated=self.truncated))
 
 
 async def _drain(stream: asyncio.StreamReader | None, buffer: _TailBuffer) -> None:
@@ -1484,7 +1378,13 @@ class _PiEventCollector:
     usage: UsageMetrics = field(default_factory=UsageMetrics)
     settled: bool = False
     aborted: bool = False
-    retry_error: str | None = None
+    #: True when pi gave up its automatic retries (``auto_retry_end`` with ``success`` false).
+    retry_failed: bool = False
+    #: Raw values from pi, the provider or the model that are not shown in an error, a log or a span: the private
+    #: report of a failed run has them (``PiRunner._write_private_report``).
+    private_notes: list[str] = field(default_factory=list)
+    #: The raw stderr tail of the run, for the private report.
+    raw_stderr: str = ""
     failure: str | None = None
     invalid_lines: int = 0
     #: True when the run settled but pi did not exit, so the runner stopped it.
@@ -1624,7 +1524,8 @@ class _PiEventCollector:
             return None
         if event_type == "auto_retry_end":
             if event.get("success") is False:
-                self.retry_error = str(event.get("finalError") or "pi retries failed")
+                self.retry_failed = True
+                self.private_notes.append(f"auto_retry_end.finalError: {event.get('finalError')!s}")
             return None
         if event_type == "auto_retry_start":
             return f"retry {event.get('attempt')}/{event.get('maxAttempts')}"
@@ -1737,7 +1638,8 @@ class _PiEventCollector:
         # The text of the final message, also when it is empty (a valid response can have no text). The placeholder
         # is only for a run that has no final message: it is not model output.
         answer = _message_text(final) if final is not None else "pi did not produce a final response."
-        error = self._error(model=model, final=final, returncode=returncode, stderr_tail=stderr_tail)
+        self.raw_stderr = stderr_tail
+        error = self._error(model=model, final=final, returncode=returncode)
         return AgentRunResult(
             answer=answer,
             usage=self.usage,
@@ -1746,36 +1648,36 @@ class _PiEventCollector:
             error=error,
         )
 
-    def _error(
-        self, *, model: ModelSpec, final: dict[str, Any] | None, returncode: int | None, stderr_tail: str
-    ) -> RuntimeError | None:
-        details = f"\npi stderr (tail):\n{stderr_tail}" if stderr_tail else ""
+    def _error(self, *, model: ModelSpec, final: dict[str, Any] | None, returncode: int | None) -> RuntimeError | None:
+        """Return the error of the run. The texts are fixed: no stderr, no provider message and no value that pi
+        reports about the model is in them (those are in ``private_notes`` and ``raw_stderr``)."""
         if self.failure is not None:
-            return RuntimeError(f"{self.failure} for {model.label}{details}")
+            return RuntimeError(f"{self.failure} for {model.label}")
         if returncode != 0 and not (self.settled and self.stopped_after_settle):
-            return RuntimeError(f"pi exited with status {returncode} for {model.label}{details}")
+            return RuntimeError(f"pi exited with status {returncode} for {model.label}")
         if final is None:
-            return RuntimeError(f"pi produced no assistant message for {model.label}{details}")
+            return RuntimeError(f"pi produced no assistant message for {model.label}")
         for message in self.assistant_messages:
             provider, model_id = message.get("provider"), message.get("model")
             if provider != model.provider or model_id != model.name:
+                self.private_notes.append(f"model that pi ran: {provider!s}/{model_id!s}")
                 return RuntimeError(
-                    f"pi ran {provider}/{model_id} instead of {model.label}; check that pi knows the model "
+                    f"pi ran another model than {model.label}; check that pi knows the model "
                     "(its catalog or [[providers.<provider>.pi_models]] in the gateway config)"
                 )
         for message in self.assistant_messages:
             response_model = message.get("responseModel")
             if response_model and response_model != model.name:
-                # The provider reports the concrete model (for example a dated
-                # snapshot). Not an error, but make it visible.
-                logger.warning("pi reports response model %r for %s", response_model, model.label)
+                # The provider reports the concrete model (for example a dated snapshot). Not an error, but make it
+                # visible, without the value (a provider or a gateway can write anything there).
+                self.private_notes.append(f"responseModel: {response_model!s}")
+                logger.warning("pi reports a response model that is not the configured one for %s", model.label)
         if final.get("stopReason") != PI_COMPLETE_STOP_REASON:
-            reason = final.get("errorMessage") or self.retry_error or f"stopReason={final.get('stopReason')!r}"
-            return RuntimeError(f"pi run did not complete for {model.label}: {reason}{details}")
+            return RuntimeError(f"pi run did not complete for {model.label}: {self._incomplete_reason(final)}")
         if self.aborted:
             return RuntimeError(f"pi run was aborted for {model.label}")
         if not self.settled:
-            return RuntimeError(f"pi exited before the run settled for {model.label}{details}")
+            return RuntimeError(f"pi exited before the run settled for {model.label}")
         if self.invalid_lines:
             return RuntimeError(
                 f"pi emitted {self.invalid_lines} malformed JSONL record(s) for {model.label}; "
@@ -1793,6 +1695,16 @@ class _PiEventCollector:
                 "token and cost data are incomplete"
             )
         return None
+
+    def _incomplete_reason(self, final: dict[str, Any]) -> str:
+        """Return a fixed text for a final message that is not complete (never the message of the provider)."""
+        stop_reason = known_value(final.get("stopReason"), PI_KNOWN_STOP_REASONS)
+        if final.get("errorMessage"):
+            self.private_notes.append(f"errorMessage of the final message: {final['errorMessage']!s}")
+            return f"provider error (stopReason={stop_reason})"
+        if self.retry_failed:
+            return f"pi retries failed (stopReason={stop_reason})"
+        return f"stopReason={stop_reason!r}"
 
     def _segments(self) -> tuple[list[AgentOutputSegment], list[_ToolExecution | None]]:
         """Return reasoning, intermediate text and tool calls in message order.
