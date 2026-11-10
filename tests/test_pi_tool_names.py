@@ -173,10 +173,22 @@ def test_probed_tools_that_can_collide_log_a_warning(caplog):
     metadata = {("a", "b__c"): McpToolMetadata(), ("a__b", "c"): McpToolMetadata()}
     with caplog.at_level(logging.WARNING, logger="airedale.harness.base"):
         definitions = _mcp_tool_definitions(servers, sdk_name="pi", mcp_tool_metadata=metadata)
-    assert "mcp__a__b__c" in caplog.text
+    # Fixed text: the configured server names and the number of collisions, no tool name.
+    assert "MCP servers a, a__b (possible collisions: 1)" in caplog.text
+    assert "mcp__a__b__c" not in caplog.text and "b__c" not in caplog.text
     assert "connects second" in caplog.text
     # The names are not changed.
     assert [definition["name"] for definition in definitions] == ["mcp__a__b__c", "mcp__a__b__c"]
+
+
+def test_the_collision_warning_has_no_tool_name_that_a_server_advertised(caplog):
+    secret = "sk-ADVERTISED-SECRET-0123456789"
+    servers = [McpServerSpec(name="a", command="x"), McpServerSpec(name="a__b", command="y")]
+    metadata = {("a", f"b__{secret}"): McpToolMetadata(), ("a__b", secret): McpToolMetadata()}
+    with caplog.at_level(logging.DEBUG, logger="airedale.harness.base"):
+        _mcp_tool_definitions(servers, sdk_name="pi", mcp_tool_metadata=metadata)
+    assert "connects second" in caplog.text  # The collision was found, so the warning ran.
+    assert "SECRET" not in caplog.text and "ADVERTISED" not in caplog.text
 
 
 def test_no_warning_without_a_collision(caplog):

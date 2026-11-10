@@ -351,13 +351,18 @@ def _warn_about_pi_tool_name_collisions(
         known = [*configured_tool_names(server)]
         known.extend(tool for server_name, tool in (mcp_tool_metadata or {}) if server_name == server.name)
         tools_by_server[server.name] = known
-    for name, pairs in pi_possible_tool_name_collisions(tools_by_server).items():
-        logger.warning(
-            "Pi tool name %s can belong to %s: pi adds a hash suffix to the tool of the server that connects "
-            "second, so the tool names in the run report can be wrong",
-            name,
-            " or ".join(f"{server}/{tool}" for server, tool in pairs),
-        )
+    collisions = pi_possible_tool_name_collisions(tools_by_server)
+    if not collisions:
+        return
+    # Fixed text: the tool names come from the MCP servers (the metadata probe), and the logs go to terminals and CI
+    # systems. Only the names of the servers of the scenario and the number of collisions are given.
+    involved = sorted({server for pairs in collisions.values() for server, _ in pairs})
+    logger.warning(
+        "Pi tool names can collide between the MCP servers %s (possible collisions: %d): pi adds a hash suffix to the "
+        "tool of the server that connects second, so the tool names in the run report can be wrong",
+        ", ".join(involved),
+        len(collisions),
+    )
 
 
 def _llmobs_tool_definitions(
