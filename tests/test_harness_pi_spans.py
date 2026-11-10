@@ -207,6 +207,32 @@ class TestModelCalls:
         assert record.metrics["output_tokens"] == 5
         assert record.error is None
 
+    @pytest.mark.parametrize(
+        "usage",
+        [
+            {"input": -1, "output": 5, "cost": {"total": 0.1}},
+            {"input": 10, "output": 5, "reasoning": 6, "cost": {"total": 0.1}},
+            {"input": 10, "output": 5},
+            {"input": 10},
+            None,
+        ],
+        ids=["negative", "reasoning-over-output", "no-cost", "no-output", "missing"],
+    )
+    def test_damaged_usage_gives_no_metrics_on_the_call_span(self, usage):
+        message = _assistant([{"type": "text", "text": "A"}], timestamp=T0_MS + 5)
+        message["usage"] = usage
+        recorder = _feed(_recorder(), [(900, {"type": "message_end", "message": message})])
+        [record] = recorder.records
+        assert record.kind == "llm"
+        assert record.metrics is None
+
+    def test_damaged_usage_of_a_compaction_is_not_in_its_metadata(self):
+        result = {"summary": "S", "usage": {"input": -1, "output": 2, "cost": {"total": 0}}}
+        recorder = _feed(
+            _recorder(), [(1, {"type": "compaction_start"}), (9, {"type": "compaction_end", "result": result})]
+        )
+        assert "usage" not in recorder.records[0].metadata
+
     def test_output_keeps_the_block_order(self):
         message = _assistant(
             [
@@ -1039,7 +1065,11 @@ class TestTools:
         assert recorder.records[0].end_ns == _ns(T0_MS + 5)
 
     def test_compaction_span(self):
-        result = {"summary": "S", "tokensBefore": 100, "usage": {"input": 1, "output": 2, "totalTokens": 3}}
+        result = {
+            "summary": "S",
+            "tokensBefore": 100,
+            "usage": {"input": 1, "output": 2, "totalTokens": 3, "cost": {"total": 0}},
+        }
         recorder = _feed(
             _recorder(),
             [

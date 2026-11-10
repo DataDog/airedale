@@ -88,7 +88,7 @@ from airedale.harness.base import (
     json_dumps_compact,
     json_safe,
 )
-from airedale.types import UsageMetrics
+from airedale.types import UsageMetrics, is_valid_pi_usage
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -170,6 +170,13 @@ def message_text(message: dict[str, Any]) -> str:
         str(block.get("text") or "") for block in content if isinstance(block, dict) and block.get("type") == "text"
     ]
     return "\n\n".join(part.strip() for part in parts if part.strip())
+
+
+def _usage_metrics(usage: Any) -> dict[str, Any] | None:
+    """Return the LLMObs metrics of a valid pi ``usage`` record; ``None`` for a missing or damaged one."""
+    if not is_valid_pi_usage(usage):
+        return None
+    return UsageMetrics.from_pi(usage).to_llmobs_metrics()
 
 
 def tool_result_text(result: Any) -> str:
@@ -558,7 +565,9 @@ class PiSpanRecorder:
                 input_messages=input_messages,
                 output_messages=_llm_output_messages(answer, segments),
                 metadata=metadata,
-                metrics=UsageMetrics.from_pi(message.get("usage")).to_llmobs_metrics(),
+                # A damaged usage record (negative count, more reasoning than output tokens, ...) gives no metrics:
+                # ``from_pi`` would turn it into zeros or wrong numbers (the run reports it as damaged).
+                metrics=_usage_metrics(message.get("usage")),
                 tags=self._tags(),
                 tool_definitions=self.tool_definitions,
                 prompt=self._prompt(),
@@ -901,8 +910,9 @@ class PiSpanRecorder:
             ):
                 if result.get(key) is not None:
                     record.metadata[meta_key] = json_safe(result[key])
-            if isinstance(result.get("usage"), dict):
-                record.metadata["usage"] = UsageMetrics.from_pi(result["usage"]).to_llmobs_metrics()
+            usage_metrics = _usage_metrics(result.get("usage"))
+            if usage_metrics is not None:
+                record.metadata["usage"] = usage_metrics
         if event.get("aborted"):
             record.error = "compaction aborted"
         elif event.get("errorMessage"):
