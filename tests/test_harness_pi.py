@@ -4291,6 +4291,48 @@ class TestNoRawValues:
             assert line.endswith("...[cut]")
             assert len(kept.encode()) > 8192 - size  # As much as fits.
 
+    @pytest.mark.parametrize("telemetry", [False, True], ids=["telemetry-off", "telemetry-on"])
+    @pytest.mark.parametrize("count", [1365, 1366, 8192], ids=["fits", "one-over", "8192-surrogates"])
+    def test_lone_surrogates_in_a_failed_tool_output_are_measured_as_written(
+        self, tmp_path, fake_pi, monkeypatch, fake_span_llmobs, private_report_dir, telemetry, count
+    ):
+        if telemetry:
+            import airedale.harness.base as base
+
+            monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
+            monkeypatch.setattr(base, "agent", lambda **kwargs: lambda func: func)
+
+            async def _no_catalog(servers, headers):
+                return {}
+
+            monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _no_catalog)
+        # (Pi's stdout is JSON: a lone surrogate arrives as the escape ``\ud800``.)
+        command, _ = fake_pi(self._failed_tool_events("\ud800" * count), FAKE_PI_EXIT="3")
+        runner = PiRunner(cwd=tmp_path, pi_command=command)
+        if telemetry:
+            with pytest.raises(RuntimeError):
+                _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
+        else:
+            _run(runner)
+        [report] = _report_files(private_report_dir)
+        line = next(
+            line for line in report.read_text(encoding="utf-8").splitlines() if "output of the failed tool call" in line
+        )
+        kept = line.split(": ", 1)[1].removesuffix("...[cut]")
+        assert len(kept.encode("utf-8")) <= 8192
+        assert set(kept) <= set("\\ud800")  # Whole six-byte escapes only.
+        assert len(kept) % 6 == 0
+        if count * 6 <= 8192:
+            assert "...[cut]" not in line and len(kept) == count * 6
+        else:
+            assert line.endswith("...[cut]")
+
+    def test_cut_utf8_returns_the_written_form_also_when_it_fits(self):
+        from airedale.harness.pi import _cut_utf8
+
+        assert _cut_utf8("a\ud800b", 100) == "a\\ud800b"
+        assert _cut_utf8("é😀", 100) == "é😀"
+
     def test_the_old_redaction_code_is_gone(self):
         import airedale.harness.pi as pi_module
 
