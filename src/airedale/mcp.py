@@ -198,6 +198,8 @@ class McpServerSpec:
         """Return a non-secret representation for LLMObs metadata/config."""
         data = self.to_dict()
         data["headers"] = dict.fromkeys(self.headers, "<redacted>")
+        # Environment values often hold credentials: keep the variable names only.
+        data["env"] = dict.fromkeys(self.env, "<set>")
         return data
 
 

@@ -226,6 +226,13 @@ class TestToSafeDict:
         # Keys are still present, just values replaced
         assert set(safe["headers"].keys()) == {"Authorization", "source"}
 
+    def test_env_values_are_not_reported_only_the_names(self):
+        spec = McpServerSpec(name="srv", command="uvx", env={"API_TOKEN": "SECRET-ENV-VALUE", "EMPTY": ""})
+        safe = spec.to_safe_dict()
+        assert safe["env"] == {"API_TOKEN": "<set>", "EMPTY": "<set>"}
+        assert "SECRET-ENV-VALUE" not in json.dumps(safe)
+        assert spec.to_dict()["env"]["API_TOKEN"] == "SECRET-ENV-VALUE"  # The runtime config keeps the values.
+
     def test_url_name_and_type_preserved(self):
         spec = McpServerSpec(name="apm", url="http://localhost/mcp")
         safe = spec.to_safe_dict()

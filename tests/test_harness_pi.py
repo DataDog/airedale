@@ -2569,7 +2569,7 @@ class TestPiToolNames:
         text = json.dumps(reported)
         for secret in ("arg-secret", "env-secret", "pw-secret", "path-secret", "query-secret", "frag"):
             assert secret not in text
-        assert reported[0]["env"] == {"TOKEN": "<redacted>"}
+        assert reported[0]["env"] == {"TOKEN": "<set>"}
         assert reported[0]["args"] == ["<redacted>", "<redacted>"]
         assert reported[1]["url"] == "https://example.test:8443"
 
