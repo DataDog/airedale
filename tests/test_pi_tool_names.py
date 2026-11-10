@@ -126,7 +126,7 @@ def test_the_runner_refuses_a_scenario_with_too_many_servers_that_share_a_name()
     from airedale.harness.pi import PiRunner
 
     servers = [
-        McpServerSpec(name=name, command="x", tool_names=tools)
+        McpServerSpec(name=name, command="x", tool_names=tuple(tools))
         for name, tools in _seven_servers_that_share_a_name().items()
     ]
     with pytest.raises(ValueError, match="7 MCP servers"):
