@@ -717,7 +717,12 @@ class PiSpanRecorder:
         if open_tool is not None and open_tool.raw_name != event.get("toolName"):
             # Pi repeats the name of the start record in the end record (the run fails on a record that does not):
             # the result is not given to the span of another tool.
-            logger.debug("Ignoring the end record of tool call %r: the tool name is not the one of its start", tool_id)
+            # (No tool call id here: it comes from the provider. The names are those of the tools.)
+            logger.debug(
+                "Ignoring an end record of the tool %r: its name is not the one of the open tool call %r",
+                event.get("toolName"),
+                open_tool.raw_name,
+            )
             return
         if open_tool is None:
             # No start record: make a span that ends now.
