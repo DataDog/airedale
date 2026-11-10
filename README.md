@@ -351,11 +351,14 @@ Notes:
   tools they register (also tools with the name of an MCP tool), `.pi/mcp.json`
   servers, `.pi/skills`, `.agents/skills` and `.pi/settings.json`. Airedale does
   not filter those tools, so a repo extension can add tools to the run. The
-  operator's own configuration never loads: `~/.pi/agent` extensions, skills,
+  operator's own configuration must not load: `~/.pi/agent` extensions, skills,
   prompt templates, themes, settings, packages and `mcp.json`, `~/.agents/skills`
   and context files above the workspace. `tests/test_pi_isolation.py` checks
-  this against the installed `pi` (it lists what pi loads for a fake home and a
-  project that both have extensions, skills, prompt templates and MCP servers).
+  only part of this against the installed `pi`: it observes extension commands,
+  skill and prompt template names, and extension and MCP marker files, for a
+  fake home and a project that both have them. It does not observe settings,
+  themes, packages, `auth.json` or the content of context files. Context
+  files are checked only through the `--no-context-files` flag.
   **Trust:** with `--approve`, a cloned repo's
   `.pi/extensions` and project packages run inside the pi process with its
   environment (as `.claude/settings.json` hooks do for Claude). Only

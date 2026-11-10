@@ -6,8 +6,11 @@
 
 The live tests start the installed ``pi`` in RPC mode (no model request, no network) with the command line and the
 environment that the runner builds, in a fake home directory that has user-level extensions, skills, prompt
-templates, an ``mcp.json`` server and context files, and a project (``cwd``) that has its own. They are skipped when
-``pi`` or ``node`` is not installed.
+templates and an ``mcp.json`` server, and a project (``cwd``) that has its own. They observe extension commands, skill
+and prompt template names, and extension and MCP marker files. They do not observe settings, themes, packages,
+``auth.json`` or the content of context files: context files are checked only through the ``--no-context-files``
+flag (``test_command_line_and_environment_cut_the_user_level``). They are skipped when ``pi`` or ``node`` is not
+installed.
 """
 
 from __future__ import annotations
@@ -63,6 +66,7 @@ def world(tmp_path, monkeypatch):
     )
     _write(user / "skills" / "user-skill" / "SKILL.md", "---\nname: user-skill\ndescription: user\n---\nx\n")
     _write(user / "prompts" / "user-prompt.md", "---\ndescription: user prompt\n---\nhello\n")
+    # Not observed by the test (it lists commands and marker files only); kept as realistic user-level files.
     _write(user / "AGENTS.md", "USER CONTEXT FILE\n")
     _write(user / "settings.json", json.dumps({"defaultProvider": "anthropic"}))
     _write(
@@ -119,7 +123,7 @@ def test_user_configuration_is_not_loaded_and_project_configuration_is(world):
     names = seen["names"]
     # The project extension and the project skill are part of the experiment.
     assert "proj-cmd" in names and "skill:proj-skill" in names
-    # Nothing of the user level: extension commands, skills (``~/.pi/agent`` and ``~/.agents``), prompt templates.
+    # Nothing of the user level that the test observes: extension commands, skills (``~/.pi/agent`` and ``~/.agents``), prompt templates.
     assert not {"user-cmd", "user-prompt", "skill:user-skill", "skill:ua"} & set(names), names
     markers = sorted(p.name for p in world["markers"].iterdir())
     assert "proj-ext" in markers and "proj-mcp" in markers
