@@ -2198,6 +2198,8 @@ FAKE_PI = textwrap.dedent(
         if "__now_ms" in event:  # set the timestamp of a message to now
             event["message"]["timestamp"] = time.time() * 1000 + event.pop("__now_ms")
         print(json.dumps(event), flush=True)
+    if os.environ.get("FAKE_PI_AFTER_SETTLE"):  # a raw line after the last event (pi has settled)
+        print(os.environ["FAKE_PI_AFTER_SETTLE"], flush=True)
     if os.environ.get("FAKE_PI_CHILD_HOLDS_STDOUT"):
         # A child keeps stdout open after pi exits; it records its pid.
         import subprocess
@@ -2246,6 +2248,36 @@ def _run(runner: PiRunner, model: ModelSpec = MODEL):
 
 def _bounded(coro):
     return asyncio.run(asyncio.wait_for(coro, timeout=RUN_TIMEOUT_SECONDS))
+
+
+class TestRecordsAfterSettle:
+    """Pi keeps writing after ``agent_settled`` until it exits: a damaged record there fails the run."""
+
+    @pytest.mark.parametrize(
+        "line", ["not json", "[1, 2]", '"text"', "{broken"], ids=["text", "array", "string", "cut"]
+    )
+    def test_a_malformed_record_after_the_run_settled_fails_the_run(self, tmp_path, fake_pi, line):
+        command, _ = fake_pi(_events_tool_run(), FAKE_PI_AFTER_SETTLE=line)
+        result = _run(PiRunner(cwd=tmp_path, pi_command=command))
+        assert result.error is not None and "malformed JSONL record" in str(result.error)
+
+    def test_a_valid_record_after_the_run_settled_changes_nothing(self, tmp_path, fake_pi):
+        extra = json.dumps({"type": "turn_start"})
+        command, _ = fake_pi(_events_tool_run(), FAKE_PI_AFTER_SETTLE=extra)
+        result = _run(PiRunner(cwd=tmp_path, pi_command=command, max_turns=2))
+        assert result.error is None
+        assert result.answer == "The directory is empty."
+
+    def test_a_blank_line_after_the_run_settled_is_fine(self, tmp_path, fake_pi):
+        command, _ = fake_pi(_events_tool_run(), FAKE_PI_AFTER_SETTLE=" ")
+        assert _run(PiRunner(cwd=tmp_path, pi_command=command)).error is None
+
+    def test_a_pi_that_settles_and_does_not_exit_is_still_stopped_without_failing(self, tmp_path, fake_pi, monkeypatch):
+        import airedale.harness.pi as pi_module
+
+        monkeypatch.setattr(pi_module, "PI_TERMINATE_GRACE_SECONDS", 0.3)
+        command, _ = fake_pi(_events_tool_run(), FAKE_PI_HANG="1")
+        assert _run(PiRunner(cwd=tmp_path, pi_command=command)).error is None
 
 
 class TestSubprocess:

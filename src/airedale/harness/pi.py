@@ -920,23 +920,27 @@ class PiRunner(DecoratorSpanAgentRunner):
         stderr_tail = _TailBuffer(PI_STDERR_TAIL_BYTES)
         stderr_task = asyncio.create_task(_drain(process.stderr, stderr_tail))
         tasks: list[asyncio.Task[Any]] = [asyncio.create_task(_write_stdin(process, user_prompt)), stderr_task]
-        reader = asyncio.create_task(_read_events(process, collector, model=model, progress=progress))
+        settled = asyncio.Event()
+        reader = asyncio.create_task(_read_events(process, collector, model=model, progress=progress, settled=settled))
+        settled_wait = asyncio.create_task(settled.wait())
         # Not ``process.wait()``: depending on the Python version it also waits
         # for the pipes to close, which a child that keeps stdout open prevents.
         waiter = asyncio.create_task(_wait_for_exit(process))
-        tasks.extend([reader, waiter])
+        tasks.extend([reader, waiter, settled_wait])
         try:
-            await asyncio.wait({reader, waiter}, return_when=asyncio.FIRST_COMPLETED)
-            if not reader.done():
-                # Pi exited, but a child process can keep its stdout open, so
-                # EOF may never come: read what is left for a bounded time.
-                await asyncio.wait({reader}, timeout=PI_TERMINATE_GRACE_SECONDS)
-            elif collector.settled and not collector.stop_requested and not waiter.done():
+            await asyncio.wait({reader, waiter, settled_wait}, return_when=asyncio.FIRST_COMPLETED)
+            if collector.settled and not collector.stop_requested and not waiter.done():
+                # The reader keeps reading stdout while pi finishes: a record after ``agent_settled`` that is not
+                # valid still fails the run.
                 await asyncio.wait({waiter}, timeout=PI_TERMINATE_GRACE_SECONDS)
                 if not waiter.done():
                     # Pi settled but did not exit: stop it. Not a run failure.
                     logger.warning("pi did not exit after the run settled; stopping it")
                     collector.stopped_after_settle = True
+            if waiter.done() and not reader.done():
+                # Pi exited, but a child process can keep its stdout open, so
+                # EOF may never come: read what is left for a bounded time.
+                await asyncio.wait({reader}, timeout=PI_TERMINATE_GRACE_SECONDS)
             if reader.done() and not reader.cancelled() and reader.exception() is not None:
                 raise reader.exception()  # type: ignore[misc]
         finally:
@@ -1014,8 +1018,13 @@ async def _read_events(
     *,
     model: ModelSpec,
     progress: ProgressCallback | None,
+    settled: asyncio.Event | None = None,
 ) -> None:
-    """Feed pi stdout records to ``collector`` until EOF, settle, or failure."""
+    """Feed pi stdout records to ``collector`` until EOF or failure.
+
+    After ``agent_settled`` it keeps reading (``settled`` is set when it arrives): a record that is not valid JSON
+    after that point is damage, and fails the run. The caller bounds the time (pi exits, or it is stopped).
+    """
     stdout = process.stdout
     if stdout is None:
         collector.fail("pi stdout is not available")
@@ -1031,7 +1040,9 @@ async def _read_events(
         message = collector.feed_line(line, received_ns=time.time_ns())
         if message:
             await _notify(progress, f"{SDK_NAME}/{model.label}: {message}")
-        if collector.stop_requested or collector.settled:
+        if collector.settled and settled is not None:
+            settled.set()
+        if collector.stop_requested:
             return
 
 
@@ -1594,6 +1605,9 @@ class _PiEventCollector:
         if not isinstance(event, dict):
             # Pi writes one JSON object per record; anything else is damage.
             self.invalid_lines += 1
+            return None
+        if self.settled:
+            # After ``agent_settled`` a record must still be a JSON object (checked above); it changes nothing.
             return None
         if _tool_event_problem(event) is not None or self._end_names_another_tool(event):
             # Not given to the spans either: they would coerce the same fields.
