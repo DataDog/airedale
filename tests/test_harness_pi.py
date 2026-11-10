@@ -4177,6 +4177,50 @@ class TestNoRawValues:
         [report] = _report_files(private_report_dir)
         assert secret in report.read_text()
 
+    @staticmethod
+    def _failed_tool_events(output):
+        events = _events_tool_run()
+        end = next(e for e in events if e["type"] == "tool_execution_end")
+        end["isError"] = True
+        end["result"] = {"content": [{"type": "text", "text": output}], "details": {}}
+        return events
+
+    @pytest.mark.parametrize("telemetry", [False, True], ids=["telemetry-off", "telemetry-on"])
+    def test_output_of_a_failed_tool_is_once_in_the_report_of_a_failed_run(
+        self, tmp_path, fake_pi, monkeypatch, fake_span_llmobs, caplog, private_report_dir, telemetry
+    ):
+        secret = "TOOL-OUTPUT-SECRET-0123456789"
+        if telemetry:
+            import airedale.harness.base as base
+
+            monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
+            monkeypatch.setattr(base, "agent", lambda **kwargs: lambda func: func)
+
+            async def _no_catalog(servers, headers):
+                return {}
+
+            monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _no_catalog)
+        command, _ = fake_pi(self._failed_tool_events(f"permission denied for {secret}"), FAKE_PI_EXIT="3")
+        runner = PiRunner(cwd=tmp_path, pi_command=command)
+        with caplog.at_level("DEBUG"):
+            if telemetry:
+                with pytest.raises(RuntimeError) as raised:
+                    _bounded(
+                        runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h")
+                    )
+                error = raised.value
+            else:
+                error = _run(runner).error
+        assert "status 3" in str(error)
+        shown = caplog.text + str(error)
+        if telemetry:
+            tool_spans = [s for s in fake_span_llmobs.spans if s.error]
+            assert any("tool call failed" in json.dumps(s.tags, default=str) for s in tool_spans)
+            shown += json.dumps([(span.error, span.tags) for span in fake_span_llmobs.spans], default=str)
+        assert secret not in shown
+        [report] = _report_files(private_report_dir)
+        assert report.read_text().count(secret) == 1
+
     def test_the_old_redaction_code_is_gone(self):
         import airedale.harness.pi as pi_module
 

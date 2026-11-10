@@ -677,7 +677,7 @@ class TestTools:
         assert [record.metadata["tool_id"] for record in recorder.records] == ["b", "a"]
         assert recorder.records[0].error == "tool call failed"
         assert recorder.records[0].output_data == "out"  # The span output is unchanged.
-        assert any(note.endswith(": out") for note in recorder.private_notes)
+        assert recorder.private_notes == []  # The event collector has the output for the private report.
         assert "out" not in recorder.records[0].error and "out" not in recorder.records[0].metadata["error"]
         assert all(not record.children for record in recorder.records)
 

@@ -766,12 +766,8 @@ class PiSpanRecorder:
         error = None
         if event.get("isError"):
             # The output of a failed tool is not in the error tag (it can hold a credential, a path or a prompt
-            # injection): the tag has a fixed text, and the private report has the output.
+            # injection): the tag has a fixed text. The event collector puts the output in the private report.
             error = "tool call failed"
-            if record.output_data:
-                self.private_notes.append(
-                    f"output of the failed tool call {tool_id[:256]!r}: {record.output_data[:8192]}"
-                )
         self.close_tool(tool_id, end_ns, error=error)
 
     def close_tool(self, tool_id: str, end_ns: int, *, error: str | None = None) -> None:

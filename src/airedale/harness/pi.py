@@ -1609,6 +1609,11 @@ class _PiEventCollector:
             execution = self._end_execution(tool_id) or self._begin_execution(event, track_open=False)
             execution.result = event.get("result")
             execution.is_error = bool(event.get("isError"))
+            if execution.is_error:
+                # Only the private report has the output of a failed tool (the error tag of its span has a fixed text).
+                output = tool_result_text(execution.result)
+                if output:
+                    self.private_notes.append(f"output of the failed tool call {tool_id[:256]!r}: {_raw(output)}")
             execution.duration_ms = event.get("durationMs")
             execution.finished = True
             return None
