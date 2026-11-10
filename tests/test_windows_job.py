@@ -298,6 +298,7 @@ class TestSpawn:
             return _Proc()
 
         monkeypatch.setattr(pi_module.asyncio, "create_subprocess_exec", fake_exec)
+        (tmp_path / "pi.cmd").write_text("x")  # The Windows lookup needs a program to find.
         runner = pi_module.PiRunner(cwd=tmp_path, pi_command=["pi"])
         with contextlib.suppress(Exception):  # The fake process is minimal: only the order of the calls matters.
             asyncio.run(
@@ -305,7 +306,7 @@ class TestSpawn:
                     runner._run_process(
                         ["pi"],
                         user_prompt="Q",
-                        env={},
+                        env={"PATH": str(tmp_path), "PATHEXT": ".cmd"},
                         collector=pi_module._PiEventCollector(),
                         model=pi_module.ModelSpec.parse("anthropic/claude-sonnet-4-6"),
                         progress=None,

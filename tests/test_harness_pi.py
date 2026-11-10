@@ -3330,52 +3330,19 @@ class TestWindowsStop:
 
 
 class TestResolvePiProgram:
-    """The pi program is resolved with ``shutil.which`` (``PATH`` + ``PATHEXT``) before the spawn."""
+    """POSIX: the program is passed as it is. Windows: own lookup with the ``PATH`` / ``PATHEXT`` / cwd of the child."""
 
     @staticmethod
-    def _fake_cmd_shim(tmp_path):
-        bin_dir = tmp_path / "bin"
-        bin_dir.mkdir()
-        shim = bin_dir / "pi.cmd"
-        shim.write_text("@echo off\n")
-        shim.chmod(0o755)
-        return bin_dir, shim
+    def _touch(path, text="x"):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+        path.chmod(0o755)
+        return path
 
-    def test_which_finds_a_cmd_shim_with_a_fake_pathext(self, monkeypatch, tmp_path):
+    @staticmethod
+    def _capture(monkeypatch):
         import airedale.harness.pi as pi_module
 
-        bin_dir, shim = self._fake_cmd_shim(tmp_path)
-        # shutil.which only reads PATHEXT on Windows: make it do so on any platform.
-        monkeypatch.setattr("shutil.sys.platform", "win32")
-        monkeypatch.setenv("PATHEXT", os.pathsep.join([".exe", ".cmd"]))
-        # The Windows-only current-directory probe needs the real Windows API.
-        monkeypatch.setattr("shutil._win_path_needs_curdir", lambda *_a, **_k: False, raising=False)
-        resolved = pi_module._resolve_program("pi", {"Path": str(bin_dir)})
-        assert Path(resolved).name.lower() == "pi.cmd"
-        assert Path(resolved).parent == bin_dir
-        assert shim.exists()
-
-    def test_spawn_receives_the_resolved_path(self, monkeypatch, tmp_path):
-        import airedale.harness.pi as pi_module
-
-        bin_dir, shim = self._fake_cmd_shim(tmp_path)
-        monkeypatch.setenv("PATH", str(bin_dir))
-        monkeypatch.setattr(pi_module.shutil, "which", lambda program, path=None: str(shim) if path else None)
-        seen: list[Any] = []
-
-        async def fake_exec(*argv, **kwargs):
-            seen.extend(argv)
-            raise FileNotFoundError(argv[0])
-
-        monkeypatch.setattr(pi_module.asyncio, "create_subprocess_exec", fake_exec)
-        with pytest.raises(RuntimeError, match="pi executable not found"):
-            _run(PiRunner(cwd=tmp_path, pi_command=["pi"]))
-        assert seen[0] == str(shim)
-
-    def test_unresolved_program_keeps_the_not_found_error(self, monkeypatch, tmp_path):
-        import airedale.harness.pi as pi_module
-
-        monkeypatch.setenv("PATH", str(tmp_path))
         seen: list[Any] = []
 
         async def fake_exec(*argv, **kwargs):
@@ -3383,9 +3350,122 @@ class TestResolvePiProgram:
             raise FileNotFoundError(argv[0])
 
         monkeypatch.setattr(pi_module.asyncio, "create_subprocess_exec", fake_exec)
-        with pytest.raises(RuntimeError, match=r"pi executable not found \('definitely-not-pi'\)"):
-            _run(PiRunner(cwd=tmp_path, pi_command=["definitely-not-pi"]))
-        assert seen == ["definitely-not-pi"]
+        return pi_module, seen
+
+    @pytest.mark.parametrize("through_env", [False, True], ids=["default-pi", "AIREDALE_PI_COMMAND"])
+    def test_posix_relative_path_entry_is_searched_from_the_child_directory(
+        self, tmp_path, fake_pi, monkeypatch, through_env
+    ):
+        command, _ = fake_pi(_events_tool_run())
+        airedale_dir, workspace, fallback = tmp_path / "airedale", tmp_path / "ws", tmp_path / "fallback"
+        workspace.mkdir()
+        # Only in the directory of Airedale: a broken ``pi`` that must not run.
+        self._touch(airedale_dir / "relative-bin" / "pi", "#!/bin/sh\nexit 99\n")
+        self._touch(fallback / "pi", f'#!/bin/sh\nexec "{command[0]}" "{command[1]}" "$@"\n')
+        monkeypatch.chdir(airedale_dir)
+        monkeypatch.setenv("PATH", f"relative-bin{os.pathsep}{fallback}")
+        if through_env:
+            monkeypatch.setenv("AIREDALE_PI_COMMAND", "pi")
+            runner = PiRunner(cwd=workspace)
+        else:
+            runner = PiRunner(cwd=workspace, pi_command=["pi"])
+        assert _run(runner).error is None
+
+    def test_posix_command_is_not_resolved(self, tmp_path, monkeypatch):
+        pi_module, seen = self._capture(monkeypatch)
+        monkeypatch.setattr(pi_module, "_is_windows", lambda: False)
+        monkeypatch.setenv("PATH", str(tmp_path))
+        self._touch(tmp_path / "pi")
+        with pytest.raises(RuntimeError, match="pi executable not found"):
+            _run(PiRunner(cwd=tmp_path, pi_command=["pi"]))
+        assert seen == ["pi"]
+
+    def test_posix_path_wins_over_path_with_another_case(self, tmp_path, fake_pi, monkeypatch):
+        command, _ = fake_pi(_events_tool_run())
+        good = tmp_path / "good"
+        self._touch(good / "pi", f'#!/bin/sh\nexec "{command[0]}" "{command[1]}" "$@"\n')
+        bad = tmp_path / "bad"
+        self._touch(bad / "pi", "#!/bin/sh\nexit 99\n")
+        monkeypatch.setenv("PATH", str(good))
+        monkeypatch.setenv("Path", str(bad))
+        assert _run(PiRunner(cwd=tmp_path, pi_command=["pi"])).error is None
+
+    # -- simulated Windows ------------------------------------------------------------------------------------
+    @pytest.fixture
+    def windows(self, monkeypatch):
+        pi_module, seen = self._capture(monkeypatch)
+        monkeypatch.setattr(pi_module, "_is_windows", lambda: True)
+        monkeypatch.setattr(pi_module, "WindowsJob", type("J", (), {"attach": staticmethod(lambda pid: None)}))
+        return pi_module, seen
+
+    def test_windows_cmd_shim_in_path_is_found(self, windows, tmp_path):
+        pi_module, seen = windows
+        shim = self._touch(tmp_path / "bin" / "pi.cmd")
+        resolved = pi_module._resolve_windows_program(
+            "pi", {"Path": str(tmp_path / "bin"), "PATHEXT": ".exe" + os.pathsep + ".cmd"}, tmp_path
+        )
+        assert resolved == str(shim)
+
+    def test_windows_current_directory_of_airedale_is_not_a_candidate(self, windows, tmp_path, monkeypatch):
+        pi_module, seen = windows
+        airedale_dir, workspace = tmp_path / "airedale", tmp_path / "ws"
+        workspace.mkdir()
+        self._touch(airedale_dir / "pi.cmd")  # Planted next to Airedale.
+        trusted = self._touch(tmp_path / "trusted" / "pi.cmd")
+        monkeypatch.chdir(airedale_dir)
+        env = {"PATH": str(tmp_path / "trusted"), "PATHEXT": ".cmd"}
+        assert pi_module._resolve_windows_program("pi", env, workspace) == str(trusted)
+        # And nothing is found when only the current directory has it.
+        assert pi_module._resolve_windows_program("pi", {"PATH": "", "PATHEXT": ".cmd"}, workspace) is None
+        assert pi_module._resolve_windows_program("pi", {"PATHEXT": ".cmd"}, airedale_dir) is None
+
+    def test_windows_relative_path_entry_and_relative_command_use_the_child_directory(
+        self, windows, tmp_path, monkeypatch
+    ):
+        pi_module, seen = windows
+        airedale_dir, workspace = tmp_path / "airedale", tmp_path / "ws"
+        self._touch(airedale_dir / "rel" / "pi.cmd")  # Only in the directory of Airedale: not used.
+        in_workspace = self._touch(workspace / "rel" / "pi.cmd")
+        tool = self._touch(workspace / "tools" / "mypi.cmd")
+        monkeypatch.chdir(airedale_dir)
+        env = {"PATH": "rel", "PATHEXT": ".cmd"}
+        assert pi_module._resolve_windows_program("pi", env, workspace) == str(in_workspace)
+        assert pi_module._resolve_windows_program("pi", env, tmp_path / "other") is None
+        assert pi_module._resolve_windows_program("tools\\mypi", env, workspace) == str(tool)
+        assert pi_module._resolve_windows_program("tools/mypi.cmd", env, workspace) == str(tool)
+        assert pi_module._resolve_windows_program(str(tool), env, tmp_path / "other") == str(tool)
+
+    def test_windows_child_pathext_is_used_not_the_one_of_airedale(self, windows, tmp_path, monkeypatch):
+        pi_module, seen = windows
+        shim = self._touch(tmp_path / "bin" / "pi.cmd")
+        monkeypatch.setenv("PATHEXT", ".exe")
+        resolved = pi_module._resolve_windows_program(
+            "pi", {"pAtH": str(tmp_path / "bin"), "PaThExT": ".cmd"}, tmp_path
+        )
+        assert resolved == str(shim)
+
+    def test_windows_extensionless_shell_script_is_not_chosen_over_the_cmd_shim(self, windows, tmp_path):
+        pi_module, seen = windows
+        self._touch(tmp_path / "bin" / "pi")
+        shim = self._touch(tmp_path / "bin" / "pi.cmd")
+        env = {"PATH": str(tmp_path / "bin"), "PATHEXT": ".exe" + os.pathsep + ".cmd"}
+        assert pi_module._resolve_windows_program("pi", env, tmp_path) == str(shim)
+
+    def test_windows_spawn_receives_the_absolute_path(self, windows, tmp_path, monkeypatch):
+        pi_module, seen = windows
+        shim = self._touch(tmp_path / "bin" / "pi.cmd")
+        monkeypatch.setenv("PATH", str(tmp_path / "bin"))
+        monkeypatch.setenv("PATHEXT", ".cmd")
+        with pytest.raises(RuntimeError, match="pi executable not found"):
+            _run(PiRunner(cwd=tmp_path, pi_command=["pi", "--flag"]))
+        assert seen == [str(shim)]
+
+    def test_windows_not_found_raises_before_the_spawn(self, windows, tmp_path, monkeypatch):
+        pi_module, seen = windows
+        monkeypatch.setenv("PATH", str(tmp_path))
+        with pytest.raises(RuntimeError, match=r"pi executable not found \('pi'\)"):
+            _run(PiRunner(cwd=tmp_path, pi_command=["pi"]))
+        assert seen == []
 
 
 # --------------------------------------------------------------------------- #

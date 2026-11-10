@@ -879,9 +879,13 @@ class PiRunner(DecoratorSpanAgentRunner):
         The process group of pi is always stopped and pi is always reaped before
         this returns, also on error or cancellation.
         """
-        # Resolve the program like a shell does (``PATH`` and, on Windows, ``PATHEXT``): a Node-installed pi is
-        # a ``pi.cmd`` shim there, which the process spawn alone does not find.
-        command = [_resolve_program(command[0], env), *command[1:]]
+        # Windows only: a Node-installed pi is a ``pi.cmd`` shim, which the process spawn does not find. Resolve it
+        # with the ``PATH`` and ``PATHEXT`` of the child, from the directory of the child. POSIX: unchanged.
+        if _is_windows():
+            resolved = _resolve_windows_program(command[0], env, self.cwd)
+            if resolved is None:
+                raise RuntimeError(f"pi executable not found ({command[0]!r}); install pi or set {PI_COMMAND_ENV}")
+            command = [resolved, *command[1:]]
         try:
             process = await asyncio.create_subprocess_exec(
                 *command,
@@ -1178,14 +1182,40 @@ def _make_private_agent_dir(workspace: Path) -> Path:
     )
 
 
-def _resolve_program(program: str, env: dict[str, str]) -> str:
-    """Return the full path of ``program`` found with ``shutil.which`` (honours ``PATHEXT``).
+_WINDOWS_DEFAULT_PATHEXT = ".COM;.EXE;.BAT;.CMD"
 
-    The ``PATH`` of the child environment is used. When nothing resolves, return
-    ``program`` unchanged, so that the spawn raises the "pi executable not found" error.
+
+def _resolve_windows_program(program: str, env: dict[str, str], cwd: str | Path) -> str | None:
+    """Return the absolute path of ``program`` as the child would find it on Windows, or ``None``.
+
+    ``PATH`` and ``PATHEXT`` come from the child environment (names are not case sensitive), and relative paths
+    are relative to the directory ``cwd`` of the child, not to the one of Airedale. A bare name is searched only
+    in the ``PATH`` entries, in order: the current directory is not a candidate. A name with a path separator is
+    resolved against ``cwd``. A file whose name has an extension of ``PATHEXT`` is taken as it is; other names
+    get each extension of ``PATHEXT``. Nothing changes in this process (the working directory and the environment
+    are not touched: runs can be concurrent).
     """
-    path = next((value for key, value in env.items() if key.upper() == "PATH"), None)
-    return shutil.which(program, path=path) or program
+    upper = {key.upper(): value for key, value in env.items()}
+    extensions = [ext for ext in (upper.get("PATHEXT") or _WINDOWS_DEFAULT_PATHEXT).split(os.pathsep) if ext]
+    if not extensions:
+        extensions = _WINDOWS_DEFAULT_PATHEXT.split(";")
+    lowered = tuple(ext.lower() for ext in extensions)
+
+    def find_in(directory: str) -> str | None:
+        base = os.path.abspath(os.path.join(str(cwd), directory, program.replace("\\", os.sep)))
+        has_extension = base.lower().endswith(lowered)
+        candidates = [*([base] if has_extension else []), *(base + ext for ext in extensions)]
+        if not has_extension:
+            candidates.append(base)  # A file with another extension, when nothing else matches.
+        return next((candidate for candidate in candidates if os.path.isfile(candidate)), None)
+
+    if "/" in program or "\\" in program:
+        return find_in("")
+    for entry in (upper.get("PATH") or "").split(os.pathsep):
+        entry = entry.strip().strip('"')
+        if entry and (found := find_in(entry)) is not None:
+            return found
+    return None
 
 
 def _default_pi_command() -> list[str]:
