@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 
 import pytest
 
@@ -133,3 +134,44 @@ def test_the_stderr_tail_is_bounded(capfd):
     asyncio.run(_mcp_tool_metadata_catalog([server], {}, notes))
     assert notes and notes[0].endswith("END")
     assert len(notes[0].encode()) < MCP_PROBE_STDERR_TAIL_BYTES + 200
+
+
+@pytest.mark.skipif(os.name == "nt", reason="needs a POSIX shell script")
+def test_stdio_servers_of_the_probe_start_in_the_workspace(tmp_path, monkeypatch):
+    """A relative command exists only in the workspace of the run, not in the directory of Airedale."""
+
+    workspace, elsewhere = tmp_path / "ws", tmp_path / "airedale"
+    workspace.mkdir()
+    elsewhere.mkdir()
+    script = workspace / "server.sh"
+    script.write_text('#!/bin/sh\necho started-in-$(basename "$PWD") >&2\nexit 1\n')
+    script.chmod(0o755)
+    monkeypatch.chdir(elsewhere)
+    server = McpServerSpec(name="rel", command="./server.sh")
+    notes: list[str] = []
+    asyncio.run(_mcp_tool_metadata_catalog([server], {}, notes, workspace))
+    assert len(notes) == 1 and "started-in-ws" in notes[0]
+    # Without the workspace (the old behaviour) the command is not found.
+    notes = []
+    asyncio.run(_mcp_tool_metadata_catalog([server], {}, notes))
+    assert notes == []
+
+
+def test_the_runner_probes_in_its_workspace(tmp_path, monkeypatch):
+    import airedale.harness.base as base
+    from airedale.harness.pi import PiRunner
+
+    seen = {}
+
+    async def catalog(servers, headers, notes=None, cwd=None):
+        seen["cwd"] = cwd
+        return {}
+
+    class _Enabled:
+        enabled = True
+
+    monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", catalog)
+    monkeypatch.setattr(base, "LLMObs", _Enabled)
+    runner = PiRunner(cwd=tmp_path, mcp_servers=[McpServerSpec(name="s", command="x")])
+    asyncio.run(runner._span_context())
+    assert seen["cwd"] == str(tmp_path)

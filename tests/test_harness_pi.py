@@ -468,7 +468,7 @@ class TestEventCollector:
 
         probed: list[object] = []
 
-        async def _catalog(servers, headers, notes=None):
+        async def _catalog(servers, headers, notes=None, cwd=None):
             probed.append(servers)
             return {}
 
@@ -522,7 +522,7 @@ class TestEventCollector:
 
         probed: list[object] = []
 
-        async def _catalog(servers, headers, notes=None):
+        async def _catalog(servers, headers, notes=None, cwd=None):
             probed.append(servers)
             return {}
 
@@ -550,7 +550,7 @@ class TestEventCollector:
 
         probed: list[object] = []
 
-        async def _catalog(servers, headers, notes=None):
+        async def _catalog(servers, headers, notes=None, cwd=None):
             probed.append(servers)
             return {}
 
@@ -580,7 +580,7 @@ class TestEventCollector:
 
         probed: list[object] = []
 
-        async def _catalog(servers, headers, notes=None):
+        async def _catalog(servers, headers, notes=None, cwd=None):
             probed.append(servers)
             return {}
 
@@ -2856,7 +2856,7 @@ class TestPiSpans:
         monkeypatch.setattr(base, "agent", _agent)
         monkeypatch.setattr(base, "llm", _no_llm_decorator)
 
-        async def _no_catalog(servers, headers, notes=None):
+        async def _no_catalog(servers, headers, notes=None, cwd=None):
             return {}
 
         monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _no_catalog)
@@ -2949,7 +2949,7 @@ class TestPiSpans:
 
             return wrap
 
-        async def _catalog(servers, headers, notes=None):
+        async def _catalog(servers, headers, notes=None, cwd=None):
             return {("docs", "get-doc"): McpToolMetadata(), ("docs", "get_doc"): McpToolMetadata()}
 
         monkeypatch.setattr(base, "LLMObs", fake)
@@ -2992,7 +2992,7 @@ class TestPiSpans:
         monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
         monkeypatch.setattr(base, "agent", lambda **kwargs: lambda func: func)
 
-        async def _no_catalog(servers, headers, notes=None):
+        async def _no_catalog(servers, headers, notes=None, cwd=None):
             return {}
 
         monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _no_catalog)
@@ -3050,7 +3050,7 @@ class TestPiSpans:
         monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
         monkeypatch.setattr(base, "agent", lambda **kwargs: lambda func: func)
 
-        async def _no_catalog(servers, headers, notes=None):
+        async def _no_catalog(servers, headers, notes=None, cwd=None):
             return {}
 
         monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _no_catalog)
@@ -3092,7 +3092,7 @@ class TestPiSpans:
         monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
         monkeypatch.setattr(base, "agent", lambda **kwargs: lambda func: func)
 
-        async def _no_catalog(servers, headers, notes=None):
+        async def _no_catalog(servers, headers, notes=None, cwd=None):
             return {}
 
         monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _no_catalog)
@@ -3117,7 +3117,7 @@ class TestPiSpans:
         monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
         monkeypatch.setattr(base, "agent", lambda **kwargs: lambda func: func)
 
-        async def _no_catalog(servers, headers, notes=None):
+        async def _no_catalog(servers, headers, notes=None, cwd=None):
             return {}
 
         monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _no_catalog)
@@ -3143,7 +3143,7 @@ class TestPiSpans:
         monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
         monkeypatch.setattr(base, "agent", lambda **kwargs: lambda func: func)
 
-        async def _no_catalog(servers, headers, notes=None):
+        async def _no_catalog(servers, headers, notes=None, cwd=None):
             return {}
 
         monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _no_catalog)
@@ -3162,7 +3162,7 @@ class TestPiSpans:
         monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
         monkeypatch.setattr(base, "agent", lambda **kwargs: lambda func: func)
 
-        async def _no_catalog(servers, headers, notes=None):
+        async def _no_catalog(servers, headers, notes=None, cwd=None):
             return {}
 
         monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _no_catalog)
@@ -4165,7 +4165,7 @@ class TestNoRawValues:
         monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
         monkeypatch.setattr(base, "agent", lambda **kwargs: lambda func: func)
 
-        async def _no_catalog(servers, headers, notes=None):
+        async def _no_catalog(servers, headers, notes=None, cwd=None):
             return {}
 
         monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _no_catalog)
@@ -4218,7 +4218,7 @@ class TestNoRawValues:
             monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
             monkeypatch.setattr(base, "agent", lambda **kwargs: lambda func: func)
 
-            async def _no_catalog(servers, headers, notes=None):
+            async def _no_catalog(servers, headers, notes=None, cwd=None):
                 return {}
 
             monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _no_catalog)
@@ -4255,7 +4255,7 @@ class TestNoRawValues:
             monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
             monkeypatch.setattr(base, "agent", lambda **kwargs: lambda func: func)
 
-            async def _no_catalog(servers, headers, notes=None):
+            async def _no_catalog(servers, headers, notes=None, cwd=None):
                 return {}
 
             monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _no_catalog)
@@ -4310,7 +4310,7 @@ class TestNoRawValues:
             monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
             monkeypatch.setattr(base, "agent", lambda **kwargs: lambda func: func)
 
-            async def _no_catalog(servers, headers, notes=None):
+            async def _no_catalog(servers, headers, notes=None, cwd=None):
                 return {}
 
             monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _no_catalog)
@@ -4369,7 +4369,7 @@ class TestNoRawValues:
             monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
             monkeypatch.setattr(base, "agent", lambda **kwargs: lambda func: func)
 
-            async def _no_catalog(servers, headers, notes=None):
+            async def _no_catalog(servers, headers, notes=None, cwd=None):
                 return {}
 
             monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _no_catalog)
@@ -4459,7 +4459,7 @@ class TestNoRawValues:
             monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
             monkeypatch.setattr(base, "agent", lambda **kwargs: lambda func: func)
 
-            async def _no_catalog(servers, headers, notes=None):
+            async def _no_catalog(servers, headers, notes=None, cwd=None):
                 return {}
 
             monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _no_catalog)
@@ -4588,7 +4588,7 @@ class TestProjectEnablesCodemode:
         monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
         monkeypatch.setattr(base, "agent", lambda **kwargs: lambda func: func)
 
-        async def _no_catalog(servers, headers, notes=None):
+        async def _no_catalog(servers, headers, notes=None, cwd=None):
             return {}
 
         monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _no_catalog)
@@ -4809,7 +4809,7 @@ class TestRawDiagnosticsAreKept:
         monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
         monkeypatch.setattr(base, "agent", lambda **kwargs: lambda func: func)
 
-        async def _no_catalog(servers, headers, notes=None):
+        async def _no_catalog(servers, headers, notes=None, cwd=None):
             return {}
 
         monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _no_catalog)

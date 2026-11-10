@@ -516,7 +516,10 @@ class McpToolMetadata:
 
 
 async def _mcp_tool_metadata_catalog(
-    servers: list[McpServerSpec], trace_headers: Mapping[str, str], notes: list[str] | None = None
+    servers: list[McpServerSpec],
+    trace_headers: Mapping[str, str],
+    notes: list[str] | None = None,
+    cwd: str | Path | None = None,
 ) -> dict[tuple[str, str], McpToolMetadata]:
     """Return actual MCP tool metadata keyed by (server_name, tool_name).
 
@@ -526,12 +529,15 @@ async def _mcp_tool_metadata_catalog(
     The stderr of a stdio server never goes to the terminal. When a probe fails, the last
     :data:`MCP_PROBE_STDERR_TAIL_BYTES` bytes of that stderr are added to ``notes`` (for the private report of a failed
     run); otherwise they are dropped.
+
+    ``cwd`` is the directory where stdio servers start (the workspace of the run, like pi does): a relative command or
+    a relative ``PATH`` entry is found from there. Default: the directory of this process.
     """
     if not servers:
         return {}
 
     server_catalogs = await asyncio.gather(
-        *[_mcp_server_tool_metadata(server, trace_headers, notes) for server in servers]
+        *[_mcp_server_tool_metadata(server, trace_headers, notes, cwd) for server in servers]
     )
     catalog: dict[tuple[str, str], McpToolMetadata] = {}
     for server_catalog in server_catalogs:
@@ -544,7 +550,10 @@ MCP_PROBE_STDERR_TAIL_BYTES = 16 * 1024
 
 
 async def _mcp_server_tool_metadata(
-    server: McpServerSpec, trace_headers: Mapping[str, str], notes: list[str] | None = None
+    server: McpServerSpec,
+    trace_headers: Mapping[str, str],
+    notes: list[str] | None = None,
+    cwd: str | Path | None = None,
 ) -> dict[tuple[str, str], McpToolMetadata]:
     """Fetch the metadata of every tool of a single MCP server.
 
@@ -563,6 +572,7 @@ async def _mcp_server_tool_metadata(
                 trace_headers,
                 all_pages=True,
                 errlog=cast("TextIO", errlog) if errlog is not None else None,
+                cwd=cwd,
             ),
             timeout=MCP_TOOL_METADATA_TIMEOUT_SECONDS,
         )
@@ -601,7 +611,12 @@ def _read_tail(file: Any, limit: int) -> str:
 
 
 async def _list_mcp_tools(
-    server: McpServerSpec, trace_headers: Mapping[str, str], *, all_pages: bool = False, errlog: TextIO | None = None
+    server: McpServerSpec,
+    trace_headers: Mapping[str, str],
+    *,
+    all_pages: bool = False,
+    errlog: TextIO | None = None,
+    cwd: str | Path | None = None,
 ) -> list[Any]:
     """List tools from an MCP server using the standard protocol.
 
@@ -610,7 +625,7 @@ async def _list_mcp_tools(
     health probe, which must stay fast).
 
     ``errlog``: where the stderr of a stdio server goes (a file with a file descriptor); the default of the
-    SDK is the terminal.
+    SDK is the terminal. ``cwd``: the directory where a stdio server starts.
     """
     if server.type == "http":
         async with (
@@ -625,7 +640,7 @@ async def _list_mcp_tools(
             return await _list_all_tools(session) if all_pages else list((await session.list_tools()).tools)
     if server.type == "stdio":
         stdio_server = StdioServerParameters(
-            command=server._require_command(), args=list(server.args), env=dict(server.env) or None
+            command=server._require_command(), args=list(server.args), env=dict(server.env) or None, cwd=cwd
         )
         async with (
             stdio_client(stdio_server, errlog=errlog) if errlog is not None else stdio_client(stdio_server) as (

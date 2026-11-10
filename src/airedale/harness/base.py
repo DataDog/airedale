@@ -772,7 +772,7 @@ class DecoratorSpanAgentRunner(AgentRunner):
         self._check_before_probe(trace_headers)
         self._mcp_probe_notes = []
         mcp_tool_metadata = (
-            await _mcp_tool_metadata_catalog(self.mcp_servers, trace_headers, self._mcp_probe_notes)
+            await _mcp_tool_metadata_catalog(self.mcp_servers, trace_headers, self._mcp_probe_notes, self.cwd)
             if LLMObs.enabled
             else {}
         )
