@@ -338,7 +338,7 @@ def span_tree(monkeypatch, llmobs):
         events.append((f"tool:{name}", active[-1] if active else None))
         yield object()
 
-    async def _no_catalog(servers, headers):
+    async def _no_catalog(servers, headers, notes=None):
         return {}
 
     monkeypatch.setattr(base, "agent", _decorator("agent"))

@@ -404,7 +404,12 @@ class PiRunner(DecoratorSpanAgentRunner):
         if result.error is not None:
             # No raw value of pi, a provider or the model is in the error, the logs or the spans: they go to a private
             # file, and the error says where it is.
-            notes = [*earlier_attempts, *collector.private_notes, *(spans.private_notes if spans is not None else [])]
+            notes = [
+                *earlier_attempts,
+                *self._mcp_probe_notes,
+                *collector.private_notes,
+                *(spans.private_notes if spans is not None else []),
+            ]
             report = self._write_private_report(model, returncode, collector.raw_stderr, notes)
             if report is not None:
                 result.error = RuntimeError(

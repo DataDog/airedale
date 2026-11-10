@@ -593,6 +593,8 @@ class AgentRunner(ABC):
         self.max_turns = max_turns
         self.effort = effort
         self.cwd = str(cwd)
+        #: Raw stderr tails of MCP servers whose metadata probe failed (for the private report of a failed run).
+        self._mcp_probe_notes: list[str] = []
 
     @abstractmethod
     async def run(
@@ -768,7 +770,12 @@ class DecoratorSpanAgentRunner(AgentRunner):
         # Local checks first: the probe starts the stdio servers and calls the HTTP ones, which a run that is
         # refused must not do.
         self._check_before_probe(trace_headers)
-        mcp_tool_metadata = await _mcp_tool_metadata_catalog(self.mcp_servers, trace_headers) if LLMObs.enabled else {}
+        self._mcp_probe_notes = []
+        mcp_tool_metadata = (
+            await _mcp_tool_metadata_catalog(self.mcp_servers, trace_headers, self._mcp_probe_notes)
+            if LLMObs.enabled
+            else {}
+        )
         return trace_headers, mcp_tool_metadata
 
     def _check_before_probe(self, trace_headers: Mapping[str, str]) -> None:

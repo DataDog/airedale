@@ -47,7 +47,7 @@ def test_metadata_probe_does_not_log_the_tool_object_of_a_rejected_list(monkeypa
         ListToolsResult.model_validate({"tools": [{"name": secret}]})
     assert secret in str(raised.value)  # (This is the leak that the log line must not repeat.)
 
-    async def failing_list(server, headers, *, all_pages=False):
+    async def failing_list(server, headers, *, all_pages=False, errlog=None, **_):
         raise raised.value
 
     monkeypatch.setattr(mcp_module, "_list_mcp_tools", failing_list)
@@ -92,3 +92,44 @@ def test_pi_settings_that_do_not_parse_are_logged_without_exc_info(tmp_path, cap
     assert "Unable to parse project pi settings" in caplog.text
     assert SECRET not in caplog.text
     assert all(record.exc_info is None for record in caplog.records)
+
+
+SERVER_SCRIPT = """
+import sys
+sys.stderr.write("starting with token sk-SERVER-STDERR-0123456789\\n")
+sys.stderr.flush()
+sys.exit(3)
+"""
+
+
+def test_stderr_of_a_stdio_server_goes_to_the_notes_when_the_probe_fails_and_never_to_the_terminal(capfd):
+    import sys
+
+    server = McpServerSpec(name="noisy", command=sys.executable, args=("-c", SERVER_SCRIPT))
+    notes: list[str] = []
+    assert asyncio.run(_mcp_tool_metadata_catalog([server], {}, notes)) == {}
+    out, err = capfd.readouterr()
+    assert "sk-SERVER-STDERR" not in out + err
+    assert len(notes) == 1 and "sk-SERVER-STDERR-0123456789" in notes[0] and "'noisy'" in notes[0]
+
+
+def test_stderr_of_a_stdio_server_is_dropped_without_notes_and_still_not_on_the_terminal(capfd):
+    import sys
+
+    server = McpServerSpec(name="noisy", command=sys.executable, args=("-c", SERVER_SCRIPT))
+    assert asyncio.run(_mcp_tool_metadata_catalog([server], {})) == {}
+    out, err = capfd.readouterr()
+    assert "sk-SERVER-STDERR" not in out + err
+
+
+def test_the_stderr_tail_is_bounded(capfd):
+    import sys
+
+    from airedale.mcp import MCP_PROBE_STDERR_TAIL_BYTES
+
+    script = "import sys; sys.stderr.write('x' * 200000 + 'END'); sys.exit(1)"
+    server = McpServerSpec(name="loud", command=sys.executable, args=("-c", script))
+    notes: list[str] = []
+    asyncio.run(_mcp_tool_metadata_catalog([server], {}, notes))
+    assert notes and notes[0].endswith("END")
+    assert len(notes[0].encode()) < MCP_PROBE_STDERR_TAIL_BYTES + 200

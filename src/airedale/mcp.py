@@ -15,11 +15,12 @@ import logging
 import os
 import re
 import signal
+import tempfile
 import time
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TextIO, cast
 
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
@@ -515,25 +516,35 @@ class McpToolMetadata:
 
 
 async def _mcp_tool_metadata_catalog(
-    servers: list[McpServerSpec], trace_headers: Mapping[str, str]
+    servers: list[McpServerSpec], trace_headers: Mapping[str, str], notes: list[str] | None = None
 ) -> dict[tuple[str, str], McpToolMetadata]:
     """Return actual MCP tool metadata keyed by (server_name, tool_name).
 
     Metadata is fetched through the standard MCP tools/list protocol. Failures are
     logged at debug level and represented by missing catalog entries.
+
+    The stderr of a stdio server never goes to the terminal. When a probe fails, the last
+    :data:`MCP_PROBE_STDERR_TAIL_BYTES` bytes of that stderr are added to ``notes`` (for the private report of a failed
+    run); otherwise they are dropped.
     """
     if not servers:
         return {}
 
-    server_catalogs = await asyncio.gather(*[_mcp_server_tool_metadata(server, trace_headers) for server in servers])
+    server_catalogs = await asyncio.gather(
+        *[_mcp_server_tool_metadata(server, trace_headers, notes) for server in servers]
+    )
     catalog: dict[tuple[str, str], McpToolMetadata] = {}
     for server_catalog in server_catalogs:
         catalog.update(server_catalog)
     return catalog
 
 
+#: How much of the stderr of a stdio MCP server is kept when its metadata probe fails (the same size as the pi tail).
+MCP_PROBE_STDERR_TAIL_BYTES = 16 * 1024
+
+
 async def _mcp_server_tool_metadata(
-    server: McpServerSpec, trace_headers: Mapping[str, str]
+    server: McpServerSpec, trace_headers: Mapping[str, str], notes: list[str] | None = None
 ) -> dict[tuple[str, str], McpToolMetadata]:
     """Fetch the metadata of every tool of a single MCP server.
 
@@ -542,15 +553,31 @@ async def _mcp_server_tool_metadata(
     suffixes, see :func:`pi_mcp_tool_names`). The tool definitions use only
     the configured tools.
     """
+    # A private anonymous file (mode 0600, deleted when closed) takes the stderr of a stdio server: the SDK default
+    # is the terminal, where a credential that the server prints would go to the CI log.
+    errlog = tempfile.TemporaryFile("w+b") if server.type == "stdio" else None  # noqa: SIM115 - closed in ``finally``
     try:
         tools = await asyncio.wait_for(
-            _list_mcp_tools(server, trace_headers, all_pages=True), timeout=MCP_TOOL_METADATA_TIMEOUT_SECONDS
+            _list_mcp_tools(
+                server,
+                trace_headers,
+                all_pages=True,
+                errlog=cast("TextIO", errlog) if errlog is not None else None,
+            ),
+            timeout=MCP_TOOL_METADATA_TIMEOUT_SECONDS,
         )
     except Exception as error:
         # Fixed text: the message of the error (the validation error of the MCP SDK holds the whole tool object
         # that the server sent) and its traceback are not logged.
         logger.debug("Unable to fetch MCP tool metadata for server %s (%s)", server.name, exception_summary(error))
+        if notes is not None and errlog is not None:
+            tail = _read_tail(errlog, MCP_PROBE_STDERR_TAIL_BYTES)
+            if tail:
+                notes.append(f"stderr of MCP server {server.name!r} during the metadata probe (last bytes):\n{tail}")
         return {}
+    finally:
+        if errlog is not None:
+            errlog.close()
 
     catalog: dict[tuple[str, str], McpToolMetadata] = {}
     for mcp_tool in tools:
@@ -561,14 +588,29 @@ async def _mcp_server_tool_metadata(
     return catalog
 
 
+def _read_tail(file: Any, limit: int) -> str:
+    """Return the last ``limit`` bytes of a binary file object, as text (invalid bytes replaced)."""
+    try:
+        file.flush()
+        file.seek(0, os.SEEK_END)
+        size = file.tell()
+        file.seek(max(0, size - limit))
+        return file.read().decode("utf-8", "replace").strip()
+    except (OSError, ValueError):
+        return ""
+
+
 async def _list_mcp_tools(
-    server: McpServerSpec, trace_headers: Mapping[str, str], *, all_pages: bool = False
+    server: McpServerSpec, trace_headers: Mapping[str, str], *, all_pages: bool = False, errlog: TextIO | None = None
 ) -> list[Any]:
     """List tools from an MCP server using the standard protocol.
 
     With ``all_pages``, every ``tools/list`` page is read (the tool metadata
     needs the complete list). Without it, only the first page (enough for a
     health probe, which must stay fast).
+
+    ``errlog``: where the stderr of a stdio server goes (a file with a file descriptor); the default of the
+    SDK is the terminal.
     """
     if server.type == "http":
         async with (
@@ -586,7 +628,10 @@ async def _list_mcp_tools(
             command=server._require_command(), args=list(server.args), env=dict(server.env) or None
         )
         async with (
-            stdio_client(stdio_server) as (read_stream, write_stream),
+            stdio_client(stdio_server, errlog=errlog) if errlog is not None else stdio_client(stdio_server) as (
+                read_stream,
+                write_stream,
+            ),
             ClientSession(read_stream, write_stream) as session,
         ):
             await session.initialize()
