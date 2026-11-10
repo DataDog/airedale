@@ -175,3 +175,37 @@ def test_the_runner_probes_in_its_workspace(tmp_path, monkeypatch):
     runner = PiRunner(cwd=tmp_path, mcp_servers=[McpServerSpec(name="s", command="x")])
     asyncio.run(runner._span_context())
     assert seen["cwd"] == str(tmp_path)
+
+
+def test_a_noisy_server_does_not_use_memory_or_disk_in_proportion_to_its_stderr(monkeypatch):
+    """64 MiB on stderr: only the last 16 KiB are kept, and no file is made for it."""
+    import sys
+    import tempfile
+    import threading
+    import tracemalloc
+
+    from airedale.mcp import MCP_PROBE_STDERR_TAIL_BYTES
+
+    def no_file(*args, **kwargs):
+        raise AssertionError("the stderr of a probed server must not go to a file")
+
+    monkeypatch.setattr(tempfile, "TemporaryFile", no_file)
+    monkeypatch.setattr(tempfile, "NamedTemporaryFile", no_file)
+    script = (
+        "import sys; block = b'x' * 65535 + bytes([10]); "
+        "[sys.stderr.buffer.write(block) for _ in range(1024)]; "
+        "sys.stderr.buffer.write(b'THE-END'); sys.stderr.flush(); sys.exit(1)"
+    )
+    server = McpServerSpec(name="loud", command=sys.executable, args=("-c", script))
+    notes: list[str] = []
+    threads_before = threading.active_count()
+    tracemalloc.start()
+    try:
+        asyncio.run(_mcp_tool_metadata_catalog([server], {}, notes))
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert len(notes) == 1 and notes[0].endswith("THE-END")
+    assert len(notes[0].encode()) < MCP_PROBE_STDERR_TAIL_BYTES + 200
+    assert peak < 4 * 1024 * 1024, peak  # (64 MiB of output; the buffer is 16 KiB, a read is 64 KiB.)
+    assert threading.active_count() <= threads_before  # The reader thread ended with the output.

@@ -15,12 +15,12 @@ import logging
 import os
 import re
 import signal
-import tempfile
+import threading
 import time
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, TextIO, cast
+from typing import TYPE_CHECKING, Any, TextIO
 
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
@@ -572,16 +572,18 @@ async def _mcp_server_tool_metadata(
     suffixes, see :func:`pi_mcp_tool_names`). The tool definitions use only
     the configured tools.
     """
-    # A private anonymous file (mode 0600, deleted when closed) takes the stderr of a stdio server: the SDK default
-    # is the terminal, where a credential that the server prints would go to the CI log.
-    errlog = tempfile.TemporaryFile("w+b") if server.type == "stdio" else None  # noqa: SIM115 - closed in ``finally``
+    # A pipe that a thread empties into a ring buffer takes the stderr of a stdio server: the SDK default is the
+    # terminal, where a credential that the server prints would go to the CI log, and a file would grow with a noisy
+    # server. Only the last ``MCP_PROBE_STDERR_TAIL_BYTES`` bytes are ever stored.
+    stderr_tail = _StderrTail(MCP_PROBE_STDERR_TAIL_BYTES) if server.type == "stdio" else None
+    errlog = stderr_tail.errlog if stderr_tail is not None else None
     try:
         tools = await asyncio.wait_for(
             _list_mcp_tools(
                 server,
                 trace_headers,
                 all_pages=True,
-                errlog=cast("TextIO", errlog) if errlog is not None else None,
+                errlog=errlog,
                 cwd=cwd,
             ),
             timeout=MCP_TOOL_METADATA_TIMEOUT_SECONDS,
@@ -590,14 +592,14 @@ async def _mcp_server_tool_metadata(
         # Fixed text: the message of the error (the validation error of the MCP SDK holds the whole tool object
         # that the server sent) and its traceback are not logged.
         logger.debug("Unable to fetch MCP tool metadata for server %s (%s)", server.name, exception_summary(error))
-        if notes is not None and errlog is not None:
-            tail = _read_tail(errlog, MCP_PROBE_STDERR_TAIL_BYTES)
+        if notes is not None and stderr_tail is not None:
+            tail = stderr_tail.finish()
             if tail:
                 notes.append(f"stderr of MCP server {server.name!r} during the metadata probe (last bytes):\n{tail}")
         return {}
     finally:
-        if errlog is not None:
-            errlog.close()
+        if stderr_tail is not None:
+            stderr_tail.finish()
 
     catalog: dict[tuple[str, str], McpToolMetadata] = {}
     for mcp_tool in tools:
@@ -608,16 +610,44 @@ async def _mcp_server_tool_metadata(
     return catalog
 
 
-def _read_tail(file: Any, limit: int) -> str:
-    """Return the last ``limit`` bytes of a binary file object, as text (invalid bytes replaced)."""
-    try:
-        file.flush()
-        file.seek(0, os.SEEK_END)
-        size = file.tell()
-        file.seek(max(0, size - limit))
-        return file.read().decode("utf-8", "replace").strip()
-    except (OSError, ValueError):
-        return ""
+class _StderrTail:
+    """A pipe for the stderr of a child process that keeps only the last ``limit`` bytes.
+
+    ``errlog`` is the write end (a text file object with a file descriptor, what ``stdio_client`` takes). A thread
+    empties the read end for as long as a process holds the write end, so the child never blocks on a full pipe,
+    and nothing but the ring buffer grows: no memory or disk use in proportion to the output.
+    """
+
+    def __init__(self, limit: int) -> None:
+        read_fd, write_fd = os.pipe()
+        self._buffer = _BoundedByteBuffer(limit)
+        self._lock = threading.Lock()
+        self.errlog: TextIO = os.fdopen(write_fd, "w", encoding="utf-8", errors="replace")
+        self._thread = threading.Thread(target=self._drain, args=(read_fd,), name="mcp-probe-stderr", daemon=True)
+        self._thread.start()
+
+    def _drain(self, read_fd: int) -> None:
+        try:
+            while chunk := os.read(read_fd, 65536):
+                with self._lock:
+                    self._buffer.append(chunk)
+        except OSError:
+            pass
+        finally:
+            with contextlib.suppress(OSError):
+                os.close(read_fd)
+
+    def finish(self) -> str:
+        """Close our copy of the write end, wait a moment for the end of the output, and return the tail as text.
+
+        If a grandchild still holds the pipe, the thread stays (it is a daemon thread and ends with that process);
+        what was read is returned.
+        """
+        with contextlib.suppress(OSError, ValueError):
+            self.errlog.close()
+        self._thread.join(timeout=1.0)
+        with self._lock:
+            return self._buffer.text().strip()
 
 
 async def _list_mcp_tools(
