@@ -113,6 +113,35 @@ def _parse_provider(name: str, config: dict[str, Any]) -> ProviderGatewayConfig:
     )
 
 
+#: The variable that a provider reads by itself: naming it in ``api_key_env`` changes nothing.
+_NATIVE_API_KEY_ENVS = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY"}
+
+
+def _check_gateway_keys_have_a_base_url(name: str, config: dict[str, Any]) -> None:
+    """Raise when a provider sets gateway keys without ``base_url``.
+
+    ``headers``, ``credentials_helper`` and a custom ``api_key_env`` apply to requests that go to the gateway. Without
+    a ``base_url`` no harness sends them (the provider's own API is used), and pi falls back to the credentials of the
+    operator: a run could silently use another account or other headers than the file says. The load fails instead.
+    """
+    if config.get("base_url"):
+        return
+    ignored = []
+    if config.get("headers"):
+        ignored.append("headers")
+    if config.get("credentials_helper"):
+        ignored.append("credentials_helper")
+    api_key_env = config.get("api_key_env")
+    if api_key_env and api_key_env != _NATIVE_API_KEY_ENVS.get(name):
+        ignored.append("api_key_env")
+    if ignored:
+        keys = ", ".join(f"'{key}'" for key in ignored)
+        raise ConfigError(
+            f"Provider '{name}' sets {keys} without 'base_url'. They only apply to a gateway and would be ignored "
+            "(and pi would use your own credentials). Set 'base_url', or remove them."
+        )
+
+
 def load_gateway(path: str | Path) -> GatewayConfig:
     """Load and validate a gateway configuration from a TOML file."""
     data = read_toml_file(path)
@@ -134,6 +163,7 @@ def load_gateway(path: str | Path) -> GatewayConfig:
                     f"Unknown keys in provider '{provider_name}': {', '.join(sorted(unknown_provider_keys))}"
                 )
 
+            _check_gateway_keys_have_a_base_url(provider_name, provider_config)
             providers[provider_name] = _parse_provider(provider_name, provider_config)
 
     return GatewayConfig(providers=providers)

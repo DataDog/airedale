@@ -391,6 +391,8 @@ env-var keys (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`).
 | `providers.<name>.headers` | table | Static extra headers for every request to this provider |
 | `providers.<name>.pi_models` | array of tables | Pi harness only: extra pi model definitions (pi `models.json` `models` entries, passed as-is) |
 
+`headers`, `credentials_helper` and an `api_key_env` other than the provider's own variable apply only to a gateway: setting one without `base_url` is a load error (`ConfigError` naming the provider and the keys). Set `base_url`, or remove them.
+
 Credential resolution priority (per provider):
 
 1. `credentials_helper` → runs the command once, caches for 30 minutes, prefers JWT-shaped output.

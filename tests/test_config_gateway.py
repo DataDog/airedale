@@ -215,3 +215,47 @@ class TestPiModels:
     def test_invalid_pi_models(self, tmp_path, body, message):
         with pytest.raises(ConfigError, match=message):
             load_gateway(write_toml(tmp_path, "[providers.openai]\n" + body + "\n"))
+
+
+class TestGatewayKeysNeedABaseUrl:
+    @pytest.mark.parametrize(
+        ("lines", "keys"),
+        [
+            ('headers = { source = "evals" }', "'headers'"),
+            ('credentials_helper = "mytool auth token"', "'credentials_helper'"),
+            ('api_key_env = "MY_KEY"', "'api_key_env'"),
+            (
+                'headers = { a = "b" }\ncredentials_helper = "h"\napi_key_env = "MY_KEY"',
+                "'headers', 'credentials_helper', 'api_key_env'",
+            ),
+        ],
+    )
+    def test_gateway_keys_without_base_url_are_refused(self, tmp_path, lines, keys):
+        toml = f"[providers.anthropic]\n{lines}\n"
+        with pytest.raises(ConfigError) as error:
+            load_gateway(write_toml(tmp_path, toml))
+        message = str(error.value)
+        assert "Provider 'anthropic'" in message and keys in message
+        assert "base_url" in message and "remove them" in message
+
+    def test_the_second_provider_is_named(self, tmp_path):
+        toml = '[providers.anthropic]\nbase_url = "https://x"\n[providers.openai]\nheaders = { a = "b" }\n'
+        with pytest.raises(ConfigError, match="Provider 'openai'"):
+            load_gateway(write_toml(tmp_path, toml))
+
+    @pytest.mark.parametrize(
+        "lines",
+        [
+            'base_url = "https://x"\nheaders = { a = "b" }\ncredentials_helper = "h"\napi_key_env = "MY_KEY"',
+            "headers = {}",  # An empty table says nothing.
+            'api_key_env = "ANTHROPIC_API_KEY"',  # The variable that the provider reads by itself.
+            "",
+            'pi_models = [{ id = "m" }]',  # Not a gateway key.
+        ],
+    )
+    def test_other_files_load(self, tmp_path, lines):
+        assert load_gateway(write_toml(tmp_path, f"[providers.anthropic]\n{lines}\n")).get("anthropic") is not None
+
+    def test_the_variable_of_another_provider_is_custom(self, tmp_path):
+        with pytest.raises(ConfigError, match="'api_key_env'"):
+            load_gateway(write_toml(tmp_path, '[providers.openai]\napi_key_env = "ANTHROPIC_API_KEY"\n'))
