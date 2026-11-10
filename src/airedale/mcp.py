@@ -562,11 +562,16 @@ async def _list_mcp_tools(
 MCP_TOOL_LIST_MAX_PAGES = 50
 
 
+class McpToolListIncompleteError(RuntimeError):
+    """The server has more ``tools/list`` pages than Airedale reads."""
+
+
 async def _list_all_tools(session: ClientSession) -> list[Any]:
     """Return the tools of every ``tools/list`` page (follows ``nextCursor``).
 
     The complete list is necessary: pi names tools from all the tools of the
-    server. The caller's timeout also bounds this.
+    server. After :data:`MCP_TOOL_LIST_MAX_PAGES` pages with a next cursor left, it raises
+    :class:`McpToolListIncompleteError`. The caller's timeout also bounds this.
     """
     tools: list[Any] = []
     cursor: str | None = None
@@ -578,8 +583,11 @@ async def _list_all_tools(session: ClientSession) -> list[Any]:
         if not cursor or cursor in seen:
             return tools
         seen.add(cursor)
-    logger.debug("MCP server sent more than %d tools/list pages; using the first ones", MCP_TOOL_LIST_MAX_PAGES)
-    return tools
+    # A partial list would give wrong tool names (pi names a tool from the whole list) and a catalog without the later
+    # tools: the listing fails, like any other failure of the probe.
+    raise McpToolListIncompleteError(
+        f"the MCP server sent more than {MCP_TOOL_LIST_MAX_PAGES} tools/list pages; the tool list is incomplete"
+    )
 
 
 def _mcp_tool_metadata(tool: Any) -> McpToolMetadata:
