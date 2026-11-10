@@ -4032,6 +4032,25 @@ class TestNoRawValues:
         )
         assert report.stat().st_mode & 0o777 == 0o600
 
+    def test_stderr_written_just_before_exit_is_not_lost_when_the_reader_is_late(
+        self, tmp_path, fake_pi, monkeypatch, private_report_dir
+    ):
+        """The reader of stderr may run after pi and its stdout are gone: the cleanup must let it finish."""
+        import airedale.harness.pi as pi_module
+
+        real_drain = pi_module._drain
+
+        async def late_drain(stream, buffer):
+            await asyncio.sleep(0.5)  # (Pi has exited and stdout has ended by now.)
+            await real_drain(stream, buffer)
+
+        monkeypatch.setattr(pi_module, "_drain", late_drain)
+        command, _ = fake_pi([], FAKE_PI_EXIT="3", FAKE_PI_STDERR="LATE-STDERR-0123456789\n")
+        result = _run(PiRunner(cwd=tmp_path, pi_command=command))
+        assert "status 3" in str(result.error)
+        [report] = _report_files(private_report_dir)
+        assert "LATE-STDERR-0123456789" in report.read_text()
+
     def test_no_file_when_the_run_did_not_fail(self, tmp_path, fake_pi, private_report_dir):
         command, _ = fake_pi(_events_tool_run(), FAKE_PI_STDERR="warning: something printed SECRET-NOISE\n")
         result = _run(PiRunner(cwd=tmp_path, pi_command=command))

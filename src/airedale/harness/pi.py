@@ -229,6 +229,8 @@ PI_STREAM_LIMIT_BYTES = 64 * 1024 * 1024
 PI_STDERR_TAIL_BYTES = 16 * 1024
 PI_TERMINATE_GRACE_SECONDS = 5.0
 PI_EXIT_POLL_SECONDS = 0.1
+#: How long to wait, after pi and its process group are stopped, for the reader of stderr to reach the end.
+PI_STDERR_DRAIN_SECONDS = 2.0
 #: The only stop reason of a complete final answer. Others (``length``,
 #: ``toolUse``, ``error``, ``aborted``, ...) mean the run did not finish.
 PI_COMPLETE_STOP_REASON = "stop"
@@ -907,10 +909,8 @@ class PiRunner(DecoratorSpanAgentRunner):
         job = WindowsJob.attach(process.pid) if _is_windows() else None
 
         stderr_tail = _TailBuffer(PI_STDERR_TAIL_BYTES)
-        tasks: list[asyncio.Task[Any]] = [
-            asyncio.create_task(_write_stdin(process, user_prompt)),
-            asyncio.create_task(_drain(process.stderr, stderr_tail)),
-        ]
+        stderr_task = asyncio.create_task(_drain(process.stderr, stderr_tail))
+        tasks: list[asyncio.Task[Any]] = [asyncio.create_task(_write_stdin(process, user_prompt)), stderr_task]
         reader = asyncio.create_task(_read_events(process, collector, model=model, progress=progress))
         # Not ``process.wait()``: depending on the Python version it also waits
         # for the pipes to close, which a child that keeps stdout open prevents.
@@ -931,19 +931,26 @@ class PiRunner(DecoratorSpanAgentRunner):
             if reader.done() and not reader.cancelled() and reader.exception() is not None:
                 raise reader.exception()  # type: ignore[misc]
         finally:
-            await _finish_cleanup(_cleanup_process(process, tasks, job))
+            await _finish_cleanup(_cleanup_process(process, tasks, job, stderr_task))
         # The raw tail is not shown anywhere: it goes to the private report of the run, when the run fails.
         raw = stderr_tail.text()
         return process.returncode, raw, _collector_extension_failed(collector, process.returncode, raw)
 
 
 async def _cleanup_process(
-    process: asyncio.subprocess.Process, tasks: list[asyncio.Task[Any]], job: WindowsJob | None = None
+    process: asyncio.subprocess.Process,
+    tasks: list[asyncio.Task[Any]],
+    job: WindowsJob | None = None,
+    stderr_task: asyncio.Task[Any] | None = None,
 ) -> None:
     # Always stop the whole group: children of pi (stdio MCP servers,
     # background commands) can outlive pi itself.
     try:
         await _stop_process_group(process, job)
+        if stderr_task is not None and not stderr_task.done():
+            # What pi wrote to stderr just before it exited can still be in the pipe: let the reader take it (the
+            # writers are stopped, so the end comes soon) before the reader is cancelled. The tail is for the report.
+            await asyncio.wait({stderr_task}, timeout=PI_STDERR_DRAIN_SECONDS)
         for task in tasks:
             if not task.done():
                 task.cancel()
