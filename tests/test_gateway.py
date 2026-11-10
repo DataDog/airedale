@@ -117,6 +117,34 @@ class TestResolveCredentialsHelper:
         with pytest.raises(RuntimeError, match="failed"):
             resolve_provider_config("anthropic", gw)
 
+    def test_stderr_and_error_text_of_the_helper_are_not_logged_or_raised(self, mocker, clear_credential_cache, caplog):
+        import logging
+        import subprocess
+
+        secret = "Bearer sk-HELPER-SECRET-0123456789"
+        mocker.patch("airedale.gateway.time.sleep")
+        mock_run = mocker.patch("airedale.gateway.subprocess.run")
+        mock_run.side_effect = subprocess.CalledProcessError(7, "helper", stderr=f"auth failed for {secret}")
+        gw = _make_gateway("anthropic", base_url="https://gw.example.com", credentials_helper="bad-helper")
+        with caplog.at_level(logging.DEBUG), pytest.raises(RuntimeError) as raised:
+            resolve_provider_config("anthropic", gw)
+        assert secret not in caplog.text and secret not in str(raised.value)
+        assert "exit 7" in caplog.text and "exit 7" in str(raised.value)
+        assert "Failed to get credentials for anthropic (RuntimeError" in caplog.text
+        assert all(record.exc_info is None for record in caplog.records)
+
+    def test_other_errors_of_the_helper_are_summarized_not_quoted(self, mocker, clear_credential_cache):
+        secret = "sk-OSERROR-SECRET-0123456789"
+        mocker.patch("airedale.gateway.subprocess.run", side_effect=OSError(f"cannot run {secret}"))
+        with pytest.raises(RuntimeError) as raised:
+            _run_credentials_helper("odd-helper")
+        assert secret not in str(raised.value) and "OSError" in str(raised.value)
+
+    def test_empty_output_keeps_its_fixed_message(self, mocker, clear_credential_cache):
+        mocker.patch("airedale.gateway.subprocess.run", return_value=MagicMock(stdout="\n", returncode=0))
+        with pytest.raises(RuntimeError, match="returned empty output"):
+            _run_credentials_helper("empty-helper")
+
     def test_failed_helper_retries_up_to_max_attempts(self, mocker, clear_credential_cache):
         import subprocess
 
