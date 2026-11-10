@@ -34,11 +34,17 @@ export default function (pi: any) {
 """
 
 
-def _pi() -> str | None:
+def _pi_or_none() -> str | None:
     return shutil.which("pi") if shutil.which("node") else None
 
 
-needs_pi = pytest.mark.skipif(_pi() is None, reason="needs node and a pi executable")
+def _pi() -> str:
+    pi = _pi_or_none()
+    assert pi is not None
+    return pi
+
+
+needs_pi = pytest.mark.skipif(_pi_or_none() is None, reason="needs node and a pi executable")
 
 
 def _write(path: Path, text: str) -> None:
