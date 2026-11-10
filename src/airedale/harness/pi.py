@@ -142,6 +142,7 @@ from airedale.harness.base import (
     _notify,
 )
 from airedale.harness.pi_spans import (
+    COMPACTION_REASONS,
     PI_KNOWN_STOP_REASONS,
     PI_LLMOBS_EXTENSION_PATH,
     PiSpanRecorder,
@@ -1106,6 +1107,11 @@ def _is_small_count(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 1000
 
 
+def _is_count_value(value: Any) -> bool:
+    """Return True for a finite non-negative number (what the compaction spans report)."""
+    return isinstance(value, int | float) and not isinstance(value, bool) and math.isfinite(value) and value >= 0
+
+
 def _raw(value: Any) -> str:
     """Return ``value`` as text for the private report, cut at :data:`_MAX_RAW_VALUE` characters."""
     text = str(value)
@@ -1660,6 +1666,11 @@ class _PiEventCollector:
             execution.duration_ms = event.get("durationMs")
             execution.finished = True
             return None
+        if event_type == "compaction_start":
+            reason = event.get("reason")
+            if reason is not None and not (isinstance(reason, str) and reason in COMPACTION_REASONS):
+                self.private_notes.append(f"compaction reason: {_raw(reason)}")
+            return None
         if event_type == "compaction_end":
             # Compaction calls the model too; count that usage.
             result = event.get("result")
@@ -1669,6 +1680,11 @@ class _PiEventCollector:
             # is there must be usable.
             if isinstance(result, dict) and "usage" in result:
                 self._add_usage(result["usage"], "compaction")
+            if isinstance(result, dict):
+                for key in ("tokensBefore", "estimatedTokensAfter"):
+                    value = result.get(key)
+                    if value is not None and not _is_count_value(value):
+                        self.private_notes.append(f"compaction {key}: {_raw(value)}")
             return "compaction"
         if event_type == "entry_appended":
             # Model work outside the messages, for example prompt-cache warming

@@ -172,6 +172,10 @@ def message_text(message: dict[str, Any]) -> str:
     return "\n\n".join(part.strip() for part in parts if part.strip())
 
 
+#: The reasons of ``compaction_start`` in pi 1.5.0 and 1.5.1 (``agent-session.d.ts``).
+COMPACTION_REASONS = frozenset({"manual", "threshold", "overflow"})
+
+
 def _usage_metrics(usage: Any) -> dict[str, Any] | None:
     """Return the LLMObs metrics of a valid pi ``usage`` record; ``None`` for a missing or damaged one."""
     if not is_valid_pi_usage(usage):
@@ -890,8 +894,22 @@ class PiSpanRecorder:
             name="pi.compaction",
             start_ns=now,
             end_ns=now,
-            metadata={"source": SOURCE, "reason": event.get("reason"), "turn": self._turn},
+            metadata={
+                "source": SOURCE,
+                "reason": self._known_compaction_reason(event.get("reason")),
+                "turn": self._turn,
+            },
         )
+
+    def _known_compaction_reason(self, reason: Any) -> str | None:
+        """Return ``reason`` if it is a reason that pi defines (1.5.0, 1.5.1), else ``<other>``; ``None`` if absent.
+
+        A project extension can write the record, so another value is not traced (the event collector of
+        ``pi.py`` puts it in the private notes).
+        """
+        if reason is None:
+            return None
+        return reason if isinstance(reason, str) and reason in COMPACTION_REASONS else "<other>"
 
     def _on_compaction_end(self, event: dict[str, Any], now: int) -> None:
         record = self._compaction
@@ -908,8 +926,10 @@ class PiSpanRecorder:
                 ("tokensBefore", "tokens_before"),
                 ("estimatedTokensAfter", "estimated_tokens_after"),
             ):
-                if result.get(key) is not None:
-                    record.metadata[meta_key] = json_safe(result[key])
+                value = result.get(key)
+                if _is_number(value) and math.isfinite(value) and value >= 0:
+                    record.metadata[meta_key] = value
+                # (Only a count is traced; anything else is kept in the private notes by the event collector.)
             usage_metrics = _usage_metrics(result.get("usage"))
             if usage_metrics is not None:
                 record.metadata["usage"] = usage_metrics

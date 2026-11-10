@@ -226,6 +226,32 @@ class TestModelCalls:
         assert record.kind == "llm"
         assert record.metrics is None
 
+    @pytest.mark.parametrize(
+        ("reason", "shown"),
+        [
+            ("manual", "manual"),
+            ("threshold", "threshold"),
+            ("overflow", "overflow"),
+            ("sk-SECRET", "<other>"),
+            (5, "<other>"),
+            (None, None),
+        ],
+    )
+    def test_compaction_reason_is_kept_only_when_pi_defines_it(self, reason, shown):
+        recorder = _feed(
+            _recorder(),
+            [(1, {"type": "compaction_start", "reason": reason}), (9, {"type": "compaction_end", "aborted": True})],
+        )
+        assert recorder.records[0].metadata["reason"] == shown
+
+    def test_compaction_counts_must_be_numbers(self):
+        result = {"summary": "S", "tokensBefore": "sk-SECRET", "estimatedTokensAfter": -3}
+        recorder = _feed(
+            _recorder(), [(1, {"type": "compaction_start"}), (9, {"type": "compaction_end", "result": result})]
+        )
+        assert "tokens_before" not in recorder.records[0].metadata
+        assert "estimated_tokens_after" not in recorder.records[0].metadata
+
     def test_damaged_usage_of_a_compaction_is_not_in_its_metadata(self):
         result = {"summary": "S", "usage": {"input": -1, "output": 2, "cost": {"total": 0}}}
         recorder = _feed(

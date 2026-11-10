@@ -4404,6 +4404,58 @@ class TestNoRawValues:
         assert collector.feed({"type": "auto_retry_start", "attempt": 1, "maxAttempts": 3}) == "retry 1/3"
         assert collector.feed({"type": "auto_retry_start", "attempt": "SECRET", "maxAttempts": 3}) == "retry"
 
+    @pytest.mark.parametrize("telemetry", [False, True], ids=["telemetry-off", "telemetry-on"])
+    def test_compaction_reason_and_counts_from_pi_are_only_in_the_private_file(
+        self, tmp_path, fake_pi, monkeypatch, fake_span_llmobs, caplog, private_report_dir, telemetry
+    ):
+        reason_secret, count_secret = "sk-REASON-SECRET-0123456789", "sk-COUNT-SECRET-0123456789"
+        if telemetry:
+            import airedale.harness.base as base
+
+            monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
+            monkeypatch.setattr(base, "agent", lambda **kwargs: lambda func: func)
+
+            async def _no_catalog(servers, headers):
+                return {}
+
+            monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _no_catalog)
+        events = _events_tool_run()
+        position = next(i for i, e in enumerate(events) if e["type"] == "agent_end")
+        events[position:position] = [
+            {"type": "compaction_start", "reason": reason_secret},
+            {
+                "type": "compaction_end",
+                "result": {"summary": "S", "tokensBefore": count_secret, "estimatedTokensAfter": 7},
+            },
+        ]
+        command, _ = fake_pi(events, FAKE_PI_EXIT="3")
+        runner = PiRunner(cwd=tmp_path, pi_command=command)
+        with caplog.at_level("DEBUG"):
+            if telemetry:
+                with pytest.raises(RuntimeError) as raised:
+                    _bounded(
+                        runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h")
+                    )
+                error = raised.value
+            else:
+                error = _run(runner).error
+        shown = caplog.text + str(error)
+        if telemetry:
+            compaction = [s for s in fake_span_llmobs.spans if s.name == "pi.compaction"]
+            assert compaction, [s.name for s in fake_span_llmobs.spans]
+            metadata = json.dumps([s.annotations for s in compaction], default=str)
+            assert "<other>" in metadata and '"estimated_tokens_after": 7' in metadata
+            shown += json.dumps([(s.error, s.tags, s.annotations) for s in fake_span_llmobs.spans], default=str)
+        assert reason_secret not in shown and count_secret not in shown
+        [report] = _report_files(private_report_dir)
+        text = report.read_text()
+        assert reason_secret in text and count_secret in text
+
+    def test_known_compaction_reasons_are_kept(self):
+        from airedale.harness.pi_spans import COMPACTION_REASONS
+
+        assert {"manual", "threshold", "overflow"} == COMPACTION_REASONS
+
     def test_the_old_redaction_code_is_gone(self):
         import airedale.harness.pi as pi_module
 
