@@ -248,6 +248,18 @@ def test_name_matches_pi(pi_reference, tmp_path, label, content):
         ('---\n" name ": alpha\ndescription: d\n---\n', "project"),  # the key is " name ": not the name
         ("---\nname: 0xff\ndescription: d\n---\n", "project"),  # a number: pi uses the directory name
         ("---\nname: 1_000\ndescription: d\n---\n", "1_000"),  # not a number in YAML 1.2
+        ("---\nname: .5\ndescription: d\n---\n", "project"),  # a float of the core schema (yaml 2.9.0)
+        ("---\nname: .5e1\ndescription: d\n---\n", "project"),  # a float of the core schema (yaml 2.9.0)
+        ("---\nname: 01.5\ndescription: d\n---\n", "project"),  # a float of the core schema (yaml 2.9.0)
+        ("---\nname: 1.\ndescription: d\n---\n", "project"),  # a float of the core schema (yaml 2.9.0)
+        ("---\nname: +.5\ndescription: d\n---\n", "project"),  # a float of the core schema (yaml 2.9.0)
+        ("---\nname: -.5e-2\ndescription: d\n---\n", "project"),  # a float of the core schema (yaml 2.9.0)
+        ("---\nname: 1.e3\ndescription: d\n---\n", "project"),  # a float of the core schema (yaml 2.9.0)
+        ("---\nname: .inf\ndescription: d\n---\n", "project"),  # a float of the core schema (yaml 2.9.0)
+        ("---\nname: .e3\ndescription: d\n---\n", ".e3"),  # not a float: a string
+        ("---\nname: 1e\ndescription: d\n---\n", "1e"),  # not a float: a string
+        ("---\nname: 1.5.5\ndescription: d\n---\n", "1.5.5"),  # not a float: a string
+        ("---\nname: 1_0\ndescription: d\n---\n", "1_0"),  # not a float: a string
         ("---\nname: yes\ndescription: d\n---\n", "yes"),  # not a boolean in YAML 1.2
         ("---\nname: 2001-01-01\ndescription: d\n---\n", "2001-01-01"),  # a string in the core schema
         ("---\nname: alpha\nname: beta\ndescription: d\n---\n", None),  # duplicate key: pi skips the skill
