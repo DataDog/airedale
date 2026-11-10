@@ -414,8 +414,18 @@ class PiToolNameOrderError(ValueError):
 
 
 def _pi_possible_names(server: str, tools: Iterable[str]) -> set[str]:
-    """Return every name that a tool of ``server`` can get in pi: the plain name or the one with a hash suffix."""
-    return {name for tool in tools for name in (_pi_plain_tool_name(server, tool), _pi_hashed_tool_name(server, tool))}
+    """Return every name that a tool of ``server`` can get in pi: the plain name or the one with a hash suffix.
+
+    Pi uses the plain name only when it has at most 64 characters (``createMcpToolName`` in ``naming.js``, pi 1.5.0 and
+    1.5.1); a longer one is always cut and given a hash suffix, so it can never be a name of a tool.
+    """
+    names: set[str] = set()
+    for tool in tools:
+        plain = _pi_plain_tool_name(server, tool)
+        if len(plain) <= PI_MAX_TOOL_NAME_LENGTH:
+            names.add(plain)
+        names.add(_pi_hashed_tool_name(server, tool))
+    return names
 
 
 def _pi_server_groups(catalog: Mapping[str, list[str]]) -> list[list[str]]:

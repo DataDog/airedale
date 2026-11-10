@@ -122,6 +122,16 @@ def test_more_than_six_servers_that_can_share_a_name_are_rejected():
     assert pi_possible_tool_name_collisions(six)
 
 
+def test_plain_names_longer_than_pi_allows_do_not_make_servers_share_a_group():
+    # Seven servers whose plain names are the same but longer than 64 characters: pi always gives each one a hash
+    # suffix made from its own server and tool names, so the names differ and no order matters.
+    catalog = {"a" + "_" * i: ["_" * (6 - i) + "x" * 70] for i in range(7)}
+    assert len({f"mcp__{server}__{tools[0]}".replace("-", "_") for server, tools in catalog.items()}) == 1
+    assert all(len(f"mcp__{server}__{tools[0]}") > 64 for server, tools in catalog.items())
+    assert len({pi_mcp_tool_name(server, tools[0]) for server, tools in catalog.items()}) == 7
+    assert pi_possible_tool_name_collisions(catalog) == {}
+
+
 def test_the_runner_refuses_a_scenario_with_too_many_servers_that_share_a_name():
     from airedale.harness.pi import PiRunner
 
