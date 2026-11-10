@@ -148,6 +148,7 @@ from airedale.harness.pi_spans import (
     message_text,
     tool_result_text,
 )
+from airedale.harness.windows_job import WindowsJob
 from airedale.mcp import pi_literal, pi_possible_tool_name_collisions
 from airedale.pi_mcp import discover_pi_project_mcp_servers, merge_project_mcp_config, validate_server_config
 from airedale.skills import pi_skill_dirs
@@ -896,6 +897,9 @@ class PiRunner(DecoratorSpanAgentRunner):
             )
         except FileNotFoundError as exc:
             raise RuntimeError(f"pi executable not found ({command[0]!r}); install pi or set {PI_COMMAND_ENV}") from exc
+        # Windows: the whole process tree of pi goes into a Job Object, assigned right after the spawn (see
+        # ``windows_job``), so that no child outlives the run, also when pi exits first.
+        job = WindowsJob.attach(process.pid) if _is_windows() else None
 
         stderr_tail = _TailBuffer(PI_STDERR_TAIL_BYTES)
         tasks: list[asyncio.Task[Any]] = [
@@ -922,20 +926,26 @@ class PiRunner(DecoratorSpanAgentRunner):
             if reader.done() and not reader.cancelled() and reader.exception() is not None:
                 raise reader.exception()  # type: ignore[misc]
         finally:
-            await _finish_cleanup(_cleanup_process(process, tasks))
+            await _finish_cleanup(_cleanup_process(process, tasks, job))
         # The raw tail is not shown anywhere: it goes to the private report of the run, when the run fails.
         raw = stderr_tail.text()
         return process.returncode, raw, _collector_extension_failed(collector, process.returncode, raw)
 
 
-async def _cleanup_process(process: asyncio.subprocess.Process, tasks: list[asyncio.Task[Any]]) -> None:
+async def _cleanup_process(
+    process: asyncio.subprocess.Process, tasks: list[asyncio.Task[Any]], job: WindowsJob | None = None
+) -> None:
     # Always stop the whole group: children of pi (stdio MCP servers,
     # background commands) can outlive pi itself.
-    await _stop_process_group(process)
-    for task in tasks:
-        if not task.done():
-            task.cancel()
-    await asyncio.gather(*tasks, return_exceptions=True)
+    try:
+        await _stop_process_group(process, job)
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+    finally:
+        if job is not None:
+            job.close()
 
 
 async def _finish_cleanup(cleanup: Any) -> None:
@@ -1271,7 +1281,7 @@ async def _drain(stream: asyncio.StreamReader | None, buffer: _TailBuffer) -> No
         buffer.append(chunk)
 
 
-async def _stop_process_group(process: asyncio.subprocess.Process) -> None:
+async def _stop_process_group(process: asyncio.subprocess.Process, job: WindowsJob | None = None) -> None:
     """Stop the pi process group and reap pi.
 
     SIGTERM goes to the whole group (also when pi itself already exited, as its
@@ -1279,10 +1289,10 @@ async def _stop_process_group(process: asyncio.subprocess.Process) -> None:
     child is still in the group, SIGKILL follows. Pi is then reaped.
 
     Windows has no process groups and no ``os.killpg``: see
-    ``_stop_process_tree_windows``.
+    ``_stop_process_tree_windows`` (``job`` is the Job Object of the run).
     """
     if _is_windows():
-        await _stop_process_tree_windows(process)
+        await _stop_process_tree_windows(process, job)
         return
     _signal_group(process, signal.SIGTERM)
     if process.returncode is None:
@@ -1302,19 +1312,23 @@ def _is_windows() -> bool:
 WINDOWS_TASKKILL = "taskkill"
 
 
-async def _stop_process_tree_windows(process: asyncio.subprocess.Process) -> None:
+async def _stop_process_tree_windows(process: asyncio.subprocess.Process, job: WindowsJob | None = None) -> None:
     """Stop pi and its child processes on Windows, then reap pi.
 
-    ``taskkill /T /F`` stops the process tree of pi (stdio MCP servers, bash
-    tool commands). Then pi itself is stopped (``TerminateProcess``) if it
-    still runs, and reaped. A ``taskkill`` that does not end in time is
-    stopped too.
+    With a Job Object (``job``), ``TerminateJobObject`` stops every process of the run (stdio MCP servers, bash
+    tool commands, and their children), also when pi already exited. Without one (the job could not be made or the
+    call failed), ``taskkill /T /F`` stops the process tree of pi. Then pi itself is stopped (``TerminateProcess``) if
+    it still runs, and reaped. A ``taskkill`` that does not end in time is stopped too.
 
-    Limit: Windows finds the children through pi. When pi already exited
-    (for example a child keeps stdout open), its children are not found and
-    are not stopped. A Windows Job Object would be necessary for that.
+    Limit of the fallback: Windows finds the children through pi. When pi already exited (for example a child keeps
+    stdout open), its children are not found and are not stopped. The children that pi starts between the spawn and
+    the assignment to the job (a few microseconds; see ``windows_job``) are not in the job.
     """
-    if process.returncode is None:
+    if job is not None and job.terminate():
+        if process.returncode is None:
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(_wait_for_exit(process), timeout=PI_TERMINATE_GRACE_SECONDS)
+    elif process.returncode is None:
         taskkill: asyncio.subprocess.Process | None = None
         try:
             taskkill = await asyncio.create_subprocess_exec(

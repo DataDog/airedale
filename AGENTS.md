@@ -365,10 +365,8 @@ Notes:
     cancellation — also a second one during cleanup — and when pi exits while a
     child keeps stdout open; exit is detected from `returncode`, not
     `process.wait()`, which can wait for the pipes). On Windows (no process
-    groups, no `os.killpg`) the runner stops the pi process tree with
-    `taskkill /PID <pid> /T /F`, then `TerminateProcess` if pi still runs.
-    Limit on Windows: when pi already exited, its children are not found and
-    keep running (a Job Object would be necessary).
+    groups, no `os.killpg`) the runner puts pi in a
+    Windows Job Object (`harness/windows_job.py`, `ctypes`, `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`) that holds the whole tree: pi is assigned to it right after the spawn, `TerminateJobObject` stops every process on cleanup (also when pi already exited), and the job handle is closed in a `finally` (so a dead Airedale also kills the tree). Children that pi starts between the spawn and the assignment are not in the job (a few microseconds; pi needs far longer to start its first child). When the job cannot be made or assigned (a warning is logged), the old path runs: `taskkill /PID <pid> /T /F`, then `TerminateProcess` if pi still runs; its limit is that when pi already exited its children are not found. The job calls are tested with a fake Windows API (CI is Linux only).
     The private agent dir is outside `cwd`, but pi's tools (`bash`, `read`
     with an absolute path) run as the same OS user, and the pi env has
     `PI_CODING_AGENT_DIR`, so a model command can read `models.json` /
