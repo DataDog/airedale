@@ -4202,3 +4202,110 @@ class TestPrivateReportDirectory:
         monkeypatch.setattr(pi_module, "open_private_report", interrupted)
         with pytest.raises(KeyboardInterrupt):
             self._write(tmp_path)
+
+
+class TestRawDiagnosticsAreKept:
+    """The raw values are collected when the records arrive, with or without telemetry, whichever error ends the run."""
+
+    FIELDS = ("errorMessage", "responseModel", "responseId", "api", "thinkingLevel", "stopReason", "model", "provider")
+
+    @pytest.mark.parametrize("field", FIELDS)
+    @pytest.mark.parametrize("status", [0, 3])
+    def test_every_raw_field_of_a_failed_final_message_reaches_the_report_without_telemetry(
+        self, tmp_path, fake_pi, caplog, private_report_dir, field, status
+    ):
+        marker = f"DUMMY-RAW-{field.upper()}-0123456789"
+        events = _events_tool_run()
+        events[9]["message"]["stopReason"] = "error"
+        events[9]["message"][field] = marker
+        command, _ = fake_pi(events, FAKE_PI_EXIT=str(status))
+        with caplog.at_level("DEBUG"):
+            result = _run(PiRunner(cwd=tmp_path, pi_command=command))
+        assert result.error is not None
+        assert marker not in _all_text(result, caplog)
+        [report] = _report_files(private_report_dir)
+        assert marker in report.read_text()
+
+    def test_message_of_an_earlier_failed_call_is_kept(self, tmp_path, fake_pi, private_report_dir):
+        events = _events_tool_run()
+        events[4]["message"]["stopReason"] = "error"
+        events[4]["message"]["errorMessage"] = "DUMMY-EARLIER-CALL-0123456789"
+        command, _ = fake_pi(events, FAKE_PI_EXIT="3")
+        result = _run(PiRunner(cwd=tmp_path, pi_command=command))
+        assert result.error is not None
+        [report] = _report_files(private_report_dir)
+        assert "DUMMY-EARLIER-CALL-0123456789" in report.read_text()
+
+    def test_unknown_stop_reason_is_kept(self, tmp_path, fake_pi, private_report_dir):
+        events = _events_tool_run()
+        events[9]["message"]["stopReason"] = "DUMMY-STOP-REASON-0123456789"
+        command, _ = fake_pi(events)
+        result = _run(PiRunner(cwd=tmp_path, pi_command=command))
+        assert "DUMMY-STOP-REASON" not in str(result.error)
+        [report] = _report_files(private_report_dir)
+        assert "DUMMY-STOP-REASON-0123456789" in report.read_text()
+
+    def test_compaction_error_message_is_kept(self, tmp_path, fake_pi, private_report_dir):
+        events = _events_tool_run()
+        events.insert(
+            5, {"type": "compaction_end", "errorMessage": "DUMMY-COMPACT-0123456789", "aborted": False, "result": {}}
+        )
+        events[10]["message"]["stopReason"] = "error"
+        command, _ = fake_pi(events)
+        result = _run(PiRunner(cwd=tmp_path, pi_command=command))
+        assert result.error is not None
+        [report] = _report_files(private_report_dir)
+        assert "DUMMY-COMPACT-0123456789" in report.read_text()
+
+    def test_a_long_raw_value_is_cut(self):
+        collector = _collect(_events_tool_run())
+        message = {"role": "assistant", "stopReason": "error", "errorMessage": "x" * 100_000}
+        collector._note_assistant_message(message)
+        assert len(collector.private_notes[-1]) < 22_000 and "[cut]" in collector.private_notes[-1]
+
+    @pytest.mark.parametrize("unfinished", [False, True])
+    def test_request_id_is_not_in_the_spans_and_is_in_the_report(
+        self, tmp_path, fake_pi, monkeypatch, fake_span_llmobs, caplog, private_report_dir, unfinished
+    ):
+        import airedale.harness.base as base
+        from airedale.harness.pi_spans import EXTENSION_REQUEST_ENTRY, EXTENSION_RESPONSE_ENTRY
+
+        monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
+        monkeypatch.setattr(base, "agent", lambda **kwargs: lambda func: func)
+
+        async def _no_catalog(servers, headers):
+            return {}
+
+        monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _no_catalog)
+        marker = "DUMMY-HEADER-CREDENTIAL-0123456789"
+
+        def entry(kind, **data):
+            return {
+                "type": "entry_appended",
+                "entry": {"type": "custom", "customType": kind, "data": {"v": 1, "seq": 1, **data}},
+            }
+
+        events = _events_tool_run()
+        position = len(events) - 1 if unfinished else 9
+        events[position:position] = [
+            entry(EXTENSION_REQUEST_ENTRY, t=1, prefix=0, appended=[], count=0),
+            entry(EXTENSION_RESPONSE_ENTRY, t=2, status=200, requestId=marker),
+        ]
+        command, _ = fake_pi(events, FAKE_PI_EXIT="3")
+        with caplog.at_level("DEBUG"), pytest.raises(RuntimeError) as error:
+            _bounded(
+                PiRunner(cwd=tmp_path, pi_command=command).run(
+                    model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"
+                )
+            )
+        everything = (
+            caplog.text
+            + str(error.value)
+            + json.dumps(
+                [(span.tags, span.annotations) for span in fake_span_llmobs.spans] + fake_span_llmobs.annotations,
+                default=str,
+            )
+        )
+        assert marker not in everything
+        [report] = _report_files(private_report_dir)
+        assert marker in report.read_text()

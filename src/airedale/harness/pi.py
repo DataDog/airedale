@@ -1056,6 +1056,16 @@ def open_private_report(name: str) -> tuple[int, Path]:
     return fd, directory / name
 
 
+#: The most characters of one raw value that the private report keeps.
+_MAX_RAW_VALUE = 20_000
+
+
+def _raw(value: Any) -> str:
+    """Return ``value`` as text for the private report, cut at :data:`_MAX_RAW_VALUE` characters."""
+    text = str(value)
+    return text if len(text) <= _MAX_RAW_VALUE else text[:_MAX_RAW_VALUE] + "...[cut]"
+
+
 def _collector_extension_failed(collector: _PiEventCollector, returncode: int | None, stderr_tail: str) -> bool:
     """Return ``True`` when pi stopped at startup because it cannot load the collector extension."""
     return (
@@ -1524,6 +1534,7 @@ class _PiEventCollector:
                 return None
             if message.get("role") == "assistant":
                 self.assistant_messages.append(message)
+                self._note_assistant_message(message)
                 if not _valid_assistant_content(message.get("content")):
                     # Pi writes ``content`` of an assistant message as a list of blocks (an empty list for a
                     # response with no content; every provider of pi 1.4.0 and 1.5.0 does, also the test provider),
@@ -1561,6 +1572,8 @@ class _PiEventCollector:
         if event_type == "compaction_end":
             # Compaction calls the model too; count that usage.
             result = event.get("result")
+            if event.get("errorMessage"):
+                self.private_notes.append(f"compaction errorMessage: {_raw(event['errorMessage'])}")
             # A compaction hook can leave usage out: that is valid. Usage that
             # is there must be usable.
             if isinstance(result, dict) and "usage" in result:
@@ -1580,7 +1593,7 @@ class _PiEventCollector:
         if event_type == "auto_retry_end":
             if event.get("success") is False:
                 self.retry_failed = True
-                self.private_notes.append(f"auto_retry_end.finalError: {event.get('finalError')!s}")
+                self.private_notes.append(f"auto_retry_end.finalError: {_raw(event.get('finalError'))}")
             return None
         if event_type == "auto_retry_start":
             return f"retry {event.get('attempt')}/{event.get('maxAttempts')}"
@@ -1595,6 +1608,26 @@ class _PiEventCollector:
             self.aborted = aborted
             return None
         return None
+
+    def _note_assistant_message(self, message: dict[str, Any]) -> None:
+        """Keep the raw fields that pi, the provider or a gateway wrote in an assistant message, for the private report.
+
+        They are collected when the record arrives, with or without spans and whichever error the run ends with: they are
+        never shown in an error, a log or a span (see :meth:`_error`). Only fields that are there are listed.
+        """
+        fields = (
+            "stopReason",
+            "errorMessage",
+            "provider",
+            "model",
+            "responseModel",
+            "responseId",
+            "api",
+            "thinkingLevel",
+        )
+        values = [f"{name}={_raw(message[name])!r}" for name in fields if message.get(name) not in (None, "")]
+        if values:
+            self.private_notes.append(f"assistant message {len(self.assistant_messages)}: " + ", ".join(values))
 
     def _end_names_another_tool(self, event: dict[str, Any]) -> bool:
         """Return True for an end record with the id of an open execution but the name of another tool.
@@ -1715,7 +1748,6 @@ class _PiEventCollector:
         for message in self.assistant_messages:
             provider, model_id = message.get("provider"), message.get("model")
             if provider != model.provider or model_id != model.name:
-                self.private_notes.append(f"model that pi ran: {provider!s}/{model_id!s}")
                 return RuntimeError(
                     f"pi ran another model than {model.label}; check that pi knows the model "
                     "(its catalog or [[providers.<provider>.pi_models]] in the gateway config)"
@@ -1725,7 +1757,6 @@ class _PiEventCollector:
             if response_model and response_model != model.name:
                 # The provider reports the concrete model (for example a dated snapshot). Not an error, but make it
                 # visible, without the value (a provider or a gateway can write anything there).
-                self.private_notes.append(f"responseModel: {response_model!s}")
                 logger.warning("pi reports a response model that is not the configured one for %s", model.label)
         if final.get("stopReason") != PI_COMPLETE_STOP_REASON:
             return RuntimeError(f"pi run did not complete for {model.label}: {self._incomplete_reason(final)}")
@@ -1755,7 +1786,6 @@ class _PiEventCollector:
         """Return a fixed text for a final message that is not complete (never the message of the provider)."""
         stop_reason = known_value(final.get("stopReason"), PI_KNOWN_STOP_REASONS)
         if final.get("errorMessage"):
-            self.private_notes.append(f"errorMessage of the final message: {final['errorMessage']!s}")
             return f"provider error (stopReason={stop_reason})"
         if self.retry_failed:
             return f"pi retries failed (stopReason={stop_reason})"

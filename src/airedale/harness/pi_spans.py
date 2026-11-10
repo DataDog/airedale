@@ -138,6 +138,11 @@ PI_KNOWN_THINKING_LEVELS = frozenset({"off", "minimal", "low", "medium", "high",
 OTHER_VALUE = "<other>"
 
 
+def _configured_or_other(value: Any, configured: str) -> str:
+    """Return ``configured`` for no value or the configured one, else :data:`OTHER_VALUE` (never the raw value)."""
+    return configured if value is None or value == "" or value == configured else OTHER_VALUE
+
+
 def known_value(value: Any, allowed: frozenset[str]) -> str:
     """Return ``value`` when it is one of ``allowed``, else :data:`OTHER_VALUE` (never the value itself)."""
     return value if isinstance(value, str) and value in allowed else OTHER_VALUE
@@ -397,7 +402,6 @@ class _ExtensionRequest:
     messages: list[Any] | None
     first_byte_ns: int | None = None
     http_status: int | None = None
-    request_id: str | None = None
 
 
 class PiSpanRecorder:
@@ -448,8 +452,9 @@ class PiSpanRecorder:
         #: End of the last model call (a tool that it asked for starts after it).
         self._last_call_end_ns: int | None = None
         self.extension_entries = 0
-        #: Raw values that are kept out of the spans (provider error messages, values pi reports about the model).
-        #: The private report of a failed run has them.
+        #: Raw values of the collector extension that are kept out of the spans (the request id of a model call). The
+        #: raw values of the stdout records (provider messages, response fields) are collected by the event collector,
+        #: also without spans. The private report of a failed run has both.
         self.private_notes: list[str] = []
         self.invalid_extension_entries = 0
 
@@ -532,23 +537,17 @@ class PiSpanRecorder:
                 metadata["time_to_first_byte_ms"] = max(0, request.first_byte_ns - request.start_ns) / _NS_PER_MS
             if request.http_status is not None:
                 metadata["http_status"] = request.http_status
-            if request.request_id:
-                metadata["request_id"] = request.request_id
         error = None
         if stop_reason in PI_ERROR_STOP_REASONS:
             # A fixed text: the message of the provider can hold a credential or a URL with one.
-            if message.get("errorMessage"):
-                self.private_notes.append(
-                    f"errorMessage of a model call (turn {self._turn}): {message['errorMessage']!s}"
-                )
             error = (
                 f"provider error (stopReason={stop_reason})"
                 if message.get("errorMessage")
                 else f"stopReason={stop_reason}"
             )
         # The model that pi really called (a mismatch is a run error): shown only when it is the configured one.
-        model_name = self._configured_or_other(message.get("model"), self.model.name, "model")
-        provider = self._configured_or_other(message.get("provider"), self.model.provider, "provider")
+        model_name = _configured_or_other(message.get("model"), self.model.name)
+        provider = _configured_or_other(message.get("provider"), self.model.provider)
         end_ns = self._call_end_ns(message, start_ns, now, metadata)
         self._last_call_end_ns = end_ns
         self.records.append(
@@ -569,13 +568,6 @@ class PiSpanRecorder:
             )
         )
 
-    def _configured_or_other(self, value: Any, configured: str, field_name: str) -> str:
-        """Return ``configured`` for no value or the configured one, else :data:`OTHER_VALUE` (the raw value is a note)."""
-        if value is None or value == "" or value == configured:
-            return configured
-        self.private_notes.append(f"{field_name} of a model call (turn {self._turn}): {value!s}")
-        return OTHER_VALUE
-
     def _add_reported_metadata(self, metadata: dict[str, Any], message: dict[str, Any]) -> None:
         """Add what pi reports about the response to ``metadata``: only values that are known are reported.
 
@@ -588,9 +580,6 @@ class PiSpanRecorder:
                 metadata["response_model"] = self.model.name
             else:
                 metadata["response_model"] = OTHER_VALUE
-                self.private_notes.append(f"responseModel (turn {self._turn}): {response_model!s}")
-        if message.get("responseId"):
-            self.private_notes.append(f"responseId (turn {self._turn}): {message['responseId']!s}")
         for key, meta_key, allowed in (
             ("api", "api", PI_KNOWN_APIS),
             ("thinkingLevel", "thinking_level", PI_KNOWN_THINKING_LEVELS),
@@ -598,8 +587,6 @@ class PiSpanRecorder:
             value = message.get(key)
             if value:
                 metadata[meta_key] = known_value(value, allowed)
-                if metadata[meta_key] == OTHER_VALUE:
-                    self.private_notes.append(f"{key} (turn {self._turn}): {value!s}")
 
     def _call_input(self, request: _ExtensionRequest | None) -> tuple[list[Any], str, bool]:
         """Return the input messages of a model call, their source, and if they are truncated."""
@@ -629,8 +616,6 @@ class PiSpanRecorder:
         }
         if request.http_status is not None:
             metadata["http_status"] = request.http_status
-        if request.request_id:
-            metadata["request_id"] = request.request_id
         self.records.append(
             _llm_record(
                 name=f"eval.{self.model.provider}_agent",
@@ -912,7 +897,6 @@ class PiSpanRecorder:
         if event.get("aborted"):
             record.error = "compaction aborted"
         elif event.get("errorMessage"):
-            self.private_notes.append(f"errorMessage of a compaction: {event['errorMessage']!s}")
             record.error = "compaction failed"
         if record.error:
             record.error_type = "PiCompactionError"
@@ -992,7 +976,8 @@ class PiSpanRecorder:
         if _is_int(data.get("status")):
             request.http_status = data["status"]
         if isinstance(data.get("requestId"), str) and data["requestId"]:
-            request.request_id = data["requestId"][:256]
+            # Not in the spans: a gateway can put a credential in the header that carries it. The private report has it.
+            self.private_notes.append(f"requestId of model request {data['seq']}: {data['requestId'][:256]!s}")
 
     def _invalid_entry(self, reason: str) -> None:
         self.invalid_extension_entries += 1

@@ -330,7 +330,7 @@ class TestModelCalls:
         message = _assistant([], stop="error", errorMessage="529 overloaded", timestamp=T0_MS)
         recorder = _feed(_recorder(), [(10, {"type": "message_end", "message": message})])
         assert recorder.records[0].error == "provider error (stopReason=error)"
-        assert "529 overloaded" in "\n".join(recorder.private_notes)
+        assert "529 overloaded" not in repr(recorder.records[0].metadata)
         assert recorder.records[0].metadata["stop_reason"] == "error"
 
     def test_extension_data_sets_time_input_and_response_details(self):
@@ -355,7 +355,8 @@ class TestModelCalls:
         assert record.metadata["input_source"] == "extension"
         assert record.metadata["time_to_first_byte_ms"] == 296
         assert record.metadata["http_status"] == 200
-        assert record.metadata["request_id"] == "req_1"
+        assert "request_id" not in record.metadata  # (The request id is in the private notes only.)
+        assert any("req_1" in note for note in recorder.private_notes)
         assert _input(record)[0]["role"] == "system"
 
     def test_context_changes_rebuild_each_request(self):
@@ -1261,7 +1262,8 @@ class TestCollectorExtension:
         roles = [message["role"] for message in _input(recorder.records[1])]
         # The assistant message has a thinking block, then a text block with a tool call.
         assert roles == ["system", "user", "assistant", "assistant", "user"]
-        assert recorder.records[0].metadata["request_id"] == "req_9"
+        assert "request_id" not in recorder.records[0].metadata
+        assert any("req_9" in note for note in recorder.private_notes)
 
     def test_change_is_relative_to_the_last_sent_request(self, tmp_path):
         reply = {"role": "assistant", "content": [{"type": "text", "text": "A"}]}
@@ -1341,7 +1343,6 @@ class TestOnlyKnownValuesInSpans:
         recorder = _one_call(responseId="SECRET-RESPONSE-ID-0123")
         assert "response_id" not in recorder.records[0].metadata
         assert "SECRET-RESPONSE-ID-0123" not in json.dumps(recorder.records[0].metadata)
-        assert any("SECRET-RESPONSE-ID-0123" in note for note in recorder.private_notes)
 
     def test_unknown_values_are_reported_as_other_and_kept_in_the_notes(self):
         recorder = _one_call(
@@ -1350,8 +1351,6 @@ class TestOnlyKnownValuesInSpans:
         metadata = recorder.records[0].metadata
         assert (metadata["response_model"], metadata["api"], metadata["thinking_level"]) == ("<other>",) * 3
         assert "SECRET" not in json.dumps(metadata, default=str)
-        notes = "\n".join(recorder.private_notes)
-        assert all(secret in notes for secret in ("SECRET-RM-0123", "SECRET-API-0123", "SECRET-TL-0123"))
 
     def test_other_response_model_than_the_configured_one_is_not_reported(self):
         recorder = _one_call(responseModel="claude-sonnet-4-6-20991231")
@@ -1388,14 +1387,12 @@ class TestOnlyKnownValuesInSpans:
         )
         assert recorder.records[0].error == "provider error (stopReason=error)"
         assert "SECRET" not in json.dumps([recorder.records[0].error, recorder.records[0].metadata], default=str)
-        assert secret in "\n".join(recorder.private_notes)
 
     def test_failed_call_without_a_message_keeps_the_stop_reason_text(self):
         recorder = _feed(
             _recorder(), [(10, {"type": "message_end", "message": _assistant([], stop="aborted", timestamp=T0_MS)})]
         )
         assert recorder.records[0].error == "stopReason=aborted"
-        assert recorder.private_notes == []
 
     def test_compaction_error_message_is_not_in_the_span(self):
         recorder = _feed(
@@ -1408,4 +1405,3 @@ class TestOnlyKnownValuesInSpans:
         [record] = [r for r in recorder.records if r.kind == "task"]
         assert record.error == "compaction failed"
         assert "SECRET-COMPACT" not in json.dumps([record.error, record.metadata], default=str)
-        assert any("SECRET-COMPACT-0123" in note for note in recorder.private_notes)
