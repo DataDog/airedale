@@ -879,6 +879,9 @@ class PiRunner(DecoratorSpanAgentRunner):
         The process group of pi is always stopped and pi is always reaped before
         this returns, also on error or cancellation.
         """
+        # Resolve the program like a shell does (``PATH`` and, on Windows, ``PATHEXT``): a Node-installed pi is
+        # a ``pi.cmd`` shim there, which the process spawn alone does not find.
+        command = [_resolve_program(command[0], env), *command[1:]]
         try:
             process = await asyncio.create_subprocess_exec(
                 *command,
@@ -1173,6 +1176,16 @@ def _make_private_agent_dir(workspace: Path) -> Path:
         "parent directory (TMPDIR/TEMP/TMP, the system temporary directories, the home directory) is inside "
         "the workspace or is not writable."
     )
+
+
+def _resolve_program(program: str, env: dict[str, str]) -> str:
+    """Return the full path of ``program`` found with ``shutil.which`` (honours ``PATHEXT``).
+
+    The ``PATH`` of the child environment is used. When nothing resolves, return
+    ``program`` unchanged, so that the spawn raises the "pi executable not found" error.
+    """
+    path = next((value for key, value in env.items() if key.upper() == "PATH"), None)
+    return shutil.which(program, path=path) or program
 
 
 def _default_pi_command() -> list[str]:

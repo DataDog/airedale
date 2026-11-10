@@ -3329,6 +3329,65 @@ class TestWindowsStop:
         assert seen["start_new_session"] is False
 
 
+class TestResolvePiProgram:
+    """The pi program is resolved with ``shutil.which`` (``PATH`` + ``PATHEXT``) before the spawn."""
+
+    @staticmethod
+    def _fake_cmd_shim(tmp_path):
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        shim = bin_dir / "pi.cmd"
+        shim.write_text("@echo off\n")
+        shim.chmod(0o755)
+        return bin_dir, shim
+
+    def test_which_finds_a_cmd_shim_with_a_fake_pathext(self, monkeypatch, tmp_path):
+        import airedale.harness.pi as pi_module
+
+        bin_dir, shim = self._fake_cmd_shim(tmp_path)
+        # shutil.which only reads PATHEXT on Windows: make it do so on any platform.
+        monkeypatch.setattr("shutil.sys.platform", "win32")
+        monkeypatch.setenv("PATHEXT", os.pathsep.join([".exe", ".cmd"]))
+        # The Windows-only current-directory probe needs the real Windows API.
+        monkeypatch.setattr("shutil._win_path_needs_curdir", lambda *_a, **_k: False, raising=False)
+        resolved = pi_module._resolve_program("pi", {"Path": str(bin_dir)})
+        assert Path(resolved).name.lower() == "pi.cmd"
+        assert Path(resolved).parent == bin_dir
+        assert shim.exists()
+
+    def test_spawn_receives_the_resolved_path(self, monkeypatch, tmp_path):
+        import airedale.harness.pi as pi_module
+
+        bin_dir, shim = self._fake_cmd_shim(tmp_path)
+        monkeypatch.setenv("PATH", str(bin_dir))
+        monkeypatch.setattr(pi_module.shutil, "which", lambda program, path=None: str(shim) if path else None)
+        seen: list[Any] = []
+
+        async def fake_exec(*argv, **kwargs):
+            seen.extend(argv)
+            raise FileNotFoundError(argv[0])
+
+        monkeypatch.setattr(pi_module.asyncio, "create_subprocess_exec", fake_exec)
+        with pytest.raises(RuntimeError, match="pi executable not found"):
+            _run(PiRunner(cwd=tmp_path, pi_command=["pi"]))
+        assert seen[0] == str(shim)
+
+    def test_unresolved_program_keeps_the_not_found_error(self, monkeypatch, tmp_path):
+        import airedale.harness.pi as pi_module
+
+        monkeypatch.setenv("PATH", str(tmp_path))
+        seen: list[Any] = []
+
+        async def fake_exec(*argv, **kwargs):
+            seen.append(argv[0])
+            raise FileNotFoundError(argv[0])
+
+        monkeypatch.setattr(pi_module.asyncio, "create_subprocess_exec", fake_exec)
+        with pytest.raises(RuntimeError, match=r"pi executable not found \('definitely-not-pi'\)"):
+            _run(PiRunner(cwd=tmp_path, pi_command=["definitely-not-pi"]))
+        assert seen == ["definitely-not-pi"]
+
+
 # --------------------------------------------------------------------------- #
 # MCP metadata probe (LLMObs tool definitions) environment
 # --------------------------------------------------------------------------- #
