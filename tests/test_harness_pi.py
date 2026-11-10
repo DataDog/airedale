@@ -4350,6 +4350,23 @@ class TestNoRawValues:
         else:
             assert line.endswith("...[cut]")
 
+    def test_cut_utf8_does_not_allocate_in_proportion_to_a_large_input(self):
+        import tracemalloc
+
+        from airedale.harness.pi import _cut_utf8
+
+        text = "😀" * (4 * 1024 * 1024 // 4) + "\ud800" * 1000  # 4 MiB of UTF-8, then lone surrogates.
+        tracemalloc.start()
+        try:
+            result = _cut_utf8(text, 8192)
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        assert result == "😀" * 2048 + "...[cut]"  # The same result as before: 8192 bytes of 4-byte characters.
+        assert peak < 256 * 1024, peak  # (The old list of forms took about 75 MB.)
+        assert _cut_utf8("\ud800" * 1365, 8192) == "\\ud800" * 1365  # Lone surrogates: six bytes each.
+        assert _cut_utf8("\ud800" * 1366, 8192) == "\\ud800" * 1365 + "...[cut]"
+
     def test_cut_utf8_returns_the_written_form_also_when_it_fits(self):
         from airedale.harness.pi import _cut_utf8
 

@@ -1084,14 +1084,14 @@ _MAX_FAILED_TOOL_OUTPUT_BYTES = 8192
 def _cut_utf8(text: str, limit: int) -> str:
     """Return the form of ``text`` that the private report writes, cut to at most ``limit`` UTF-8 bytes.
 
-    The report is written with ``backslashreplace`` (a lone surrogate becomes six ASCII bytes, ``\\ud800``), so that
-    form is built first, then measured and cut, character by character: no partial character or escape. The
+    The report is written with ``backslashreplace`` (a lone surrogate becomes six ASCII bytes, ``\\ud800``), so the
+    form of each character is built, measured and cut, one at a time: no partial character or escape. The
     result is returned also when it fits. A cut adds a mark after the kept text.
     """
-    forms = [char.encode("utf-8", "backslashreplace").decode("utf-8") for char in text]
     parts: list[str] = []
     size = 0
-    for form in forms:
+    for char in text:  # (One form at a time, and stop at the first that does not fit: no work for the rest.)
+        form = char.encode("utf-8", "backslashreplace").decode("utf-8")
         size += len(form.encode("utf-8"))
         if size > limit:
             return "".join(parts) + "...[cut]"
