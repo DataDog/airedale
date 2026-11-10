@@ -116,6 +116,33 @@ EXTENSION_DATA_VERSION = 1
 MAX_INPUT_MESSAGE_REFS = 2_000_000
 #: Assistant stop reasons that mark the model call as failed.
 PI_ERROR_STOP_REASONS = frozenset({"error", "aborted"})
+#: The values that pi writes in these fields (pi-ai 1.4.0 and 1.5.0: ``StopReason``, ``KnownApi``, and the thinking
+#: levels). Anything else (a provider, a gateway or an extension can write any text there) is not reported.
+PI_KNOWN_STOP_REASONS = frozenset({"pending", "stop", "length", "toolUse", "error", "aborted", "deferred"})
+PI_KNOWN_APIS = frozenset(
+    {
+        "openai-completions",
+        "mistral-conversations",
+        "openai-responses",
+        "azure-openai-responses",
+        "openai-codex-responses",
+        "anthropic-messages",
+        "bedrock-converse-stream",
+        "google-generative-ai",
+        "google-vertex",
+        "pi-messages",
+    }
+)
+PI_KNOWN_THINKING_LEVELS = frozenset({"off", "minimal", "low", "medium", "high", "xhigh", "max"})
+#: What a value outside the allow-list is reported as.
+OTHER_VALUE = "<other>"
+
+
+def known_value(value: Any, allowed: frozenset[str]) -> str:
+    """Return ``value`` when it is one of ``allowed``, else :data:`OTHER_VALUE` (never the value itself)."""
+    return value if isinstance(value, str) and value in allowed else OTHER_VALUE
+
+
 #: Pi message roles that are sent to the model as user text.
 _USER_TEXT_ROLES = frozenset({"user", "custom"})
 _NS_PER_MS = 1_000_000
@@ -421,6 +448,9 @@ class PiSpanRecorder:
         #: End of the last model call (a tool that it asked for starts after it).
         self._last_call_end_ns: int | None = None
         self.extension_entries = 0
+        #: Raw values that are kept out of the spans (provider error messages, values pi reports about the model).
+        #: The private report of a failed run has them.
+        self.private_notes: list[str] = []
         self.invalid_extension_entries = 0
 
     # ------------------------------------------------------------------ #
@@ -491,19 +521,12 @@ class PiSpanRecorder:
             "reported_model_name": self.model.label,
             "sdk": self.sdk_name,
             "turn": self._turn,
-            "stop_reason": stop_reason,
+            "stop_reason": known_value(stop_reason, PI_KNOWN_STOP_REASONS),
             "input_source": input_source,
             "input_truncated": input_truncated,
             "tool_call_count": sum(1 for segment in segments if isinstance(segment, AgentToolCall)),
         }
-        for key, meta_key in (
-            ("responseModel", "response_model"),
-            ("responseId", "response_id"),
-            ("api", "api"),
-            ("thinkingLevel", "thinking_level"),
-        ):
-            if message.get(key):
-                metadata[meta_key] = str(message[key])
+        self._add_reported_metadata(metadata, message)
         if request is not None:
             if request.first_byte_ns is not None and request.start_ns is not None:
                 metadata["time_to_first_byte_ms"] = max(0, request.first_byte_ns - request.start_ns) / _NS_PER_MS
@@ -513,9 +536,19 @@ class PiSpanRecorder:
                 metadata["request_id"] = request.request_id
         error = None
         if stop_reason in PI_ERROR_STOP_REASONS:
-            error = str(message.get("errorMessage") or f"stopReason={stop_reason}")
-        model_name = str(message.get("model") or self.model.name)
-        provider = str(message.get("provider") or self.model.provider)
+            # A fixed text: the message of the provider can hold a credential or a URL with one.
+            if message.get("errorMessage"):
+                self.private_notes.append(
+                    f"errorMessage of a model call (turn {self._turn}): {message['errorMessage']!s}"
+                )
+            error = (
+                f"provider error (stopReason={stop_reason})"
+                if message.get("errorMessage")
+                else f"stopReason={stop_reason}"
+            )
+        # The model that pi really called (a mismatch is a run error): shown only when it is the configured one.
+        model_name = self._configured_or_other(message.get("model"), self.model.name, "model")
+        provider = self._configured_or_other(message.get("provider"), self.model.provider, "provider")
         end_ns = self._call_end_ns(message, start_ns, now, metadata)
         self._last_call_end_ns = end_ns
         self.records.append(
@@ -535,6 +568,38 @@ class PiSpanRecorder:
                 model_name=model_name,
             )
         )
+
+    def _configured_or_other(self, value: Any, configured: str, field_name: str) -> str:
+        """Return ``configured`` for no value or the configured one, else :data:`OTHER_VALUE` (the raw value is a note)."""
+        if value is None or value == "" or value == configured:
+            return configured
+        self.private_notes.append(f"{field_name} of a model call (turn {self._turn}): {value!s}")
+        return OTHER_VALUE
+
+    def _add_reported_metadata(self, metadata: dict[str, Any], message: dict[str, Any]) -> None:
+        """Add what pi reports about the response to ``metadata``: only values that are known are reported.
+
+        ``responseModel`` only when it is the configured model, ``api`` and ``thinkingLevel`` only from the values that
+        pi defines, ``responseId`` never. The raw values that are not reported go to the private notes.
+        """
+        response_model = message.get("responseModel")
+        if response_model:
+            if response_model == self.model.name:
+                metadata["response_model"] = self.model.name
+            else:
+                metadata["response_model"] = OTHER_VALUE
+                self.private_notes.append(f"responseModel (turn {self._turn}): {response_model!s}")
+        if message.get("responseId"):
+            self.private_notes.append(f"responseId (turn {self._turn}): {message['responseId']!s}")
+        for key, meta_key, allowed in (
+            ("api", "api", PI_KNOWN_APIS),
+            ("thinkingLevel", "thinking_level", PI_KNOWN_THINKING_LEVELS),
+        ):
+            value = message.get(key)
+            if value:
+                metadata[meta_key] = known_value(value, allowed)
+                if metadata[meta_key] == OTHER_VALUE:
+                    self.private_notes.append(f"{key} (turn {self._turn}): {value!s}")
 
     def _call_input(self, request: _ExtensionRequest | None) -> tuple[list[Any], str, bool]:
         """Return the input messages of a model call, their source, and if they are truncated."""
@@ -847,7 +912,8 @@ class PiSpanRecorder:
         if event.get("aborted"):
             record.error = "compaction aborted"
         elif event.get("errorMessage"):
-            record.error = str(event["errorMessage"])
+            self.private_notes.append(f"errorMessage of a compaction: {event['errorMessage']!s}")
+            record.error = "compaction failed"
         if record.error:
             record.error_type = "PiCompactionError"
         self.records.append(record)

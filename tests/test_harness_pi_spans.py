@@ -329,7 +329,8 @@ class TestModelCalls:
     def test_failed_call_is_an_error_span(self):
         message = _assistant([], stop="error", errorMessage="529 overloaded", timestamp=T0_MS)
         recorder = _feed(_recorder(), [(10, {"type": "message_end", "message": message})])
-        assert recorder.records[0].error == "529 overloaded"
+        assert recorder.records[0].error == "provider error (stopReason=error)"
+        assert "529 overloaded" in "\n".join(recorder.private_notes)
         assert recorder.records[0].metadata["stop_reason"] == "error"
 
     def test_extension_data_sets_time_input_and_response_details(self):
@@ -474,7 +475,11 @@ class TestModelCalls:
             ],
         )
         failed, retried = recorder.records
-        assert (failed.error, failed.start_ns, failed.end_ns) == ("529", _ns(T0_MS + 1), _ns(T0_MS + 5))
+        assert (failed.error, failed.start_ns, failed.end_ns) == (
+            "provider error (stopReason=error)",
+            _ns(T0_MS + 1),
+            _ns(T0_MS + 5),
+        )
         assert "http_status" not in failed.metadata
         assert (retried.error, retried.start_ns) == (None, _ns(T0_MS + 8))
         assert retried.metadata["http_status"] == 200
@@ -1311,3 +1316,96 @@ class TestCollectorExtension:
         request, response = (entry["data"] for entry in out["entries"])
         assert request["count"] == 0
         assert response["status"] is None and response["requestId"] is None
+
+
+# --------------------------------------------------------------------------- #
+# Option S: only known values from pi reach the spans
+# --------------------------------------------------------------------------- #
+def _one_call(**extra):
+    message = _assistant([{"type": "text", "text": "A"}], timestamp=T0_MS + 1, **extra)
+    return _feed(_recorder(), [(10, {"type": "message_end", "message": message})])
+
+
+class TestOnlyKnownValuesInSpans:
+    def test_known_values_are_reported(self):
+        recorder = _one_call(
+            responseModel="claude-sonnet-4-6", responseId="resp-1", api="anthropic-messages", thinkingLevel="high"
+        )
+        metadata = recorder.records[0].metadata
+        assert metadata["response_model"] == "claude-sonnet-4-6"
+        assert metadata["api"] == "anthropic-messages"
+        assert metadata["thinking_level"] == "high"
+        assert metadata["stop_reason"] == "stop"
+
+    def test_response_id_is_never_reported(self):
+        recorder = _one_call(responseId="SECRET-RESPONSE-ID-0123")
+        assert "response_id" not in recorder.records[0].metadata
+        assert "SECRET-RESPONSE-ID-0123" not in json.dumps(recorder.records[0].metadata)
+        assert any("SECRET-RESPONSE-ID-0123" in note for note in recorder.private_notes)
+
+    def test_unknown_values_are_reported_as_other_and_kept_in_the_notes(self):
+        recorder = _one_call(
+            responseModel="https://u:SECRET-RM-0123@gw/m", api="SECRET-API-0123", thinkingLevel="SECRET-TL-0123"
+        )
+        metadata = recorder.records[0].metadata
+        assert (metadata["response_model"], metadata["api"], metadata["thinking_level"]) == ("<other>",) * 3
+        assert "SECRET" not in json.dumps(metadata, default=str)
+        notes = "\n".join(recorder.private_notes)
+        assert all(secret in notes for secret in ("SECRET-RM-0123", "SECRET-API-0123", "SECRET-TL-0123"))
+
+    def test_other_response_model_than_the_configured_one_is_not_reported(self):
+        recorder = _one_call(responseModel="claude-sonnet-4-6-20991231")
+        assert recorder.records[0].metadata["response_model"] == "<other>"
+
+    def test_unknown_stop_reason_is_reported_as_other(self):
+        recorder = _one_call(stop="SECRET-STOP-0123")
+        assert recorder.records[0].metadata["stop_reason"] == "<other>"
+
+    def test_model_and_provider_of_the_call_are_shown_only_when_configured(self):
+        recorder = _one_call(model="SECRET-MODEL-0123", provider="SECRET-PROVIDER-0123")
+        record = recorder.records[0]
+        assert (record.metadata["model_name"], record.metadata["model_provider"]) == ("<other>", "<other>")
+        assert "SECRET" not in json.dumps(record.metadata, default=str)
+        configured = _one_call(model="claude-sonnet-4-6", provider="anthropic").records[0]
+        assert (configured.metadata["model_name"], configured.metadata["model_provider"]) == (
+            "claude-sonnet-4-6",
+            "anthropic",
+        )
+
+    def test_error_tag_of_a_failed_call_has_no_provider_message(self):
+        secret = "https://u:SECRET-ERR-0123@gw/v1?key=SECRET-ERR-QUERY-0123"
+        recorder = _feed(
+            _recorder(),
+            [
+                (
+                    10,
+                    {
+                        "type": "message_end",
+                        "message": _assistant([], stop="error", errorMessage=secret, timestamp=T0_MS),
+                    },
+                )
+            ],
+        )
+        assert recorder.records[0].error == "provider error (stopReason=error)"
+        assert "SECRET" not in json.dumps([recorder.records[0].error, recorder.records[0].metadata], default=str)
+        assert secret in "\n".join(recorder.private_notes)
+
+    def test_failed_call_without_a_message_keeps_the_stop_reason_text(self):
+        recorder = _feed(
+            _recorder(), [(10, {"type": "message_end", "message": _assistant([], stop="aborted", timestamp=T0_MS)})]
+        )
+        assert recorder.records[0].error == "stopReason=aborted"
+        assert recorder.private_notes == []
+
+    def test_compaction_error_message_is_not_in_the_span(self):
+        recorder = _feed(
+            _recorder(),
+            [
+                (1, {"type": "compaction_start", "reason": "threshold"}),
+                (5, {"type": "compaction_end", "aborted": False, "errorMessage": "SECRET-COMPACT-0123", "result": {}}),
+            ],
+        )
+        [record] = [r for r in recorder.records if r.kind == "task"]
+        assert record.error == "compaction failed"
+        assert "SECRET-COMPACT" not in json.dumps([record.error, record.metadata], default=str)
+        assert any("SECRET-COMPACT-0123" in note for note in recorder.private_notes)
