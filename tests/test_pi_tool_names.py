@@ -16,6 +16,7 @@ from airedale.harness.base import McpToolMetadata, _mcp_tool_definitions
 from airedale.harness.pi import PiRunner
 from airedale.mcp import (
     McpServerSpec,
+    PiToolNameOrderError,
     pi_mcp_tool_name,
     pi_mcp_tool_names,
     pi_possible_tool_name_collisions,
@@ -84,11 +85,60 @@ def test_names_that_hash_suffixes_make_collide():
     assert {pair for pairs in collisions.values() for pair in pairs} >= {("a", "b__c"), ("a__b", "c_01b8a75b")}
 
 
-def test_many_servers_are_checked_two_by_two():
+def test_many_independent_servers_do_not_change_the_result():
     catalog = {f"s{index}": [f"t{index}"] for index in range(8)}
     catalog["a"] = ["b__c"]
     catalog["a__b"] = ["c"]
     assert "mcp__a__b__c" in pi_possible_tool_name_collisions(catalog)
+    assert pi_possible_tool_name_collisions({f"s{index}": [f"t{index}"] for index in range(8)}) == {}
+
+
+def test_a_hash_suffix_of_a_first_collision_can_collide_with_a_third_server():
+    # ``a`` and ``a__b`` collide on ``mcp__a__b__c``; when ``a`` loses, its name has a hash suffix, and the tool of
+    # the third server has exactly that name. Only a check of the three servers together sees it.
+    hashed = pi_registered_tool_names([("a__b", ["c"]), ("a", ["b__c"])])[("a", "b__c")]
+    assert hashed != "mcp__a__b__c"
+    third_tool = hashed.removeprefix("mcp__a__b__")  # (the server "a_-b" is written "a__b" by pi)
+    assert hashed == "mcp__a__b__" + third_tool
+    catalog = {"a": ["b__c"], "a__b": ["c"], "a_-b": [third_tool]}
+    fillers = {f"s{index}": [f"t{index}"] for index in range(6)}  # 9 servers in all: more than 6.
+    collisions = pi_possible_tool_name_collisions({**fillers, **catalog})
+    assert hashed in collisions
+    assert {("a", "b__c"), ("a_-b", third_tool)} <= set(collisions[hashed])
+
+
+def _seven_servers_that_share_a_name():
+    # Every ``("a" + "_" * i, "_" * (6 - i) + "x")`` is called ``mcp__a________x``.
+    return {"a" + "_" * i: ["_" * (6 - i) + "x"] for i in range(7)}
+
+
+def test_more_than_six_servers_that_can_share_a_name_are_rejected():
+    catalog = _seven_servers_that_share_a_name()
+    assert len({pi_mcp_tool_name(server, tools[0]) for server, tools in catalog.items()}) == 1
+    with pytest.raises(PiToolNameOrderError, match="7 MCP servers"):
+        pi_possible_tool_name_collisions(catalog)
+    # Six of them are checked with every order.
+    six = dict(list(catalog.items())[:6])
+    assert pi_possible_tool_name_collisions(six)
+
+
+def test_the_runner_refuses_a_scenario_with_too_many_servers_that_share_a_name():
+    from airedale.harness.pi import PiRunner
+
+    servers = [
+        McpServerSpec(name=name, command="x", tool_names=tools)
+        for name, tools in _seven_servers_that_share_a_name().items()
+    ]
+    with pytest.raises(ValueError, match="7 MCP servers"):
+        PiRunner(cwd=".", mcp_servers=servers)._check_tool_name_collisions()
+
+
+def test_the_warning_after_the_probe_says_that_the_order_cannot_be_checked(caplog):
+    servers = [McpServerSpec(name=name, command="x") for name in _seven_servers_that_share_a_name()]
+    metadata = {(name, tools[0]): McpToolMetadata() for name, tools in _seven_servers_that_share_a_name().items()}
+    with caplog.at_level(logging.WARNING, logger="airedale.harness.base"):
+        _mcp_tool_definitions(servers, sdk_name="pi", mcp_tool_metadata=metadata)  # (A warning, not an error.)
+    assert "7 MCP servers can take the same pi tool names" in caplog.text
 
 
 def test_non_bmp_characters_count_twice():

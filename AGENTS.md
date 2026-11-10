@@ -352,8 +352,8 @@ Notes:
     pi hashes the tool of the server that connects second, which the runner cannot
     know. The local checks (a scenario server that pi rejects, which cannot be written or fails pi's own validation, or has a URL that the reader cannot decide exactly (strict: `validate_server_config(exact=True)`; the guard for repo entries keeps its fail-closed meaning); a repo entry that replaces a scenario server; tool names that can collide; a scenario skill whose name collides with a project skill) run before the metadata probe, which starts the stdio servers and calls the HTTP ones (`_check_before_probe`). A scenario with `tool_names` lists that can collide fails before pi starts
     ("possible" collision: a list is an allow-list, hidden tools can change the
-    result; the check runs pi's registration loop for every connection order (`pi_registered_tool_names`), hash-suffixed names included, which pi does not check again; `pi_possible_tool_name_collisions`); for the probed tools of servers
-    without a list, `_mcp_tool_definitions` logs a warning and keeps the names.
+    result; the check runs pi's registration loop for every connection order (`pi_registered_tool_names`), hash-suffixed names included, which pi does not check again; `pi_possible_tool_name_collisions`: servers that cannot get a common name are checked apart; a group of more than 6 servers that can share a name is **refused** with `PiToolNameOrderError`, as not all orders can be tried and there is no approximation); for the probed tools of servers
+    without a list, `_mcp_tool_definitions` logs a warning (fixed text: server names and a count, never an advertised tool name) and keeps the names.
     Project `.pi/mcp.json` servers stay in the `--tools` selection
     (`mcp__*`); their `codemode`-exposed tools need `codemode` in
     `allowed_builtin_tools` (never added implicitly: it can call other models). `--approve` lets repo `.pi/extensions` run in-process with

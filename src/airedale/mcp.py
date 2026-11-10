@@ -402,8 +402,37 @@ def pi_registered_tool_names(
     return names
 
 
-#: Up to this number of servers, every connection order is tried; with more servers, each pair in both orders.
+#: Most servers of one group (servers that can take the same tool name) for which every connection order is tried.
 _PI_MAX_SERVERS_FOR_ALL_ORDERS = 6
+
+
+class PiToolNameOrderError(ValueError):
+    """Too many servers can take the same tool names for every connection order to be checked."""
+
+
+def _pi_possible_names(server: str, tools: Iterable[str]) -> set[str]:
+    """Return every name that a tool of ``server`` can get in pi: the plain name or the one with a hash suffix."""
+    return {name for tool in tools for name in (_pi_plain_tool_name(server, tool), _pi_hashed_tool_name(server, tool))}
+
+
+def _pi_server_groups(catalog: Mapping[str, list[str]]) -> list[list[str]]:
+    """Group the servers so that two servers are in one group when a name can be the name of a tool of both.
+
+    A tool takes a name away from another tool only when the two can get the same name, so the connection order of
+    servers in different groups does not change any name: each group is checked alone.
+    """
+    names = {server: _pi_possible_names(server, tools) for server, tools in catalog.items()}
+    groups: list[tuple[list[str], set[str]]] = []
+    for server in catalog:
+        merged = ([server], set(names[server]))
+        rest = []
+        for members, taken in groups:
+            if taken & merged[1]:
+                merged = ([*members, *merged[0]], taken | merged[1])
+            else:
+                rest.append((members, taken))
+        groups = [*rest, merged]
+    return [members for members, _ in groups]
 
 
 def pi_possible_tool_name_collisions(tools_by_server: Mapping[str, Iterable[str]]) -> dict[str, list[tuple[str, str]]]:
@@ -413,11 +442,15 @@ def pi_possible_tool_name_collisions(tools_by_server: Mapping[str, Iterable[str]
     is taken by a tool of another server gets a hash suffix, so which tool keeps
     the plain name depends on which server connects first, and the runner
     cannot know that order. The names are computed with :func:`pi_registered_tool_names`
-    for every order (up to 6 servers; with more servers, for each pair of servers in
-    both orders). A name is listed when, in some order, a tool does not get the name
+    for every order. A name is listed when, in some order, a tool does not get the name
     that it has alone with its server (``pi_mcp_tool_names``), or when two tools get
     the same name. The names that a hash suffix makes are included: a suffix is not
     checked again by pi.
+
+    Servers are grouped: servers that cannot get a common name (plain or with a hash suffix) cannot
+    change each other's names, so each group is checked alone, with all its orders. When a group has more than 6
+    servers, not all the orders can be tried and no approximation is made: :class:`PiToolNameOrderError`
+    is raised (the result would not be reliable).
 
     ``tools_by_server`` has the tools that are known for each server. For a
     server with a ``tool_names`` allow-list, the list is not the whole catalog:
@@ -433,30 +466,29 @@ def pi_possible_tool_name_collisions(tools_by_server: Mapping[str, Iterable[str]
     }
     position = {pair: index for index, pair in enumerate(alone)}
     claims: dict[str, set[tuple[str, str]]] = {}
-    for order in _connection_orders(list(catalog)):
-        names = pi_registered_tool_names([(server, catalog[server]) for server in order])
-        by_name: dict[str, list[tuple[str, str]]] = {}
-        for pair, name in names.items():
-            by_name.setdefault(name, []).append(pair)
-        for name, pairs in by_name.items():
-            if len(pairs) > 1:  # Two tools with one name.
-                claims.setdefault(name, set()).update(pairs)
-        for pair, name in names.items():
-            if name != alone[pair]:  # This tool lost its name to another one.
-                claim = claims.setdefault(alone[pair], set())
-                claim.add(pair)
-                claim.update(other for other, other_name in names.items() if other_name == alone[pair])
+    for group in _pi_server_groups(catalog):
+        if len(group) > _PI_MAX_SERVERS_FOR_ALL_ORDERS:
+            raise PiToolNameOrderError(
+                f"{len(group)} MCP servers can take the same pi tool names (the limit is "
+                f"{_PI_MAX_SERVERS_FOR_ALL_ORDERS}): the names that pi gives them depend on the order in which they "
+                "connect, and not all the orders can be checked. Rename servers so that fewer of them share tool names."
+            )
+        for order in itertools.permutations(group):
+            names = pi_registered_tool_names([(server, catalog[server]) for server in order])
+            by_name: dict[str, list[tuple[str, str]]] = {}
+            for pair, name in names.items():
+                by_name.setdefault(name, []).append(pair)
+            for name, pairs in by_name.items():
+                if len(pairs) > 1:  # Two tools with one name.
+                    claims.setdefault(name, set()).update(pairs)
+            for pair, name in names.items():
+                if name != alone[pair]:  # This tool lost its name to another one.
+                    claim = claims.setdefault(alone[pair], set())
+                    claim.add(pair)
+                    claim.update(other for other, other_name in names.items() if other_name == alone[pair])
     return {
         name: sorted(pairs, key=lambda pair: position[pair]) for name, pairs in sorted(claims.items()) if len(pairs) > 1
     }
-
-
-def _connection_orders(servers: list[str]) -> Iterable[list[str]]:
-    if len(servers) <= _PI_MAX_SERVERS_FOR_ALL_ORDERS:
-        yield from (list(order) for order in itertools.permutations(servers))
-        return
-    for first, second in itertools.permutations(servers, 2):
-        yield [first, second]
 
 
 def pi_literal(value: str) -> str:

@@ -35,6 +35,7 @@ from ddtrace.llmobs.decorators import agent, llm
 from airedale.mcp import (
     McpServerSpec,
     McpToolMetadata,
+    PiToolNameOrderError,
     _mcp_tool_metadata_catalog,
     configured_tool_names,
     pi_mcp_tool_names,
@@ -351,7 +352,12 @@ def _warn_about_pi_tool_name_collisions(
         known = [*configured_tool_names(server)]
         known.extend(tool for server_name, tool in (mcp_tool_metadata or {}) if server_name == server.name)
         tools_by_server[server.name] = known
-    collisions = pi_possible_tool_name_collisions(tools_by_server)
+    try:
+        collisions = pi_possible_tool_name_collisions(tools_by_server)
+    except PiToolNameOrderError as error:
+        # Too many servers share tool names for every connection order to be tried: the names cannot be checked.
+        logger.warning("%s; the tool names in the run report can be wrong", error)
+        return
     if not collisions:
         return
     # Fixed text: the tool names come from the MCP servers (the metadata probe), and the logs go to terminals and CI
