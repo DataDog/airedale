@@ -57,7 +57,11 @@ def _write(path: Path, text: str) -> None:
 
 @pytest.fixture
 def world(tmp_path, monkeypatch):
-    """A fake home with user-level pi configuration of every kind, and a project with its own."""
+    """A fake home with a user extension, skills (``~/.pi/agent`` and ``~/.agents``), a prompt template, an MCP server,
+    a context file and a settings file, and a project with its own extension, skill and MCP server.
+
+    The test observes the extension, the skills, the prompt template and the MCP server only (see the module docstring).
+    """
     home, cwd, markers = tmp_path / "home", tmp_path / "cwd", tmp_path / "markers"
     markers.mkdir()
     user = home / ".pi" / "agent"
