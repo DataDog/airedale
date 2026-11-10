@@ -4221,6 +4221,29 @@ class TestNoRawValues:
         [report] = _report_files(private_report_dir)
         assert report.read_text().count(secret) == 1
 
+    @pytest.mark.parametrize("char", ["a", "é", "😀"], ids=["ascii", "2-byte", "4-byte"])
+    @pytest.mark.parametrize("extra", [-1, 0, 1, 3])
+    def test_output_of_a_failed_tool_is_cut_at_8192_bytes_without_a_partial_character(
+        self, tmp_path, fake_pi, private_report_dir, char, extra
+    ):
+        size = len(char.encode())
+        count = (8192 + extra) // size + (1 if extra > 0 else 0)
+        output = char * count
+        command, _ = fake_pi(self._failed_tool_events(output), FAKE_PI_EXIT="3")
+        _run(PiRunner(cwd=tmp_path, pi_command=command))
+        [report] = _report_files(private_report_dir)
+        line = next(
+            line for line in report.read_text(encoding="utf-8").splitlines() if "output of the failed tool call" in line
+        )
+        kept = line.split(": ", 1)[1].removesuffix("...[cut]")
+        assert len(kept.encode("utf-8")) <= 8192
+        assert set(kept) <= {char}  # No partial character (no replacement character).
+        if len(output.encode()) <= 8192:
+            assert kept == output and "...[cut]" not in line
+        else:
+            assert line.endswith("...[cut]")
+            assert len(kept.encode()) > 8192 - size  # As much as fits.
+
     def test_the_old_redaction_code_is_gone(self):
         import airedale.harness.pi as pi_module
 

@@ -1067,6 +1067,18 @@ def open_private_report(name: str) -> tuple[int, Path]:
 _MAX_RAW_VALUE = 20_000
 
 
+#: Cap of the output of a failed tool in the private report, in UTF-8 bytes.
+_MAX_FAILED_TOOL_OUTPUT_BYTES = 8192
+
+
+def _cut_utf8(text: str, limit: int) -> str:
+    """Return ``text`` cut to at most ``limit`` UTF-8 bytes, without a partial character, with a mark if cut."""
+    data = text.encode("utf-8", "replace")
+    if len(data) <= limit:
+        return text
+    return data[:limit].decode("utf-8", "ignore") + "...[cut]"
+
+
 def _raw(value: Any) -> str:
     """Return ``value`` as text for the private report, cut at :data:`_MAX_RAW_VALUE` characters."""
     text = str(value)
@@ -1613,7 +1625,9 @@ class _PiEventCollector:
                 # Only the private report has the output of a failed tool (the error tag of its span has a fixed text).
                 output = tool_result_text(execution.result)
                 if output:
-                    self.private_notes.append(f"output of the failed tool call {tool_id[:256]!r}: {_raw(output)}")
+                    self.private_notes.append(
+                        f"output of the failed tool call {tool_id[:256]!r}: {_cut_utf8(output, _MAX_FAILED_TOOL_OUTPUT_BYTES)}"
+                    )
             execution.duration_ms = event.get("durationMs")
             execution.finished = True
             return None
