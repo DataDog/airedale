@@ -12,8 +12,10 @@ code, never ``exc_info`` and never ``str(exception)``.
 
 from __future__ import annotations
 
+import importlib
 import logging
 import os
+import pkgutil
 import sys
 import threading
 import weakref
@@ -185,6 +187,40 @@ def _install_filters() -> None:
             candidate.addFilter(_sdk_filter)
 
 
+_client_side_imported = False
+
+
+def _import_client_side_sdk() -> None:
+    """Import the client-side parts of the SDK once, so that their loggers exist before the filters are installed.
+
+    The SDK makes a logger when a module is imported. A module that is imported later (the OAuth parser of
+    ``mcp.client.auth`` is only imported when it is used) would make a logger without the filter. So every submodule of
+    ``mcp.client``, ``mcp.shared``, ``mcp.types`` and the ``mcp.os`` package of this platform is imported now. A
+    submodule that cannot be imported (an optional dependency is missing) is skipped, and so are ``__main__`` modules
+    (they run code). The server-side parts (``mcp.server``, ``mcp.cli``) are not used by Airedale and not imported here.
+    """
+    global _client_side_imported
+    if _client_side_imported:
+        return
+    _client_side_imported = True
+    platform_package = "mcp.os.win32" if os.name == "nt" else "mcp.os.posix"
+    for package in ("mcp.client", "mcp.shared", "mcp.types", platform_package):
+        try:
+            module = importlib.import_module(package)
+        except Exception:  # noqa: BLE001 - an optional part must not stop the guard
+            continue
+        search_path = getattr(module, "__path__", None)
+        if not search_path:
+            continue
+        for info in pkgutil.walk_packages(search_path, package + ".", onerror=lambda _name: None):
+            if info.name.rsplit(".", 1)[-1] == "__main__":
+                continue
+            try:
+                importlib.import_module(info.name)
+            except Exception:  # noqa: BLE001 - for example a missing optional dependency
+                continue
+
+
 def ensure_mcp_log_guard() -> None:
     """Make sure that every log record made by the MCP SDK has a fixed text. Cheap; call it before each use of the SDK.
 
@@ -209,6 +245,7 @@ def ensure_mcp_log_guard() -> None:
     a probe (the SDK makes its loggers when its modules are imported). Thread-safe.
     """
     with _guard_lock:
+        _import_client_side_sdk()
         current = logging.getLogRecordFactory()
         if current not in _guards:  # (By identity: an attribute can be copied to another factory.)
             logging.setLogRecordFactory(_guard(current))

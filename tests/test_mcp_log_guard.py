@@ -344,3 +344,57 @@ def test_a_bytecode_only_copy_of_the_sdk_is_recognized(tmp_path, mode, as_zip):
     logged = result.stdout.split("LOGGED-BEGIN", 1)[1].split("LOGGED-END", 1)[0]
     assert "MCP SDK" in logged and "(details hidden)" in logged, logged  # The SDK did log, and the guard hid it.
     assert MARKER not in logged + result.stderr
+
+
+# --------------------------------------------------------------------------- #
+# SDK modules that are imported late make their loggers late
+# --------------------------------------------------------------------------- #
+LATE_MODULE_SCRIPT = textwrap.dedent(
+    """
+    import io, logging, sys
+    marker, route, level = sys.argv[1], sys.argv[2], int(sys.argv[3])
+    assert "mcp.client.auth.utils" not in sys.modules  # (Only imported when the OAuth code is used.)
+    import airedale.mcp  # installs the guard
+    assert "mcp.client.auth.utils" in sys.modules, "the guard must import the client-side SDK modules"
+    import mcp.client.auth.utils as utils
+    logging.setLogRecordFactory(lambda *args, **kwargs: logging.LogRecord(*args, **kwargs))  # layer 1 is gone
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    logger = utils.logger
+    logger.setLevel(level)
+    if route == "root":
+        logging.getLogger().addHandler(handler)
+        logging.getLogger().setLevel(level)
+    elif route == "sdk-handler":
+        logger.addHandler(handler)
+    elif route == "no-propagate":
+        logger.propagate = False
+        logger.addHandler(handler)
+    elif route == "last-resort":
+        logger.propagate = False
+        logging.lastResort = logging.StreamHandler(stream)
+    code = "logger.warning('data of a server: %s', marker)\\nlogger.debug('more data: %s', marker)"
+    exec(compile(code, utils.__file__, "exec"), {"logger": logger, "marker": marker})
+    print("LOGGED-BEGIN")
+    print(stream.getvalue())
+    print("LOGGED-END")
+    """
+)
+
+
+@pytest.mark.parametrize("level", [logging.WARNING, logging.DEBUG], ids=["warning", "debug"])
+@pytest.mark.parametrize("route", ["root", "sdk-handler", "no-propagate", "last-resort"])
+def test_an_sdk_module_that_is_only_imported_on_use_has_the_filter_too(route, level):
+    import subprocess
+
+    result = subprocess.run(
+        [sys.executable, "-c", LATE_MODULE_SCRIPT, MARKER, route, str(level)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
+    logged = result.stdout.split("LOGGED-BEGIN", 1)[1].split("LOGGED-END", 1)[0]
+    assert "MCP SDK WARNING" in logged, logged  # The record was handled (not lost) and was hidden.
+    assert MARKER not in logged + result.stderr
