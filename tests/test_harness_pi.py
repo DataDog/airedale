@@ -4600,6 +4600,39 @@ class TestNoRawValues:
         assert sdk, "the SDK made no log record: the test does not cover the guard"
         assert all(getattr(record, "app_attribute", None) == "from the application" for record in sdk)
 
+    def test_an_unhashable_log_record_factory_does_not_stop_a_public_run(
+        self, tmp_path, fake_pi, monkeypatch, fake_span_llmobs, caplog
+    ):
+        import dataclasses
+
+        from test_mcp_log_guard import MARKER, SERVER
+
+        import airedale.harness.base as base
+
+        monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
+        monkeypatch.setattr(base, "agent", lambda **kwargs: lambda func: func)
+
+        @dataclasses.dataclass
+        class UnhashableFactory:
+            def __call__(self, *args, **kwargs):
+                return logging.LogRecord(*args, **kwargs)
+
+        previous = logging.getLogRecordFactory()
+        logging.setLogRecordFactory(UnhashableFactory())
+        try:
+            command, _ = fake_pi(_events_tool_run())
+            server = McpServerSpec(
+                name="fake", command=sys.executable, args=("-c", SERVER, MARKER, "unsupported-request")
+            )
+            runner = PiRunner(cwd=tmp_path, pi_command=command, mcp_servers=[server])
+            with caplog.at_level(logging.DEBUG):
+                # (``run`` raises when the run fails: the run must complete.)
+                _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
+        finally:
+            logging.setLogRecordFactory(previous)
+        assert MARKER not in caplog.text
+        assert any("MCP SDK" in record.getMessage() for record in caplog.records)
+
     def test_the_old_redaction_code_is_gone(self):
         import airedale.harness.pi as pi_module
 

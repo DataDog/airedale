@@ -51,8 +51,15 @@ def _leaves(error: BaseException) -> list[BaseException]:
 # --------------------------------------------------------------------------- #
 _GUARD_MARK = "_airedale_mcp_log_guard"  # (a debug aid, never proof: ``functools.wraps`` copies attributes)
 _guard_lock = threading.Lock()
-#: The guard factories that this module made. A factory is a guard only if it is one of these objects.
-_guards: weakref.WeakSet[Any] = weakref.WeakSet()
+#: Weak references to the guard factories that this module made. A factory is a guard only if it *is* one of these
+#: objects (compared with ``is``): a ``WeakSet`` would hash the factory and compare it with ``==``, and the application
+#: factory can be unhashable (``TypeError``) or equal to a guard (a proxy such as ``wrapt.FunctionWrapper``).
+_guards: list[weakref.ref[Any]] = []
+
+
+def _is_guard(factory: Any) -> bool:
+    _guards[:] = [reference for reference in _guards if reference() is not None]  # (Forget the ones that are gone.)
+    return any(reference() is factory for reference in _guards)
 
 
 class _McpOrigins:
@@ -150,7 +157,7 @@ def _guard(previous: Any) -> Any:
         return previous(name, level, fn, lno, msg, args, exc_info, func, sinfo, **kwargs)
 
     setattr(factory, _GUARD_MARK, True)
-    _guards.add(factory)
+    _guards.append(weakref.ref(factory))
     return factory
 
 
@@ -247,7 +254,7 @@ def ensure_mcp_log_guard() -> None:
     with _guard_lock:
         _import_client_side_sdk()
         current = logging.getLogRecordFactory()
-        if current not in _guards:  # (By identity: an attribute can be copied to another factory.)
+        if not _is_guard(current):  # (By identity: an attribute can be copied, and a proxy can be equal to a guard.)
             logging.setLogRecordFactory(_guard(current))
         _install_filters()
 

@@ -240,11 +240,11 @@ def test_a_logger_called_mcp_is_hidden_even_when_the_file_is_unknown(caplog):
 def test_a_guard_is_recognized_by_identity_not_by_an_attribute():
     import functools
 
-    from airedale.safe_log import _guards, ensure_mcp_log_guard
+    from airedale.safe_log import _is_guard, ensure_mcp_log_guard
 
     ensure_mcp_log_guard()
     guard = logging.getLogRecordFactory()
-    assert guard in _guards
+    assert _is_guard(guard)
 
     def copy_of_the_attributes(*args, **kwargs):
         return logging.LogRecord(*args, **kwargs)
@@ -255,9 +255,74 @@ def test_a_guard_is_recognized_by_identity_not_by_an_attribute():
     try:
         ensure_mcp_log_guard()
         wrapped = logging.getLogRecordFactory()
-        assert wrapped is not copy_of_the_attributes and wrapped in _guards
+        assert wrapped is not copy_of_the_attributes and _is_guard(wrapped)
         ensure_mcp_log_guard()  # Identity passes now: nothing is stacked.
         assert logging.getLogRecordFactory() is wrapped
+    finally:
+        logging.setLogRecordFactory(guard)
+
+
+def test_an_unhashable_factory_does_not_crash_and_is_wrapped():
+    import dataclasses
+
+    from airedale.safe_log import _is_guard, ensure_mcp_log_guard
+
+    ensure_mcp_log_guard()
+    guard = logging.getLogRecordFactory()
+
+    @dataclasses.dataclass  # (``eq=True`` without ``frozen`` sets ``__hash__`` to ``None``.)
+    class UnhashableFactory:
+        calls: int = 0
+
+        def __call__(self, *args, **kwargs):
+            self.calls += 1
+            return logging.LogRecord(*args, **kwargs)
+
+    app_factory = UnhashableFactory()
+    with pytest.raises(TypeError):
+        hash(app_factory)
+    logging.setLogRecordFactory(app_factory)
+    try:
+        ensure_mcp_log_guard()  # (Used to raise ``TypeError`` from the ``WeakSet``.)
+        wrapped = logging.getLogRecordFactory()
+        assert wrapped is not app_factory and _is_guard(wrapped)
+        logging.getLogger("x").warning("a record")
+        assert app_factory.calls >= 1  # The factory of the application still runs.
+    finally:
+        logging.setLogRecordFactory(guard)
+
+
+def test_a_proxy_that_is_equal_to_a_guard_is_wrapped():
+    from airedale.safe_log import _is_guard, ensure_mcp_log_guard
+
+    ensure_mcp_log_guard()
+    guard = logging.getLogRecordFactory()
+
+    class Proxy:
+        """Like ``wrapt.FunctionWrapper``: it looks like the factory it wraps (equal, same hash, same attributes)."""
+
+        def __init__(self, wrapped):
+            self.__wrapped__ = wrapped
+
+        def __call__(self, *args, **kwargs):
+            return logging.LogRecord(*args, **kwargs)  # (It does not call the factory it wraps.)
+
+        def __eq__(self, other):
+            return self.__wrapped__ == getattr(other, "__wrapped__", other)
+
+        def __hash__(self):
+            return hash(self.__wrapped__)
+
+        def __getattr__(self, name):
+            return getattr(self.__wrapped__, name)
+
+    proxy = Proxy(guard)
+    assert proxy == guard and getattr(proxy, "_airedale_mcp_log_guard", False)
+    logging.setLogRecordFactory(proxy)
+    try:
+        ensure_mcp_log_guard()
+        wrapped = logging.getLogRecordFactory()
+        assert wrapped is not proxy and _is_guard(wrapped) and not _is_guard(proxy)
     finally:
         logging.setLogRecordFactory(guard)
 
