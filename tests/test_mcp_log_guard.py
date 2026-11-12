@@ -53,6 +53,8 @@ SERVER = textwrap.dedent(
             send({"jsonrpc": "2.0", "id": 99, "method": "unsupported/" + marker, "params": {"value": marker}})
         elif method == "notifications/initialized" and mode == "unsupported-request":
             send({"jsonrpc": "2.0", "id": 99, "method": "unsupported/" + marker, "params": {"value": marker}})
+        elif method == "tools/call":
+            send({"jsonrpc": "2.0", "id": message["id"], "result": {"content": [], "isError": False}})
         elif method == "tools/list":
             send({"jsonrpc": "2.0", "id": message["id"], "result": {
                 "tools": [{"name": "t", "description": "d", "inputSchema": {"type": "object"}}]}})
@@ -166,6 +168,56 @@ def test_a_factory_set_from_another_thread_during_a_probe_does_not_remove_the_pr
     sdk = [record for record in caplog.records if "MCP SDK" in record.getMessage()]
     assert sdk, "the SDK made no log record: the test does not cover the guard"
     assert any(getattr(record, "app_attribute", None) for record in sdk)  # The new factory made them.
+
+
+@pytest.mark.parametrize("level", [logging.WARNING, logging.DEBUG], ids=["warning", "debug"])
+def test_an_sdk_logger_with_another_name_is_hidden_after_a_factory_change(caplog, level):
+    """``mcp/client/session.py`` logs a tool name that the server controls, on a logger called ``client``."""
+    from mcp import ClientSession
+    from mcp.client.stdio import StdioServerParameters, stdio_client
+
+    from airedale.safe_log import ensure_mcp_log_guard
+
+    ensure_mcp_log_guard()
+    previous = logging.getLogRecordFactory()
+
+    def app_factory(*args, **kwargs):
+        return logging.LogRecord(*args, **kwargs)  # (it does not call the factory before it: layer 1 is gone)
+
+    async def call_an_unlisted_tool():
+        params = StdioServerParameters(command=sys.executable, args=["-c", SERVER, MARKER, "plain"])
+        async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
+            await session.initialize()
+            await session.call_tool(MARKER, {})  # (Not in the list of the server: the SDK logs its name.)
+
+    logging.setLogRecordFactory(app_factory)
+    try:
+        with caplog.at_level(level):
+            asyncio.run(call_an_unlisted_tool())
+    finally:
+        logging.setLogRecordFactory(previous)
+    sdk = [record for record in caplog.records if record.name == "client"]
+    assert sdk, "the SDK made no record on its 'client' logger: the test does not cover it"
+    assert MARKER not in caplog.text and all("(details hidden)" in record.getMessage() for record in sdk)
+
+
+def test_the_filter_on_every_logger_is_cheap_and_changes_no_other_record(caplog):
+    import time
+
+    from airedale.safe_log import ensure_mcp_log_guard
+
+    names = [f"many.loggers.{index}" for index in range(300)]
+    loggers = [logging.getLogger(name) for name in names]
+    ensure_mcp_log_guard()  # (The filter is put on the loggers that exist.)
+    assert all(any(f.__class__.__name__ == "_SdkRecordFilter" for f in logger.filters) for logger in loggers)
+    with caplog.at_level(logging.DEBUG):
+        started = time.perf_counter()
+        for _ in range(20):
+            for logger in loggers:
+                logger.info("record of the application: %s", MARKER)
+        elapsed = time.perf_counter() - started
+    assert sum(MARKER in record.getMessage() for record in caplog.records) == 20 * 300
+    assert elapsed < 5, elapsed  # (6000 records; the origin of a file name is looked up once.)
 
 
 def test_records_on_the_root_logger_and_on_other_loggers_are_unchanged_with_the_filters(caplog):

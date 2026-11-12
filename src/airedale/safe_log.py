@@ -65,6 +65,7 @@ class _McpOrigins:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
+        self._modules_seen = -1  # How many ``mcp`` modules were loaded when the origins were last collected.
         self._filenames: set[str] = set()
         self._prefixes: set[str] = set()
         self._answers: dict[str, bool] = {}
@@ -82,6 +83,10 @@ class _McpOrigins:
         return answer
 
     def _collect(self) -> None:
+        count = sum(1 for name in list(sys.modules) if name == "mcp" or name.startswith("mcp."))
+        if count == self._modules_seen:
+            return  # Nothing new was loaded since the last time: the answer for a new file name is "not the SDK".
+        self._modules_seen = count
         for name, module in list(sys.modules.items()):
             if name != "mcp" and not name.startswith("mcp."):
                 continue
@@ -168,10 +173,15 @@ _sdk_filter = _SdkRecordFilter()
 
 
 def _install_filters() -> None:
-    """Put the filter on the root logger (the SDK logs on it) and on every ``mcp`` / ``mcp.*`` logger that exists."""
+    """Put the filter on the root logger (the SDK logs on it) and on every logger that exists.
+
+    Not only on ``mcp`` / ``mcp.*``: some SDK loggers have other names (``client`` in ``mcp/client/session.py``,
+    ``client.stdio.win32``, ``server``). The filter acts only on records made by SDK code (the origin of a file name is
+    looked up once, then cached), so the records of other loggers are not changed.
+    """
     logging.getLogger().addFilter(_sdk_filter)  # (``addFilter`` does nothing when the filter is already there.)
-    for name, candidate in list(logging.Logger.manager.loggerDict.items()):
-        if (name == "mcp" or name.startswith("mcp.")) and isinstance(candidate, logging.Logger):
+    for candidate in list(logging.Logger.manager.loggerDict.values()):
+        if isinstance(candidate, logging.Logger):  # (Not a ``PlaceHolder``.)
             candidate.addFilter(_sdk_filter)
 
 
@@ -191,11 +201,12 @@ def ensure_mcp_log_guard() -> None:
        which pass up without its filter). The application can replace the factory later, and one that does not call the
        factory before it removes this layer, so the current factory is wrapped again when it is not one of the guards
        made here (checked by identity: ``functools.wraps`` copies attributes).
-    2. A filter on the root logger and on every ``mcp`` / ``mcp.*`` logger (:class:`_SdkRecordFilter`). It runs when the
+    2. A filter on the root logger and on every logger that exists (:class:`_SdkRecordFilter`). It runs when the
        record is handled, whatever factory made it, so a factory that another thread sets during a probe cannot remove it.
 
     Not covered: code in this process that copies the raw message into its own field inside its own record factory.
-    Code in the process is trusted (it can read the data directly). Thread-safe.
+    Code in the process is trusted (it can read the data directly), and so are the loggers it replaces or creates during
+    a probe (the SDK makes its loggers when its modules are imported). Thread-safe.
     """
     with _guard_lock:
         current = logging.getLogRecordFactory()
