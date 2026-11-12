@@ -24,7 +24,7 @@ MARKER = "sk-SDK-LOG-MARKER-0123456789"
 SERVER = textwrap.dedent(
     """
     import json, sys
-    secret = sys.argv[1]
+    marker = sys.argv[1]
     mode = sys.argv[2]
 
     def send(message):
@@ -32,7 +32,7 @@ SERVER = textwrap.dedent(
         sys.stdout.flush()
 
     if mode == "invalid-output":
-        sys.stdout.write("this is not json " + secret + chr(10))
+        sys.stdout.write("this is not json " + marker + chr(10))
         sys.stdout.flush()
     for line in sys.stdin:
         message = json.loads(line)
@@ -43,7 +43,7 @@ SERVER = textwrap.dedent(
                 "capabilities": {"tools": {}},
                 "serverInfo": {"name": "fake", "version": "1"}}})
         elif method == "notifications/initialized" and mode == "unsupported-request":
-            send({"jsonrpc": "2.0", "id": 99, "method": "unsupported/" + secret, "params": {"token": secret}})
+            send({"jsonrpc": "2.0", "id": 99, "method": "unsupported/" + marker, "params": {"value": marker}})
         elif method == "tools/list":
             send({"jsonrpc": "2.0", "id": message["id"], "result": {
                 "tools": [{"name": "t", "description": "d", "inputSchema": {"type": "object"}}]}})
