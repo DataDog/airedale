@@ -1,0 +1,2040 @@
+{
+ "_comment": "Answers of pi to the requests of the tests. Record again: see tests/conftest.py (pi_reference).",
+ "cases": {
+  "{\"action\":\"mcp\",\"global_file\":{\"autoEnableCodemode\":false,\"mcpServers\":{\"same\":{\"exposure\":\"direct\",\"headers\":{\"traceparent\":\"00-11111111111111111111111111111111-2222222222222222-01\"},\"type\":\"http\",\"url\":\"https://example.invalid/mcp\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ0eXBlIjogImh0dHAiLCAidXJsIjogImh0dHBzOi8vZXhhbXBsZS5pbnZhbGlkL21jcCIsICJleHBvc3VyZSI6ICJkaXJlY3QifX19\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "exposure": "direct",
+       "type": "http",
+       "url": "https://example.invalid/mcp"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "exposure": "direct",
+       "type": "http",
+       "url": "https://example.invalid/mcp"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"s0\":{\"url\":\"http://[::1]/mcp\"},\"s1\":{\"oauth\":{\"callbackUrl\":\"http://[::1]/mcp\"},\"url\":\"https://e.test\"},\"s10\":{\"oauth\":{\"callbackUrl\":\"http://[fe80::1%eth0]:8080/mcp\"},\"url\":\"https://e.test\"},\"s11\":{\"oauth\":{\"authServerMetadataUrl\":\"http://[fe80::1%eth0]:8080/mcp\"},\"url\":\"https://e.test\"},\"s12\":{\"url\":\"http://[%]/mcp\"},\"s13\":{\"oauth\":{\"callbackUrl\":\"http://[%]/mcp\"},\"url\":\"https://e.test\"},\"s14\":{\"oauth\":{\"authServerMetadataUrl\":\"http://[%]/mcp\"},\"url\":\"https://e.test\"},\"s15\":{\"url\":\"http://[::1%]/mcp\"},\"s16\":{\"oauth\":{\"callbackUrl\":\"http://[::1%]/mcp\"},\"url\":\"https://e.test\"},\"s17\":{\"oauth\":{\"authServerMetadataUrl\":\"http://[::1%]/mcp\"},\"url\":\"https://e.test\"},\"s18\":{\"url\":\"https://example.test/mcp\"},\"s19\":{\"oauth\":{\"callbackUrl\":\"https://example.test/mcp\"},\"url\":\"https://e.test\"},\"s2\":{\"oauth\":{\"authServerMetadataUrl\":\"http://[::1]/mcp\"},\"url\":\"https://e.test\"},\"s20\":{\"oauth\":{\"authServerMetadataUrl\":\"https://example.test/mcp\"},\"url\":\"https://e.test\"},\"s21\":{\"url\":\"http://[not-an-ip]/mcp\"},\"s22\":{\"oauth\":{\"callbackUrl\":\"http://[not-an-ip]/mcp\"},\"url\":\"https://e.test\"},\"s23\":{\"oauth\":{\"authServerMetadataUrl\":\"http://[not-an-ip]/mcp\"},\"url\":\"https://e.test\"},\"s24\":{\"url\":\"http://[1::2::3]/mcp\"},\"s25\":{\"oauth\":{\"callbackUrl\":\"http://[1::2::3]/mcp\"},\"url\":\"https://e.test\"},\"s26\":{\"oauth\":{\"authServerMetadataUrl\":\"http://[1::2::3]/mcp\"},\"url\":\"https://e.test\"},\"s27\":{\"url\":\"http://a b/mcp\"},\"s28\":{\"oauth\":{\"callbackUrl\":\"http://a b/mcp\"},\"url\":\"https://e.test\"},\"s29\":{\"oauth\":{\"authServerMetadataUrl\":\"http://a b/mcp\"},\"url\":\"https://e.test\"},\"s3\":{\"url\":\"http://[::1%lo0]/mcp\"},\"s30\":{\"url\":\"ftp://example.test/mcp\"},\"s31\":{\"oauth\":{\"callbackUrl\":\"ftp://example.test/mcp\"},\"url\":\"https://e.test\"},\"s32\":{\"oauth\":{\"authServerMetadataUrl\":\"ftp://example.test/mcp\"},\"url\":\"https://e.test\"},\"s4\":{\"oauth\":{\"callbackUrl\":\"http://[::1%lo0]/mcp\"},\"url\":\"https://e.test\"},\"s5\":{\"oauth\":{\"authServerMetadataUrl\":\"http://[::1%lo0]/mcp\"},\"url\":\"https://e.test\"},\"s6\":{\"url\":\"http://[::1%25lo0]/mcp\"},\"s7\":{\"oauth\":{\"callbackUrl\":\"http://[::1%25lo0]/mcp\"},\"url\":\"https://e.test\"},\"s8\":{\"oauth\":{\"authServerMetadataUrl\":\"http://[::1%25lo0]/mcp\"},\"url\":\"https://e.test\"},\"s9\":{\"url\":\"http://[fe80::1%eth0]:8080/mcp\"}}},\"project_b64\":null}": {
+   "1.4.0": {
+    "error_count": 28,
+    "servers": [
+     {
+      "config": {
+       "url": "http://[::1]/mcp"
+      },
+      "name": "s0",
+      "scope": "global"
+     },
+     {
+      "config": {
+       "oauth": {
+        "callbackUrl": "http://[::1]/mcp"
+       },
+       "url": "https://e.test"
+      },
+      "name": "s1",
+      "scope": "global"
+     },
+     {
+      "config": {
+       "oauth": {
+        "authServerMetadataUrl": "http://[::1]/mcp"
+       },
+       "url": "https://e.test"
+      },
+      "name": "s2",
+      "scope": "global"
+     },
+     {
+      "config": {
+       "url": "https://example.test/mcp"
+      },
+      "name": "s18",
+      "scope": "global"
+     },
+     {
+      "config": {
+       "oauth": {
+        "authServerMetadataUrl": "https://example.test/mcp"
+       },
+       "url": "https://e.test"
+      },
+      "name": "s20",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 28,
+    "servers": [
+     {
+      "config": {
+       "url": "http://[::1]/mcp"
+      },
+      "name": "s0",
+      "scope": "global"
+     },
+     {
+      "config": {
+       "oauth": {
+        "callbackUrl": "http://[::1]/mcp"
+       },
+       "url": "https://e.test"
+      },
+      "name": "s1",
+      "scope": "global"
+     },
+     {
+      "config": {
+       "oauth": {
+        "authServerMetadataUrl": "http://[::1]/mcp"
+       },
+       "url": "https://e.test"
+      },
+      "name": "s2",
+      "scope": "global"
+     },
+     {
+      "config": {
+       "url": "https://example.test/mcp"
+      },
+      "name": "s18",
+      "scope": "global"
+     },
+     {
+      "config": {
+       "oauth": {
+        "authServerMetadataUrl": "https://example.test/mcp"
+       },
+       "url": "https://e.test"
+      },
+      "name": "s20",
+      "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"77u/eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJjb21tYW5kIjogInByb2plY3QifX19\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "command": "project"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "command": "project"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"e25vdCBqc29u\"}": {
+   "1.4.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyI0Mjk0OTY3Mjk0IjogeyJjb21tYW5kIjogInByb2plY3QifX19\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     },
+     {
+      "config": {
+       "command": "project"
+      },
+      "name": "4294967294",
+      "scope": "project"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     },
+     {
+      "config": {
+       "command": "project"
+      },
+      "name": "4294967294",
+      "scope": "project"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyI0Mjk0OTY3Mjk1IjogeyJjb21tYW5kIjogInByb2plY3QifX19\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     },
+     {
+      "config": {
+       "command": "project"
+      },
+      "name": "4294967295",
+      "scope": "project"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     },
+     {
+      "config": {
+       "command": "project"
+      },
+      "name": "4294967295",
+      "scope": "project"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyI5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OSI6IHsiY29tbWFuZCI6ICJwcm9qZWN0In19fQ==\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     },
+     {
+      "config": {
+       "command": "project"
+      },
+      "name": "99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999",
+      "scope": "project"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     },
+     {
+      "config": {
+       "command": "project"
+      },
+      "name": "99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999",
+      "scope": "project"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJvdGhlciI6IHsiY29tbWFuZCI6ICJwcm9qZWN0In19fQ==\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     },
+     {
+      "config": {
+       "command": "project"
+      },
+      "name": "other",
+      "scope": "project"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     },
+     {
+      "config": {
+       "command": "project"
+      },
+      "name": "other",
+      "scope": "project"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogInRleHQifX0=\"}": {
+   "1.4.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjoge319fQ==\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ0eXBlIjogImJvZ3VzIn19fQ==\"}": {
+   "1.4.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ0eXBlIjogInN0ZGlvIiwgImNvbW1hbmQiOiAic2NlbmFyaW8iLCAiYXJncyI6IFtdLCAiZXhwb3N1cmUiOiAiZGlyZWN0In19fQ==\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ0eXBlIjogInN0ZGlvIn19fQ==\"}": {
+   "1.4.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ0eXBlIjogInNzZSIsICJ1cmwiOiAiaHR0cHM6Ly9leGFtcGxlLnRlc3QifX19\"}": {
+   "1.4.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ0eXBlIjogbnVsbH19fQ==\"}": {
+   "1.4.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiXHUwMDAwaHR0cHM6Ly9leGFtcGxlLmludmFsaWQvbWNwIn19fQ==\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "url": "\u0000https://example.invalid/mcp"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "url": "\u0000https://example.invalid/mcp"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiZnRwOi8vZXhhbXBsZS50ZXN0In19fQ==\"}": {
+   "1.4.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiaHR0cDovL2UudGVzdCIsICJhdXRoIjogeyJwcm92aWRlciI6ICJwIn19fX0=\"}": {
+   "1.4.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiaHR0cDovL2UudGVzdDo5OTk5OS8ifX19\"}": {
+   "1.4.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiaHR0cDovL2V4YVxubXBsZS50ZXN0LyJ9fX0=\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "url": "http://exa\nmple.test/"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "url": "http://exa\nmple.test/"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiaHR0cDovLy8ifX19\"}": {
+   "1.4.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiaHR0cHM6Ly8lQzIlQUQxMjcuMS9tY3AifX19\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "url": "https://%C2%AD127.1/mcp"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "url": "https://%C2%AD127.1/mcp"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiaHR0cHM6Ly8xMjdcdTIwMGIuMS9tY3AifX19\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "url": "https://127\u200b.1/mcp"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "url": "https://127\u200b.1/mcp"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiaHR0cHM6Ly9cdTAwYWQxMjcuMS9tY3AifX19\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "url": "https://\u00ad127.1/mcp"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "url": "https://\u00ad127.1/mcp"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiaHR0cHM6Ly9lLnRlc3QiLCAib2F1dGgiOiB7ImNhbGxiYWNrUG9ydCI6IC0xMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMH19fX0=\"}": {
+   "1.4.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiaHR0cHM6Ly9lLnRlc3QiLCAib2F1dGgiOiB7ImNhbGxiYWNrUG9ydCI6IDB9fX19\"}": {
+   "1.4.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiaHR0cHM6Ly9lLnRlc3QiLCAib2F1dGgiOiB7ImNhbGxiYWNrUG9ydCI6IDEwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwfX19fQ==\"}": {
+   "1.4.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiaHR0cHM6Ly9lLnRlc3QiLCAib2F1dGgiOiB7ImNhbGxiYWNrUG9ydCI6IDgwODAuMH19fX0=\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "oauth": {
+        "callbackPort": 8080
+       },
+       "url": "https://e.test"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "oauth": {
+        "callbackPort": 8080
+       },
+       "url": "https://e.test"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiaHR0cHM6Ly9lLnRlc3QiLCAib2F1dGgiOiB7ImNhbGxiYWNrUG9ydCI6IEluZmluaXR5fX19fQ==\"}": {
+   "1.4.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiaHR0cHM6Ly9lLnRlc3QiLCAib2F1dGgiOiB7ImNhbGxiYWNrVXJsIjogImh0dHA6Ly8weDdmLjE6ODA4MC9jYWxsYmFjayJ9fX19\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "oauth": {
+        "callbackUrl": "http://0x7f.1:8080/callback"
+       },
+       "url": "https://e.test"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "oauth": {
+        "callbackUrl": "http://0x7f.1:8080/callback"
+       },
+       "url": "https://e.test"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiaHR0cHM6Ly9lLnRlc3QiLCAib2F1dGgiOiB7ImNsaWVudFJlZ2lzdHJhdGlvbiI6ICJjaW1kIiwgImNhbGxiYWNrVXJsIjogImh0dHA6Ly9sb2NhbGhvc3QveC8uLi9jYWxsYmFjayJ9fX19\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "oauth": {
+        "callbackUrl": "http://localhost/x/../callback",
+        "clientRegistration": "cimd"
+       },
+       "url": "https://e.test"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "oauth": {
+        "callbackUrl": "http://localhost/x/../callback",
+        "clientRegistration": "cimd"
+       },
+       "url": "https://e.test"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiaHR0cHM6Ly9lLnRlc3QiLCAib2F1dGgiOiB7ImNsaWVudFJlZ2lzdHJhdGlvbiI6ICJjaW1kIiwgImNsaWVudElkIjogIngifX19fQ==\"}": {
+   "1.4.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiaHR0cHM6Ly9lLnRlc3QvbWNwIiwgInR5cGUiOiAiaHR0cCJ9fX0=\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "type": "http",
+       "url": "https://e.test/mcp"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "type": "http",
+       "url": "https://e.test/mcp"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiaHR0cHM6Ly9lLnRlc3QvbWNwIiwgInR5cGUiOiAic3RkaW8ifX19\"}": {
+   "1.4.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiaHR0cHM6Ly9lLnRlc3QvbWNwIiwgInR5cGUiOiAic3RyZWFtYWJsZS1odHRwIn19fQ==\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "type": "streamable-http",
+       "url": "https://e.test/mcp"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "type": "streamable-http",
+       "url": "https://e.test/mcp"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiaHR0cHM6Ly9lLnRlc3QvbWNwIiwgInR5cGUiOiBudWxsfX19\"}": {
+   "1.4.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiaHR0cHM6Ly9leGFtcGxlLmludmFsaWQvbWNwIiwgIm9hdXRoIjogeyJhdXRoU2VydmVyTWV0YWRhdGFVcmwiOiAiaHR0cDovL1x1MDBhZDEyNy4xL21ldGEifX19fQ==\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "oauth": {
+        "authServerMetadataUrl": "http://\u00ad127.1/meta"
+       },
+       "url": "https://example.invalid/mcp"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "oauth": {
+        "authServerMetadataUrl": "http://\u00ad127.1/meta"
+       },
+       "url": "https://example.invalid/mcp"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiaHR0cHM6Ly9leGFtcGxlLmludmFsaWQvbWNwIiwgIm9hdXRoIjogeyJhdXRoU2VydmVyTWV0YWRhdGFVcmwiOiAiaHR0cDovL2V4YW1wbGUudGVzdC9tZXRhIn19fX0=\"}": {
+   "1.4.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiaHR0cHM6Ly9leGFtcGxlLmludmFsaWQvbWNwIiwgIm9hdXRoIjogeyJhdXRoU2VydmVyTWV0YWRhdGFVcmwiOiAiaHR0cDovLzEyNy4xL21ldGEifX19fQ==\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "oauth": {
+        "authServerMetadataUrl": "http://127.1/meta"
+       },
+       "url": "https://example.invalid/mcp"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "oauth": {
+        "authServerMetadataUrl": "http://127.1/meta"
+       },
+       "url": "https://example.invalid/mcp"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiaHR0cHM6Ly9leGFtcGxlLnRlc3QiLCAiYXV0aCI6IHsicHJvdmlkZXIiOiAicCJ9fX19\"}": {
+   "1.4.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiaHR0cHM6Ly9leGFtcGxlLnRlc3QvbWNwIiwgImVudiI6IHsidW51c2VkIjogMX19fX0=\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "env": {
+        "unused": 1
+       },
+       "url": "https://example.test/mcp"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "env": {
+        "unused": 1
+       },
+       "url": "https://example.test/mcp"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJ1cmwiOiAiaHRcdHRwczovL2V4YW1wbGUuaW52YWxpZC9tY3AifX19\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "url": "ht\ttps://example.invalid/mcp"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "url": "ht\ttps://example.invalid/mcp"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJhcmdzIjogW119fX0=\"}": {
+   "1.4.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJjb21tYW5kIjogInByb2plY3QiLCAiZW5hYmxlZCI6IGZhbHNlfX19\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "command": "project",
+       "enabled": false
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "command": "project",
+       "enabled": false
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJjb21tYW5kIjogInByb2plY3QiLCAiaGVhZGVycyI6IHsidW51c2VkIjogMX19fX0=\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "command": "project",
+       "headers": {
+        "unused": 1
+       }
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "command": "project",
+       "headers": {
+        "unused": 1
+       }
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJjb21tYW5kIjogInByb2plY3QiLCAidHlwZSI6IG51bGx9fX0=\"}": {
+   "1.4.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJjb21tYW5kIjogInByb2plY3QifX19\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "command": "project"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "command": "project"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJjb21tYW5kIjogIngiLCAiYXJncyI6IFsxXX19fQ==\"}": {
+   "1.4.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJjb21tYW5kIjogIngiLCAidGltZW91dCI6IDB9fX0=\"}": {
+   "1.4.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJjb21tYW5kIjogIngiLCAidGltZW91dCI6IDEwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwfX19\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "command": "x",
+       "timeout": null
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "command": "x",
+       "timeout": null
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJjb21tYW5kIjogIngiLCAidGltZW91dCI6IDV9fX0=\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "command": "x",
+       "timeout": 5
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "command": "x",
+       "timeout": 5
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJjb21tYW5kIjogIngiLCAidGltZW91dCI6IHRydWV9fX0=\"}": {
+   "1.4.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJjb21tYW5kIjogNX19fQ==\"}": {
+   "1.4.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJjb21tYW5kIjogbnVsbH19fQ==\"}": {
+   "1.4.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJlbmFibGVkIjogZmFsc2V9fX0=\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "enabled": false,
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "enabled": false,
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJleHBvc3VyZSI6ICJib2d1cyJ9fX0=\"}": {
+   "1.4.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJleHBvc3VyZSI6ICJjb2RlbW9kZS1kZWZlcnJlZCJ9fX0=\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "codemode",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "codemode",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJleHBvc3VyZSI6ICJkaXJlY3QifX19\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lIjogeyJleHBvc3VyZSI6ICJoaWRkZW4ifX19\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "hidden",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "hidden",
+       "type": "stdio"
+      },
+      "name": "same",
+      "scope": "global"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJvdGhlciI6IDk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5LCAibWNwU2VydmVycyI6IHsic2FtZSI6IHsiY29tbWFuZCI6ICJwcm9qZWN0In19fQ==\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "command": "project"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "command": "project"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJvdGhlciI6IFstOTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5OTldLCAibWNwU2VydmVycyI6IHsic2FtZSI6IHsiY29tbWFuZCI6ICJwcm9qZWN0In19fQ==\"}": {
+   "1.4.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "command": "project"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 0,
+    "servers": [
+     {
+      "config": {
+       "command": "project"
+      },
+      "name": "same",
+      "scope": "project"
+     }
+    ]
+   }
+  },
+  "{\"action\":\"mcp\",\"global_file\":{\"mcpServers\":{\"same_name\":{\"args\":[],\"command\":\"scenario\",\"exposure\":\"direct\",\"type\":\"stdio\"}}},\"project_b64\":\"eyJtY3BTZXJ2ZXJzIjogeyJzYW1lLW5hbWUiOiB7ImNvbW1hbmQiOiAicHJvamVjdCJ9fX0=\"}": {
+   "1.4.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same_name",
+      "scope": "global"
+     }
+    ]
+   },
+   "1.5.0": {
+    "error_count": 1,
+    "servers": [
+     {
+      "config": {
+       "args": [],
+       "command": "scenario",
+       "exposure": "direct",
+       "type": "stdio"
+      },
+      "name": "same_name",
+      "scope": "global"
+     }
+    ]
+   }
+  }
+ },
+ "node": "v26.13.0",
+ "pi_versions": [
+  "1.4.0",
+  "1.5.0"
+ ]
+}

@@ -6,7 +6,9 @@
 
 from __future__ import annotations
 
+import math
 import re
+import sys
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -157,6 +159,92 @@ class UsageMetrics:
             cache_read_input_tokens=coerce_int(getattr(total, "cached_input_tokens", 0)),
             reasoning_output_tokens=coerce_int(getattr(total, "reasoning_output_tokens", 0)),
         )
+
+    @classmethod
+    def from_pi(cls, usage: Any) -> UsageMetrics:
+        """Build usage metrics from one pi assistant-message ``usage`` dictionary.
+
+        Pi reports ``input`` without the cached tokens (for every provider API),
+        so the effective input is ``input + cacheRead + cacheWrite``, as for the
+        Claude Agent SDK. ``reasoning`` is a subset of ``output``. ``cost.total``
+        is the cost pi computes from its model catalog. ``total_tokens`` is the sum
+        of the parts, whatever ``totalTokens`` says.
+        """
+        usage_dict = usage if isinstance(usage, dict) else {}
+        input_tokens = coerce_int(usage_dict.get("input"))
+        output_tokens = coerce_int(usage_dict.get("output"))
+        cache_write = coerce_int(usage_dict.get("cacheWrite"))
+        cache_read = coerce_int(usage_dict.get("cacheRead"))
+        effective_input = input_tokens + cache_write + cache_read
+        # The total is the sum of the parts. The ``totalTokens`` that pi writes is not always that sum: Anthropic
+        # (the sum), OpenAI Responses (the total of the provider), Bedrock (without the cache) and Google (the
+        # total of the provider; its thinking tokens are already in ``output``) differ. A damaged value must not change the total,
+        # and a different value is not an error, so the field is not used (``is_valid_pi_usage`` checks its form).
+        total_tokens = effective_input + output_tokens
+        cost = usage_dict.get("cost")
+        try:
+            cost_total = float(cost.get("total") or 0.0) if isinstance(cost, dict) else 0.0
+        except (TypeError, ValueError, OverflowError):
+            cost_total = 0.0
+        if not math.isfinite(cost_total):
+            cost_total = 0.0  # "Infinity" or "NaN": not a cost, and not valid JSON in the metrics.
+        return cls(
+            input_tokens=effective_input,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+            cache_write_input_tokens=cache_write,
+            cache_read_input_tokens=cache_read,
+            reasoning_output_tokens=coerce_int(usage_dict.get("reasoning")),
+            estimated_cost_usd=max(0.0, cost_total),
+        )
+
+
+#: The token counts of a pi ``usage`` record.
+PI_USAGE_COUNT_KEYS = ("input", "output", "cacheRead", "cacheWrite", "totalTokens", "reasoning")
+
+
+def is_valid_pi_usage(usage: Any) -> bool:
+    """Return True when ``usage`` is a complete pi usage record with usable values.
+
+    Pi writes ``input``, ``output`` and ``cost.total`` in every record (pi 1.4.0
+    and 1.5.0 start each usage with a cost of zero and add the catalog price, so a
+    model with an unknown price has ``total`` 0: zeros are data). A record is
+    damaged when it is not an object, lacks ``input`` or ``output``, has a count
+    that is not a finite non-negative whole number (a missing optional count is
+    fine, a null, text, boolean, fraction or nested value is not), has more
+    ``reasoning`` tokens than ``output`` tokens (``reasoning`` is a subset of
+    ``output`` in every provider of pi-ai 1.4.0 and 1.5.0: Anthropic and the OpenAI
+    APIs report the thinking tokens inside the output tokens, and the Google adapter
+    adds them to ``output`` and copies them to ``reasoning``), or has no
+    ``cost`` object with a finite non-negative ``total``: without it the cost of
+    the run would be recorded as zero.
+    :meth:`UsageMetrics.from_pi` turns such values into zero, which hides the
+    damage, so callers check this first.
+    """
+    if not isinstance(usage, dict) or "input" not in usage or "output" not in usage:
+        return False
+    if not all(key not in usage or _is_count(usage[key]) for key in PI_USAGE_COUNT_KEYS):
+        return False
+    if usage.get("reasoning", 0) > usage["output"]:
+        return False
+    cost = usage.get("cost")
+    return isinstance(cost, dict) and _is_cost(cost.get("total"))
+
+
+def _is_finite_number(value: Any) -> bool:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return False
+    # (``math.isfinite`` converts to a float: an integer above 1.8e308 raises OverflowError, and it is finite.)
+    return value >= 0 if isinstance(value, int) else math.isfinite(value) and value >= 0
+
+
+def _is_cost(value: Any) -> bool:
+    """A cost total: a finite number >= 0 that a float can hold (``float()`` of a bigger integer raises)."""
+    return _is_finite_number(value) and value <= sys.float_info.max
+
+
+def _is_count(value: Any) -> bool:
+    return _is_finite_number(value) and (isinstance(value, int) or value.is_integer())
 
 
 @dataclass

@@ -21,6 +21,8 @@ Given two TOML files the harness:
 2. **Runs each cell** with a provider-native agentic SDK: Anthropic models use
    [`claude-agent-sdk`](https://pypi.org/project/claude-agent-sdk/) (Claude Code);
    OpenAI models use [`openai-codex`](https://pypi.org/project/openai-codex/).
+   A scenario with `harness = "pi"` runs its models through the
+   [pi](https://pi.dev) coding agent instead.
    MCP servers and skills are passed natively — no custom tool-calling loop.
 3. **Scores each run** with a per-criterion LLM-as-judge
    (`RubricEvaluator`). Each criterion is an independent judge call; the final
@@ -34,6 +36,29 @@ Given two TOML files the harness:
 |-------------|-----------------------------|-------------------------------------|
 | `anthropic` | `claude-agent-sdk`          | Native integration (ddtrace owns spans) |
 | `openai`    | `openai-codex`              | Decorator spans (`@agent` / `@llm`) |
+
+### Pi harness
+
+Set `harness = "pi"` on a scenario (or in `[defaults]`) to run every model of
+that scenario through the `pi` coding agent (`anthropic` and `openai` models).
+To compare Claude Code with pi for the same model, define two scenarios that
+are the same except for `harness`.
+
+| Scenario `harness` | Engine | LLMObs spans |
+|--------------------|--------|--------------|
+| `native` (default) | Selected from the model provider (table above) | See above |
+| `pi` | `pi --mode json` subprocess | `@agent` span, then one `llm` span per model call, one `tool` span per tool execution and one `task` span per compaction, with real times |
+
+Pi is not a Python package. Install it separately so that `pi` is on `PATH`, or
+set `AIREDALE_PI_COMMAND` (for example `AIREDALE_PI_COMMAND="npx -y
+@earendil-works/pi-coding-agent"`). See [Pi isolation](#pi-isolation) for how a
+run is kept hermetic.
+
+**MCP server URLs with the pi harness.** Before a run starts, Airedale checks the MCP servers
+of the scenario the way pi will read them. A URL whose host it cannot check exactly is refused
+with a clear message, before any server is contacted: a non-ASCII (IDNA) host name such as
+`http://exämple.test/mcp`, or an IPv6 literal it cannot decide. Write the host in ASCII
+(`http://xn--exmple-cua.test/mcp`). The same limit does not apply to the other harnesses.
 
 When an MCP server is itself LLMObs-instrumented, its spans link back to the
 experiment so the tokens it consumes are rolled into the experiment's total. See
@@ -63,6 +88,7 @@ dependencies and are installed automatically.
 | `DD_SITE`       | Datadog site (default `datadoghq.com`)          | Only for a non-default site |
 | `ANTHROPIC_API_KEY` | Anthropic API key                          | Anthropic models, without a gateway |
 | `OPENAI_API_KEY`    | OpenAI API key                             | OpenAI models, without a gateway    |
+| `AIREDALE_PI_COMMAND` | Command that starts pi: a command line (split with shell rules, or Windows rules on Windows) or a JSON array of arguments; default `pi` | Optional, `harness = "pi"` only |
 
 ---
 
@@ -170,6 +196,7 @@ list).
 
 | Key | Type | Description |
 |-----|------|-------------|
+| `harness` | string | Default engine: `"native"` (default) or `"pi"` |
 | `max_turns` | int | Default outer agent loop cap (default `64`) |
 | `effort` | string | Reasoning effort hint: `"low"` / `"medium"` / `"high"` (default `"medium"`) |
 | `system_prompt` | string | Default appended system prompt |
@@ -182,9 +209,10 @@ list).
 | Key | Type | Description |
 |-----|------|-------------|
 | `description` | string | Human description |
+| `harness` | string | `"native"` (default: engine selected from the model provider) or `"pi"` (pi coding agent for every model) |
 | `system_prompt` | string | Optional; appended to the base system prompt |
 | `skills` | list of strings | Skill names referencing the `skills` registry |
-| `allowed_builtin_tools` | list of strings | Built-in tool allow-list. **Omitted = all built-in tools allowed**; an explicit empty list `[]` = no built-in tools; a list = exactly those (e.g. `["Read", "Grep"]`) |
+| `allowed_builtin_tools` | list of strings | Built-in tool allow-list. **Omitted = all built-in tools allowed**; an explicit empty list `[]` = no built-in tools; a list = exactly those (e.g. `["Read", "Grep"]`). For pi, Claude names (`Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write`, `LS`) map to the pi tools (`read`, `grep`, `find`, ...); other names go to pi unchanged. For pi, this list is the complete set of tools declared to the model (plus the MCP tools): a tool of a repo `.pi/extensions` extension is declared only when the list names it |
 | `max_turns` | int | Per-scenario override for `defaults.max_turns` |
 | `effort` | string | Per-scenario override for `defaults.effort` |
 | `mcp_servers` | list of strings | MCP server names referencing the `mcp_servers` registry |
@@ -297,6 +325,70 @@ Notes:
   `codex login` the harness copies only `auth.json` into the isolated home — so
   login auth keeps working without pulling in the global `config.toml`. A
   repo-committed `.codex/config.toml` is not read by Codex for MCP servers.
+- **Pi isolation.** <a id="pi-isolation"></a> Pi reads user-level config
+  (settings, packages, extensions, MCP servers, models, skills, `AGENTS.md`,
+  credentials) from its agent directory (default `~/.pi/agent`). The harness
+  **always** points `PI_CODING_AGENT_DIR` at a fresh private temp directory
+  **outside** the workspace (deleted after the run; also when `TMPDIR`,
+  `TEMP` or `TMP` points into the workspace), so none of the operator's
+  pi config loads. It holds only the generated `models.json` (gateway),
+  `mcp.json` (scenario MCP servers) and, when no gateway credential or provider
+  API-key env var is set, a **copy** of the operator's pi `auth.json`. Pi also
+  runs with `--no-session`, `--no-skills` (so `~/.agents/skills` does not load;
+  scenario skills, the `skills` paths of `.pi/settings.json`, and the skills
+  that pi finds in `.pi/skills` and `.agents/skills` (also in subdirectories)
+  are passed with `--skill`), `--approve` (a cloned
+  repo's `.pi/` files load, like `.claude/` for Claude), `--no-context-files`
+  (an `AGENTS.md`/`CLAUDE.md` in a parent directory of the workspace does not
+  load; the workspace's own file is added to the system prompt) and
+  `PI_OFFLINE=1` (no model-catalog refresh). Pi does not read `.mcp.json`; it reads a repo's
+  `.pi/mcp.json` (its `direct` tools stay available; for its `codemode`
+  tools, add `codemode` to `allowed_builtin_tools`). Because
+  pi lets a project server replace a same-named scenario server, such a name
+  collision fails the run. **The boundary:** the project configuration is
+  **part of the experiment**, and the user configuration is not. Everything
+  that the evaluated repo carries loads and counts: `.pi/extensions` and the
+  tools they register (also tools with the name of an MCP tool), `.pi/mcp.json`
+  servers, `.pi/skills`, `.agents/skills` and `.pi/settings.json`. Airedale does
+  not filter those tools, so a repo extension can add tools to the run. The
+  operator's own configuration must not load: `~/.pi/agent` extensions, skills,
+  prompt templates, themes, settings, packages and `mcp.json`, `~/.agents/skills`
+  and context files above the workspace. `tests/test_pi_isolation.py` checks
+  only part of this against the installed `pi`: it observes extension commands,
+  skill and prompt template names, and extension and MCP marker files, for a
+  fake home and a project that both have them. It does not observe settings,
+  themes, packages, `auth.json` or the content of context files. Context
+  files are checked only through the `--no-context-files` flag.
+  **Trust:** with `--approve`, a cloned repo's
+  `.pi/extensions` and project packages run inside the pi process with its
+  environment (as `.claude/settings.json` hooks do for Claude). Only
+  evaluate repositories you trust. The pi process gets **no** Datadog variable
+  from the operator: every `DD_*`, `DATADOG_*` and `_DD_*` variable is removed
+  (an allowlist, `PI_DATADOG_ENV_ALLOWLIST` in `harness/pi.py`, is empty).
+  These variables are for the airedale process (LLMObs). They hold credentials,
+  some inside the value (`DD_ADDITIONAL_ENDPOINTS`, `DD_PROXY_HTTPS`), and
+  settings that would make Datadog-instrumented repo code report to your
+  account. So pi, its tools and stdio MCP servers do not inherit them. Other
+  variables are not filtered: a Datadog key stored under another name (for
+  example in `OTEL_EXPORTER_OTLP_HEADERS`) still reaches pi. This is not a
+  sandbox (repo code runs as the same OS user). A gateway `api_key_env`
+  credential goes to pi only in its private `models.json`: the `api_key_env`
+  variables of all gateway providers are removed from the pi environment (except the native key variable of the
+  evaluated provider, `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`, without a gateway
+  `base_url`: pi reads it to authenticate). The provider key variables
+  (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) are also removed, except the one of
+  the evaluated provider when pi needs it (no gateway token in `models.json`).
+  With LLMObs, airedale first starts each scenario stdio MCP server once to
+  read its tool list; the MCP SDK gives that probe only `HOME`, `LOGNAME`,
+  `PATH`, `SHELL`, `TERM`, `USER` and the server's own `env`.
+  **Compatibility:** a pi stdio MCP server or repo code that used
+  `OPENAI_API_KEY` in an Anthropic run (or the reverse) does not get it any
+  more. Also, a pi stdio MCP server that used an inherited Datadog
+  variable (for example `DD_API_KEY`) does not get it any more. There is no
+  safe way to give it one at this time: `$NAME` in an MCP `env` value is not
+  expanded, and a literal key in `env` goes to the LLMObs experiment metadata.
+  The task prompt goes to pi on stdin, so a prompt
+  that starts with `@` is not read as a file.
 
 ---
 
@@ -311,12 +403,40 @@ env-var keys (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`).
 | `providers.<name>.credentials_helper` | string | Shell command yielding a bearer token |
 | `providers.<name>.api_key_env` | string | Env var holding a static API key (alternative to helper) |
 | `providers.<name>.headers` | table | Static extra headers for every request to this provider |
+| `providers.<name>.pi_models` | array of tables | Pi harness only: extra pi model definitions (pi `models.json` `models` entries, passed as-is) |
+
+`headers`, `credentials_helper` and an `api_key_env` other than the provider's own variable apply only to a gateway: setting one without `base_url` is a load error (`ConfigError` naming the provider and the keys). Set `base_url`, or remove them.
 
 Credential resolution priority (per provider):
 
 1. `credentials_helper` → runs the command once, caches for 30 minutes, prefers JWT-shaped output.
 2. `api_key_env` → reads the named environment variable.
 3. Falls back to the provider SDK default (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`).
+
+**Pi and model details.** Pi needs model details (API type, context window,
+output limit, cost) that a gateway model list does not give. The pi harness does
+not define models: it changes pi's *built-in* `anthropic` / `openai` provider
+(`baseUrl`, `headers`, credential), and pi's built-in model catalog supplies the
+details. Use the same `base_url` as for the native harness (no `/v1` for
+Anthropic, `/v1` for OpenAI). A `credentials_helper` token is sent as
+`Authorization: Bearer`. Only for a model that is not in pi's catalog, add its
+definition:
+
+```toml
+[[providers.anthropic.pi_models]]
+id = "claude-next"            # sent to the API; must equal the model name in experiment.toml
+reasoning = true
+input = ["text", "image"]
+contextWindow = 200000
+maxTokens = 64000
+cost = { input = 3, output = 15, cacheRead = 0.3, cacheWrite = 3.75 }
+```
+
+`pi_models` entries go to pi as-is, and pi resolves `$NAME` and `!command` in
+their values, so treat `gateway.toml` as trusted input (it already holds
+`credentials_helper` commands). The run fails if pi reports a model other than
+the one requested, if the final answer is incomplete (stop reason other than
+`stop`, for example `length`), or if pi exits before the run settles.
 
 ---
 
@@ -331,9 +451,11 @@ within the per-run temporary working directory before the agent starts.
 For **Claude** (`claude-agent-sdk`), skills are copied to
 `<cwd>/.claude/skills/<name>` and allow-listed in `ClaudeAgentOptions`.
 For **Codex** (`openai-codex`), skills are copied to `<cwd>/.codex/skills/<name>`
-and approved via the thread config. Both engines share the same SKILL.md package
-format, so a single configured directory works for whichever engine the model
-uses.
+and approved via the thread config. For **pi**, nothing is copied: each skill
+directory is passed with `--skill`, together with the project skills in
+`<cwd>/.pi/skills` and `<cwd>/.agents/skills`. All engines share the same
+SKILL.md package format, so a single configured directory works for whichever
+engine the model uses.
 
 See `examples/skills/example-skill/SKILL.md` for a minimal skill template.
 

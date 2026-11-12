@@ -15,6 +15,8 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from airedale.safe_log import exception_summary
+
 if TYPE_CHECKING:
     from airedale.config.gateway import GatewayConfig
 
@@ -38,6 +40,10 @@ class ResolvedGatewayConfig:
     headers: dict[str, str]
 
 
+class _HelperOutputError(ValueError):
+    """The output of the helper is not usable (the message is a fixed text of Airedale)."""
+
+
 def _run_credentials_helper(command: str) -> str:
     """Run a credentials helper command and return the output."""
     with _credential_cache_lock:
@@ -57,12 +63,12 @@ def _run_credentials_helper(command: str) -> str:
             output = result.stdout.strip()
 
             if not output:
-                raise ValueError("Credentials helper returned empty output")
+                raise _HelperOutputError("Credentials helper returned empty output")
 
             # Parse output - prefer JWT-shaped tokens, otherwise use last non-empty line
             lines = [line.strip() for line in output.split("\n") if line.strip()]
             if not lines:
-                raise ValueError("Credentials helper returned no usable output")
+                raise _HelperOutputError("Credentials helper returned no usable output")
 
             # Look for JWT pattern (three base64-like segments separated by dots)
             jwt_pattern = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
@@ -85,24 +91,29 @@ def _run_credentials_helper(command: str) -> str:
         except subprocess.CalledProcessError as e:
             # Non-zero exit: retry a bounded number of times before giving up.
             last_error = e
-            stderr = e.stderr.strip() if e.stderr else "no error output"
+            # (The stderr of the helper is never logged or put in an error: it can hold a credential.)
             if attempt < _CREDENTIALS_HELPER_MAX_ATTEMPTS:
                 logger.warning(
-                    f"Credentials helper failed (exit {e.returncode}, attempt "
-                    f"{attempt}/{_CREDENTIALS_HELPER_MAX_ATTEMPTS}): {command}\nError: {stderr}\nRetrying..."
+                    "Credentials helper failed (exit %s, attempt %d/%d): %s. Retrying...",
+                    e.returncode,
+                    attempt,
+                    _CREDENTIALS_HELPER_MAX_ATTEMPTS,
+                    command,
                 )
                 time.sleep(_CREDENTIALS_HELPER_RETRY_DELAY_SECONDS * attempt)
                 continue
             break
-        except Exception as e:
+        except _HelperOutputError as e:
             raise RuntimeError(f"Failed to run credentials helper: {command}\nError: {e}") from e
+        except Exception as e:
+            # (Not the message of the error: it can hold data of the helper.)
+            raise RuntimeError(f"Failed to run credentials helper: {command}\nError: {exception_summary(e)}") from e
 
     # Exhausted all attempts on non-zero exit.
     assert last_error is not None
-    stderr = last_error.stderr.strip() if last_error.stderr else "no error output"
     raise RuntimeError(
         f"Credentials helper failed after {_CREDENTIALS_HELPER_MAX_ATTEMPTS} attempts "
-        f"(exit {last_error.returncode}): {command}\nError: {stderr}"
+        f"(exit {last_error.returncode}): {command}. Run the command yourself to see its error output."
     ) from last_error
 
 
@@ -128,7 +139,7 @@ def resolve_provider_config(provider: str, gateway_config: GatewayConfig | None 
         try:
             bearer_token = _run_credentials_helper(provider_config.credentials_helper)
         except Exception as e:
-            logger.error(f"Failed to get credentials for {provider}: {e}")
+            logger.error("Failed to get credentials for %s (%s)", provider, exception_summary(e))
             raise
     elif provider_config.api_key_env:
         api_key = os.environ.get(provider_config.api_key_env)

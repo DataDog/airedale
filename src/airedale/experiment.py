@@ -26,7 +26,8 @@ from typing import TYPE_CHECKING, Any
 from ddtrace.llmobs import LLMObs
 
 from airedale import dataset as dataset_module
-from airedale.harness import create_runner, mcp_system_prompt
+from airedale.config.experiment import HARNESS_NATIVE
+from airedale.harness import check_scenario_for_pi, create_runner, mcp_system_prompt
 from airedale.mcp import McpServerSpec, managed_servers
 from airedale.observability import enable_llmobs
 from airedale.progress import ProgressReporter
@@ -89,6 +90,10 @@ async def run_experiments(
     effective_runs = runs if runs is not None else config.runs
     effective_judge_model = judge_model or config.judge_model
     dataset_name = config.dataset_name or config.project
+
+    # Before anything starts (LLMObs, the dataset, managed MCP servers): a pi scenario that cannot run is refused.
+    for scenario in selected_scenarios:
+        check_scenario_for_pi(scenario)
 
     enable_llmobs(config.project, agentless=agentless)
 
@@ -221,6 +226,7 @@ async def _run_cell(
         description=f"{scenario.name} / {model.label} / {task.id}",
         tags={
             "scenario": scenario.name,
+            "harness": scenario.harness,
             "prompt_version": scenario.name,
             "model_name": model.label,
             "task_slug": task.id,
@@ -229,6 +235,7 @@ async def _run_cell(
         config={
             "model_name": model.label,
             "scenario": scenario.name,
+            "harness": scenario.harness,
             "prompt_version": scenario.name,
             "task": task.id,
             "judge_model": judge_model,
@@ -339,7 +346,8 @@ def _print_matrix(matrix: list[tuple[ModelSpec, ScenarioConfig, TaskConfig]]) ->
     """Print the resolved matrix for a dry run."""
     print(f"Matrix: {len(matrix)} cell(s)")
     for model, scenario, task in matrix:
-        print(f"  {model.label} | {scenario.name} | {task.id}")
+        harness = "" if scenario.harness == HARNESS_NATIVE else f" [harness={scenario.harness}]"
+        print(f"  {model.label} | {scenario.name}{harness} | {task.id}")
 
 
 def _experiment_name(scenario: ScenarioConfig, model: ModelSpec, task: TaskConfig) -> str:

@@ -30,19 +30,26 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from ddtrace.llmobs import LLMObs
+from ddtrace.llmobs.decorators import agent, llm
 
 from airedale.mcp import (
     McpServerSpec,
     McpToolMetadata,
+    PiToolNameOrderError,
+    _mcp_tool_metadata_catalog,
     configured_tool_names,
+    pi_mcp_tool_names,
+    pi_possible_tool_name_collisions,
     provider_mcp_tool_name,
 )
+from airedale.tracing import current_trace_headers
+from airedale.types import HarnessResult
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
     from pathlib import Path
 
-    from airedale.types import HarnessResult, ModelSpec, UsageMetrics
+    from airedale.types import ModelSpec, UsageMetrics
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +147,10 @@ class AgentRunResult:
     tool_calls: list[AgentToolCall]
     segments: list[AgentOutputSegment] = field(default_factory=list)
     error: RuntimeError | None = None
+    #: The MCP tool catalog of the run (LLMObs only), so that the agent
+    #: manifest names the tools as the per-call definitions do (pi adds a
+    #: hash suffix to names that collide with a tool not in ``tool_names``).
+    mcp_tool_metadata: Mapping[tuple[str, str], McpToolMetadata] = field(default_factory=dict)
 
 
 def _decorate_when_llmobs_enabled(
@@ -290,11 +301,31 @@ def _mcp_tool_definitions(
     sdk_name: str,
     mcp_tool_metadata: Mapping[tuple[str, str], McpToolMetadata] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return LLMObs tool definitions for the configured MCP tools."""
+    """Return LLMObs tool definitions for the MCP tools of the servers.
+
+    The tools of a server are its ``tool_names``, or, without that list, every
+    tool in ``mcp_tool_metadata`` (the probed catalog) for the server.
+    """
     definitions = []
+    if sdk_name == "pi":
+        _warn_about_pi_tool_name_collisions(mcp_servers, mcp_tool_metadata)
     for server in mcp_servers:
-        for tool_name in configured_tool_names(server):
-            definition: dict[str, Any] = {"name": provider_mcp_tool_name(server.name, tool_name, sdk_name=sdk_name)}
+        pi_names: dict[str, str] = {}
+        if sdk_name == "pi":
+            # Pi adds a hash suffix to tools whose names collide after
+            # sanitizing, so name them against every known tool of the server.
+            known = [*configured_tool_names(server)]
+            if mcp_tool_metadata:
+                known.extend(tool for server_name, tool in mcp_tool_metadata if server_name == server.name)
+            pi_names = pi_mcp_tool_names(server.name, known)
+        # Without a ``tool_names`` allow-list, the server exposes every tool:
+        # declare every tool that the probe found (in the probe's order).
+        declared = configured_tool_names(server) or [
+            tool for server_name, tool in (mcp_tool_metadata or {}) if server_name == server.name
+        ]
+        for tool_name in declared:
+            name = pi_names.get(tool_name) or provider_mcp_tool_name(server.name, tool_name, sdk_name=sdk_name)
+            definition: dict[str, Any] = {"name": name}
             metadata = mcp_tool_metadata.get((server.name, tool_name)) if mcp_tool_metadata else None
             if metadata is not None:
                 if metadata.description:
@@ -303,6 +334,41 @@ def _mcp_tool_definitions(
                     definition["schema"] = metadata.input_schema
             definitions.append(definition)
     return definitions
+
+
+def _warn_about_pi_tool_name_collisions(
+    mcp_servers: list[McpServerSpec], mcp_tool_metadata: Mapping[tuple[str, str], McpToolMetadata] | None
+) -> None:
+    """Log a warning when tools of two servers can get the same pi name.
+
+    Pi adds a hash suffix to the tool of the server that connects second, and the
+    runner does not know the order: the names in the tool definitions can be
+    wrong for these tools. The tools of a server are its ``tool_names`` and the
+    tools of the metadata probe (a ``tool_names`` list is also checked before
+    the run starts, see ``PiRunner._check_tool_name_collisions``).
+    """
+    tools_by_server: dict[str, list[str]] = {}
+    for server in mcp_servers:
+        known = [*configured_tool_names(server)]
+        known.extend(tool for server_name, tool in (mcp_tool_metadata or {}) if server_name == server.name)
+        tools_by_server[server.name] = known
+    try:
+        collisions = pi_possible_tool_name_collisions(tools_by_server)
+    except PiToolNameOrderError as error:
+        # Too many servers share tool names for every connection order to be tried: the names cannot be checked.
+        logger.warning("%s; the tool names in the run report can be wrong", error)
+        return
+    if not collisions:
+        return
+    # Fixed text: the tool names come from the MCP servers (the metadata probe), and the logs go to terminals and CI
+    # systems. Only the names of the servers of the scenario and the number of collisions are given.
+    involved = sorted({server for pairs in collisions.values() for server, _ in pairs})
+    logger.warning(
+        "Pi tool names can collide between the MCP servers %s (possible collisions: %d): pi adds a hash suffix to the "
+        "tool of the server that connects second, so the tool names in the run report can be wrong",
+        ", ".join(involved),
+        len(collisions),
+    )
 
 
 def _llmobs_tool_definitions(
@@ -372,6 +438,7 @@ def _agent_manifest(
     mcp_servers: list[McpServerSpec],
     allowed_builtin_tools: Iterable[str] | None,
     max_turns: int | None,
+    mcp_tool_metadata: Mapping[tuple[str, str], McpToolMetadata] | None = None,
 ) -> dict[str, Any]:
     """Build the LLMObs ``agent_manifest`` mirroring the native Claude manifest.
 
@@ -387,7 +454,10 @@ def _agent_manifest(
     tool_names = [
         definition["name"]
         for definition in _llmobs_tool_definitions(
-            mcp_servers, sdk_name=sdk_name, allowed_builtin_tools=allowed_builtin_tools
+            mcp_servers,
+            sdk_name=sdk_name,
+            allowed_builtin_tools=allowed_builtin_tools,
+            mcp_tool_metadata=mcp_tool_metadata,
         )
         if definition.get("name")
     ]
@@ -415,6 +485,8 @@ def _annotate_agent_loop_span(
     segments: list[AgentOutputSegment],
     allowed_builtin_tools: Iterable[str] | None = None,
     max_turns: int | None = None,
+    mcp_tool_metadata: Mapping[tuple[str, str], McpToolMetadata] | None = None,
+    extra_metadata: Mapping[str, Any] | None = None,
 ) -> None:
     """Annotate the outer ``agent`` span to match the native Claude agent span.
 
@@ -432,6 +504,7 @@ def _annotate_agent_loop_span(
         "sdk": sdk_name,
         "mcp_servers": [server.to_safe_dict() for server in mcp_servers],
         "tool_call_count": len(tool_calls),
+        **(extra_metadata or {}),
     }
     manifest = _agent_manifest(
         framework=framework,
@@ -440,6 +513,7 @@ def _annotate_agent_loop_span(
         mcp_servers=mcp_servers,
         allowed_builtin_tools=allowed_builtin_tools,
         max_turns=max_turns,
+        mcp_tool_metadata=mcp_tool_metadata,
     )
     # `_dd.agent_manifest` is the location the native integration writes the
     # manifest; the public `annotate(metadata=...)` merges into the same dict.
@@ -519,6 +593,8 @@ class AgentRunner(ABC):
         self.max_turns = max_turns
         self.effort = effort
         self.cwd = str(cwd)
+        #: Raw stderr tails of MCP servers whose metadata probe failed (for the private report of a failed run).
+        self._mcp_probe_notes: list[str] = []
 
     @abstractmethod
     async def run(
@@ -532,3 +608,221 @@ class AgentRunner(ABC):
         progress: ProgressCallback | None = None,
     ) -> HarnessResult:
         """Run one eval prompt and return the structured harness result."""
+
+
+class DecoratorSpanAgentRunner(AgentRunner):
+    """Base for runners whose engine has no native ddtrace LLMObs integration.
+
+    The subclass runs the engine in :meth:`_run_agent` and returns the
+    normalized :class:`AgentRunResult`. This base wraps the run in manual spans
+    that copy the shape of the native ``claude_agent_sdk`` integration: an outer
+    ``@agent`` span, an inner ``@llm`` span, and one ``tool`` span for each tool
+    call (children of the agent span). The decorators apply only when
+    ``LLMObs.enabled``, so no empty spans are sent.
+
+    A subclass that can observe each model call (for example pi) overrides
+    :meth:`_run_model_calls` to make one ``llm`` span per model call instead
+    of the single inner ``llm`` span.
+    """
+
+    #: Framework label written in the agent-span manifest.
+    framework: str = "agent-sdk"
+
+    @abstractmethod
+    async def _run_agent(
+        self,
+        *,
+        model: ModelSpec,
+        system_prompt: str,
+        user_prompt: str,
+        trace_headers: Mapping[str, str],
+        progress: ProgressCallback | None,
+    ) -> AgentRunResult:
+        """Run the engine once and return its normalized output.
+
+        Put a run failure that occurs after some output is available in
+        ``AgentRunResult.error``, so that the spans still show the partial
+        transcript before the error is raised.
+        """
+
+    def _effective_builtin_tools(self) -> Iterable[str] | None:
+        """Return the built-in tools to report as available for this run."""
+        return self.allowed_builtin_tools
+
+    async def run(
+        self,
+        *,
+        model: ModelSpec,
+        system_prompt: str,
+        user_prompt: str,
+        prompt_version: str,
+        harness: str,
+        progress: ProgressCallback | None = None,
+    ) -> HarnessResult:
+        await _notify(progress, f"{harness}/{model.label}: {self.sdk_name} run")
+        run_in_agent_span = _decorate_when_llmobs_enabled(
+            self._run_agent_loop_span,
+            agent(name=f"eval.{model.provider}_agent_loop", _automatic_io_annotation=False),
+        )
+        return await run_in_agent_span(
+            model=model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            prompt_version=prompt_version,
+            harness=harness,
+            progress=progress,
+        )
+
+    async def _run_agent_loop_span(
+        self,
+        *,
+        model: ModelSpec,
+        system_prompt: str,
+        user_prompt: str,
+        prompt_version: str,
+        harness: str,
+        progress: ProgressCallback | None,
+    ) -> HarnessResult:
+        run_result, missing_usage_error = await self._run_model_calls(
+            model=model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            prompt_version=prompt_version,
+            harness=harness,
+            progress=progress,
+        )
+        _annotate_agent_loop_span(
+            model=model,
+            sdk_name=self.sdk_name,
+            framework=self.framework,
+            prompt_version=prompt_version,
+            harness=harness,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            answer=run_result.answer,
+            usage=run_result.usage,
+            mcp_servers=self._reported_mcp_servers(),
+            segments=run_result.segments,
+            allowed_builtin_tools=self._effective_builtin_tools(),
+            max_turns=self.max_turns,
+            mcp_tool_metadata=run_result.mcp_tool_metadata,
+            extra_metadata=self._run_metadata(),
+        )
+        if run_result.error is not None:
+            raise run_result.error
+        if missing_usage_error is not None:
+            raise missing_usage_error
+        return HarnessResult(
+            answer=run_result.answer,
+            usage=run_result.usage,
+            tool_calls=[tool_call.to_record() for tool_call in run_result.tool_calls],
+            harness=harness,
+        )
+
+    async def _run_model_calls(
+        self,
+        *,
+        model: ModelSpec,
+        system_prompt: str,
+        user_prompt: str,
+        prompt_version: str,
+        harness: str,
+        progress: ProgressCallback | None,
+    ) -> tuple[AgentRunResult, RuntimeError | None]:
+        """Run the engine and make the child spans of the active ``agent`` span.
+
+        Default: one ``llm`` span for the full run, then one ``tool`` span for
+        each tool call. Return the run result and the usage error (if any).
+        """
+        run_in_llm_span = _decorate_when_llmobs_enabled(
+            self._run_llm_span,
+            llm(model_name=model.name, model_provider=model.provider, name=f"eval.{model.provider}_agent"),
+        )
+        run_result, missing_usage_error = await run_in_llm_span(
+            model=model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            prompt_version=prompt_version,
+            harness=harness,
+            progress=progress,
+        )
+        # Emit per-tool child spans first so they attach to this active agent
+        # span (siblings of the inner llm span), reproducing the native Claude
+        # `agent -> llm + tool...` topology.
+        _emit_tool_spans(run_result.tool_calls)
+        return run_result, missing_usage_error
+
+    def _run_metadata(self) -> dict[str, Any]:
+        """Return extra flags for the metadata of the ``agent`` span. Default: none."""
+        return {}
+
+    def _reported_mcp_servers(self) -> list[McpServerSpec]:
+        """Return the MCP servers to report in the span metadata and the agent manifest.
+
+        Default: the servers given to the engine. A runner whose engine also
+        loads servers itself (pi reads a repo ``.pi/mcp.json``) adds them.
+        """
+        return self.mcp_servers
+
+    async def _span_context(self) -> tuple[dict[str, str], Mapping[tuple[str, str], McpToolMetadata]]:
+        """Return the trace headers for MCP servers and the MCP tool catalog."""
+        trace_headers = current_trace_headers()
+        # Local checks first: the probe starts the stdio servers and calls the HTTP ones, which a run that is
+        # refused must not do.
+        self._check_before_probe(trace_headers)
+        self._mcp_probe_notes = []
+        mcp_tool_metadata = (
+            await _mcp_tool_metadata_catalog(self.mcp_servers, trace_headers, self._mcp_probe_notes, self.cwd)
+            if LLMObs.enabled
+            else {}
+        )
+        return trace_headers, mcp_tool_metadata
+
+    def _check_before_probe(self, trace_headers: Mapping[str, str]) -> None:
+        """Raise when the run is refused for a reason that needs no MCP server (nothing is started yet). Default: none."""
+
+    def _missing_usage_error(self, run_result: AgentRunResult, model: ModelSpec) -> RuntimeError | None:
+        """Return the error for a successful run without token usage, else ``None``."""
+        if run_result.error is not None:
+            return None
+        try:
+            _raise_if_missing_usage(run_result.usage, sdk_name=self.sdk_name, model=model)
+        except RuntimeError as exc:
+            return exc
+        return None
+
+    async def _run_llm_span(
+        self,
+        *,
+        model: ModelSpec,
+        system_prompt: str,
+        user_prompt: str,
+        prompt_version: str,
+        harness: str,
+        progress: ProgressCallback | None,
+    ) -> tuple[AgentRunResult, RuntimeError | None]:
+        trace_headers, mcp_tool_metadata = await self._span_context()
+        run_result = await self._run_agent(
+            model=model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            trace_headers=trace_headers,
+            progress=progress,
+        )
+        run_result.mcp_tool_metadata = mcp_tool_metadata
+        missing_usage_error = self._missing_usage_error(run_result, model)
+        _annotate_llm_span(
+            model=model,
+            sdk_name=self.sdk_name,
+            prompt_version=prompt_version,
+            harness=harness,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            answer=run_result.answer,
+            usage=run_result.usage,
+            mcp_servers=self.mcp_servers,
+            segments=run_result.segments,
+            allowed_builtin_tools=self._effective_builtin_tools(),
+            mcp_tool_metadata=mcp_tool_metadata,
+        )
+        return run_result, missing_usage_error
