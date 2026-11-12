@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import json
 import logging
 import math
@@ -4559,8 +4560,9 @@ class TestNoRawValues:
     @pytest.mark.parametrize("level", [logging.WARNING, logging.DEBUG], ids=["warning", "debug"])
     @pytest.mark.parametrize("mode", ["invalid-output", "unsupported-request"])
     @pytest.mark.parametrize("install_again", [False, True], ids=["replaced", "replaced-then-install"])
+    @pytest.mark.parametrize("copy_attributes", [False, True], ids=["plain-factory", "functools-wraps-factory"])
     def test_the_sdk_log_guard_survives_a_new_log_record_factory(
-        self, tmp_path, fake_pi, monkeypatch, fake_span_llmobs, caplog, level, mode, install_again
+        self, tmp_path, fake_pi, monkeypatch, fake_span_llmobs, caplog, level, mode, install_again, copy_attributes
     ):
         """An application can call ``logging.setLogRecordFactory`` after the import: the run still hides the SDK data."""
         from test_mcp_log_guard import MARKER, SERVER
@@ -4577,6 +4579,10 @@ class TestNoRawValues:
             return record
 
         previous = logging.getLogRecordFactory()
+        if copy_attributes:
+            # ``functools.wraps`` copies the attributes of the factory before it (also the mark of the guard) to a
+            # factory that does not call it.
+            app_factory = functools.wraps(previous)(app_factory)
         logging.setLogRecordFactory(app_factory)
         try:
             if install_again:

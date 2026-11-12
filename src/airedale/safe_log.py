@@ -16,6 +16,7 @@ import logging
 import os
 import sys
 import threading
+import weakref
 from typing import Any
 
 _MAX_LEAVES = 8
@@ -46,8 +47,10 @@ def _leaves(error: BaseException) -> list[BaseException]:
 # --------------------------------------------------------------------------- #
 # Log records made inside the MCP SDK
 # --------------------------------------------------------------------------- #
-_GUARD_MARK = "_airedale_mcp_log_guard"
+_GUARD_MARK = "_airedale_mcp_log_guard"  # (a debug aid, never proof: ``functools.wraps`` copies attributes)
 _guard_lock = threading.Lock()
+#: The guard factories that this module made. A factory is a guard only if it is one of these objects.
+_guards: weakref.WeakSet[Any] = weakref.WeakSet()
 
 
 class _McpOrigins:
@@ -134,6 +137,7 @@ def _guard(previous: Any) -> Any:
         return previous(name, level, fn, lno, msg, args, exc_info, func, sinfo, **kwargs)
 
     setattr(factory, _GUARD_MARK, True)
+    _guards.add(factory)
     return factory
 
 
@@ -152,12 +156,12 @@ def ensure_mcp_log_guard() -> None:
     traceback or stack; the level and the logger name are kept. Records from other code are not touched.
 
     The application can replace the factory later (``logging.setLogRecordFactory``), and a factory that does not call
-    the one before it removes the guard. So this function looks at the factory that is current: if it is not the guard,
-    it wraps it (the factory of the application still runs, and sees the fixed text). Thread-safe.
+    the one before it removes the guard. So this function looks at the factory that is current: if it is not one of the
+    guards made here (checked by identity, not by an attribute that ``functools.wraps`` can copy), it wraps it (the factory of the application still runs, and sees the fixed text). Thread-safe.
     """
     with _guard_lock:
         current = logging.getLogRecordFactory()
-        if not getattr(current, _GUARD_MARK, False):
+        if current not in _guards:  # (By identity: an attribute can be copied to another factory.)
             logging.setLogRecordFactory(_guard(current))
 
 

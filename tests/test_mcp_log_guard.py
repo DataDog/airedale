@@ -117,6 +117,31 @@ def test_a_logger_called_mcp_is_hidden_even_when_the_file_is_unknown(caplog):
     assert MARKER not in caplog.text and "MCP SDK WARNING at test_mcp_log_guard:" in caplog.text
 
 
+def test_a_guard_is_recognized_by_identity_not_by_an_attribute():
+    import functools
+
+    from airedale.safe_log import _guards, ensure_mcp_log_guard
+
+    ensure_mcp_log_guard()
+    guard = logging.getLogRecordFactory()
+    assert guard in _guards
+
+    def copy_of_the_attributes(*args, **kwargs):
+        return logging.LogRecord(*args, **kwargs)
+
+    copy_of_the_attributes = functools.wraps(guard)(copy_of_the_attributes)
+    assert getattr(copy_of_the_attributes, "_airedale_mcp_log_guard", False)  # (The mark was copied.)
+    logging.setLogRecordFactory(copy_of_the_attributes)
+    try:
+        ensure_mcp_log_guard()
+        wrapped = logging.getLogRecordFactory()
+        assert wrapped is not copy_of_the_attributes and wrapped in _guards
+        ensure_mcp_log_guard()  # Identity passes now: nothing is stacked.
+        assert logging.getLogRecordFactory() is wrapped
+    finally:
+        logging.setLogRecordFactory(guard)
+
+
 def test_the_guard_is_installed_once():
     from airedale.safe_log import install_mcp_log_guard
 
