@@ -19,7 +19,7 @@ import pytest
 
 from airedale.mcp import McpServerSpec, _mcp_tool_metadata_catalog
 
-SECRET = "sk-SDK-LOG-SECRET-0123456789"
+MARKER = "sk-SDK-LOG-MARKER-0123456789"
 
 SERVER = textwrap.dedent(
     """
@@ -52,7 +52,7 @@ SERVER = textwrap.dedent(
 
 
 def _probe(mode: str) -> dict:
-    server = McpServerSpec(name="fake", command=sys.executable, args=("-c", SERVER, SECRET, mode))
+    server = McpServerSpec(name="fake", command=sys.executable, args=("-c", SERVER, MARKER, mode))
     return asyncio.run(_mcp_tool_metadata_catalog([server], {}))
 
 
@@ -83,7 +83,7 @@ def test_the_sdk_logs_no_data_of_the_server(mode, level, caplog, everything_logg
     texts = [record.getMessage() for record in caplog.records]
     for record in caplog.records:
         texts.append(str(record.exc_info) + str(record.exc_text) + str(record.stack_info) + str(record.args))
-    assert SECRET not in "\n".join(texts) + everything_logged.getvalue() + caplog.text
+    assert MARKER not in "\n".join(texts) + everything_logged.getvalue() + caplog.text
     sdk_records = [r for r in caplog.records if "MCP SDK" in r.getMessage()]
     assert sdk_records, "the SDK made no log record in this case: the test does not cover the guard"
     for record in sdk_records:
@@ -102,12 +102,12 @@ def test_a_record_from_another_file_is_not_changed(caplog):
     other = logging.getLogger("not.mcp")
     with caplog.at_level(logging.DEBUG):
         try:
-            raise ValueError(f"detail {SECRET}")
+            raise ValueError(f"detail {MARKER}")
         except ValueError:
-            other.exception("message %s", SECRET)
-        logging.getLogger("mcp.something").warning("a record that the SDK did not make: %s", SECRET)
+            other.exception("message %s", MARKER)
+        logging.getLogger("mcp.something").warning("a record that the SDK did not make: %s", MARKER)
     texts = [record.getMessage() for record in caplog.records]
-    assert any(SECRET in text for text in texts) and all("details hidden" not in text for text in texts)
+    assert any(MARKER in text for text in texts) and all("details hidden" not in text for text in texts)
     assert any(record.exc_info is not None for record in caplog.records if record.name == "not.mcp")
 
 
