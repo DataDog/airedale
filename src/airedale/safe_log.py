@@ -117,7 +117,14 @@ def _functions_of(value: Any) -> list[Any]:
 _origins = _McpOrigins()
 
 
+def _hidden_message(level: int, filename: str, lineno: int) -> str:
+    module = os.path.splitext(os.path.basename(filename))[0]
+    return f"MCP SDK {logging.getLevelName(level)} at {module}:{lineno} (details hidden)"
+
+
 def _guard(previous: Any) -> Any:
+    """Layer 1: a record factory that makes the record of the SDK with a fixed text, then calls ``previous``."""
+
     def factory(
         name: str,
         level: int,
@@ -131,14 +138,41 @@ def _guard(previous: Any) -> Any:
         **kwargs: Any,
     ) -> logging.LogRecord:
         if _origins.is_sdk(name, fn):
-            module = os.path.splitext(os.path.basename(fn))[0]
-            msg = f"MCP SDK {logging.getLevelName(level)} at {module}:{lno} (details hidden)"
+            msg = _hidden_message(level, fn, lno)
             args, exc_info, sinfo = (), None, None
         return previous(name, level, fn, lno, msg, args, exc_info, func, sinfo, **kwargs)
 
     setattr(factory, _GUARD_MARK, True)
     _guards.add(factory)
     return factory
+
+
+class _SdkRecordFilter(logging.Filter):
+    """Layer 2: a logger filter that gives a record of the SDK a fixed text, whatever factory made the record.
+
+    ``Logger.handle`` runs the filters of the logger on which the record was made, when the record is handled, so this
+    does not depend on the record factory (which the application can replace, also from another thread during a probe).
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if _origins.is_sdk(record.name, record.pathname):
+            record.msg = _hidden_message(record.levelno, record.pathname, record.lineno)
+            record.args = ()
+            record.exc_info = None
+            record.exc_text = None
+            record.stack_info = None
+        return True
+
+
+_sdk_filter = _SdkRecordFilter()
+
+
+def _install_filters() -> None:
+    """Put the filter on the root logger (the SDK logs on it) and on every ``mcp`` / ``mcp.*`` logger that exists."""
+    logging.getLogger().addFilter(_sdk_filter)  # (``addFilter`` does nothing when the filter is already there.)
+    for name, candidate in list(logging.Logger.manager.loggerDict.items()):
+        if (name == "mcp" or name.startswith("mcp.")) and isinstance(candidate, logging.Logger):
+            candidate.addFilter(_sdk_filter)
 
 
 def ensure_mcp_log_guard() -> None:
@@ -149,20 +183,25 @@ def ensure_mcp_log_guard() -> None:
     support is logged with its parameters on the *root* logger (``mcp.shared.session``). Logs go to terminals and CI
     systems, and a successful run has no private report.
 
-    A filter on the ``mcp`` or the root logger would miss the records of child loggers, since the filter of a logger
-    does not run for the records that its children pass up. So the log record factory is wrapped: it runs for every
-    record and knows the source file. A record of the SDK (see :class:`_McpOrigins`, or a logger called ``mcp`` or
-    ``mcp.*``) gets the message ``MCP SDK <level> at <module>:<line> (details hidden)``, without arguments, exception,
-    traceback or stack; the level and the logger name are kept. Records from other code are not touched.
+    A record of the SDK (see :class:`_McpOrigins`, or a logger called ``mcp`` or ``mcp.*``) gets the message
+    ``MCP SDK <level> at <module>:<line> (details hidden)``, without arguments, exception, traceback or stack. The level
+    and the logger name are kept; records from other code are not touched. Two layers do it:
 
-    The application can replace the factory later (``logging.setLogRecordFactory``), and a factory that does not call
-    the one before it removes the guard. So this function looks at the factory that is current: if it is not one of the
-    guards made here (checked by identity, not by an attribute that ``functools.wraps`` can copy), it wraps it (the factory of the application still runs, and sees the fixed text). Thread-safe.
+    1. The log record factory is wrapped (a filter on the ``mcp`` logger alone would miss the records of its children,
+       which pass up without its filter). The application can replace the factory later, and one that does not call the
+       factory before it removes this layer, so the current factory is wrapped again when it is not one of the guards
+       made here (checked by identity: ``functools.wraps`` copies attributes).
+    2. A filter on the root logger and on every ``mcp`` / ``mcp.*`` logger (:class:`_SdkRecordFilter`). It runs when the
+       record is handled, whatever factory made it, so a factory that another thread sets during a probe cannot remove it.
+
+    Not covered: code in this process that copies the raw message into its own field inside its own record factory.
+    Code in the process is trusted (it can read the data directly). Thread-safe.
     """
     with _guard_lock:
         current = logging.getLogRecordFactory()
         if current not in _guards:  # (By identity: an attribute can be copied to another factory.)
             logging.setLogRecordFactory(_guard(current))
+        _install_filters()
 
 
 #: The name that the first version of the guard had.
