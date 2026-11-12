@@ -26,7 +26,7 @@ from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamablehttp_client
 
-from airedale.safe_log import exception_summary, install_mcp_log_guard
+from airedale.safe_log import ensure_mcp_log_guard, exception_summary
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -38,7 +38,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # The SDK logs data that servers sent (invalid output, the parameters of a request it does not support): hide it.
-install_mcp_log_guard()
+ensure_mcp_log_guard()
 
 # Constants for managed MCP server start/health
 MANAGED_MCP_HEALTH_TIMEOUT_SECONDS = 30.0
@@ -546,6 +546,7 @@ async def _mcp_tool_metadata_catalog(
     ``cwd`` is the directory where stdio servers start (the workspace of the run, like pi does): a relative command or
     a relative ``PATH`` entry is found from there. Default: the directory of this process.
     """
+    ensure_mcp_log_guard()
     if not servers:
         return {}
 
@@ -670,6 +671,7 @@ async def _list_mcp_tools(
     ``errlog``: where the stderr of a stdio server goes (a file with a file descriptor); the default of the
     SDK is the terminal. ``cwd``: the directory where a stdio server starts.
     """
+    ensure_mcp_log_guard()  # (Before the transport and the session: the SDK logs what the server sends.)
     if server.type == "http":
         async with (
             streamablehttp_client(server._require_url(), headers=server.merged_headers(trace_headers)) as (
@@ -801,6 +803,7 @@ class ManagedMcpServer:
         }
 
     async def __aenter__(self) -> ManagedMcpServer:
+        ensure_mcp_log_guard()
         if not self.spec.is_managed:
             # Not an http server, or no auto-start command configured
             return self

@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import math
 import os
 import sys
@@ -4554,6 +4555,44 @@ class TestNoRawValues:
             assert bool(reports) is expect_report
             if expect_report:
                 assert "PROBE-STDERR-SECRET-0123456789" in reports[0].read_text()
+
+    @pytest.mark.parametrize("level", [logging.WARNING, logging.DEBUG], ids=["warning", "debug"])
+    @pytest.mark.parametrize("mode", ["invalid-output", "unsupported-request"])
+    @pytest.mark.parametrize("install_again", [False, True], ids=["replaced", "replaced-then-install"])
+    def test_the_sdk_log_guard_survives_a_new_log_record_factory(
+        self, tmp_path, fake_pi, monkeypatch, fake_span_llmobs, caplog, level, mode, install_again
+    ):
+        """An application can call ``logging.setLogRecordFactory`` after the import: the run still hides the SDK data."""
+        from test_mcp_log_guard import MARKER, SERVER
+
+        import airedale.harness.base as base
+        from airedale.safe_log import install_mcp_log_guard
+
+        monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
+        monkeypatch.setattr(base, "agent", lambda **kwargs: lambda func: func)
+
+        def app_factory(*args, **kwargs):
+            record = logging.LogRecord(*args, **kwargs)  # (a standard record; it does not call the factory before it)
+            record.app_attribute = "from the application"
+            return record
+
+        previous = logging.getLogRecordFactory()
+        logging.setLogRecordFactory(app_factory)
+        try:
+            if install_again:
+                install_mcp_log_guard()
+            command, _ = fake_pi(_events_tool_run())
+            server = McpServerSpec(name="fake", command=sys.executable, args=("-c", SERVER, MARKER, mode))
+            runner = PiRunner(cwd=tmp_path, pi_command=command, mcp_servers=[server])
+            with caplog.at_level(level):
+                _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
+        finally:
+            logging.setLogRecordFactory(previous)
+        texts = [record.getMessage() + str(record.exc_info) + str(record.args) for record in caplog.records]
+        assert MARKER not in "\n".join(texts) + caplog.text
+        sdk = [record for record in caplog.records if "MCP SDK" in record.getMessage()]
+        assert sdk, "the SDK made no log record: the test does not cover the guard"
+        assert all(getattr(record, "app_attribute", None) == "from the application" for record in sdk)
 
     def test_the_old_redaction_code_is_gone(self):
         import airedale.harness.pi as pi_module
