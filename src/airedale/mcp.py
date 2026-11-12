@@ -26,7 +26,7 @@ from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamablehttp_client
 
-from airedale.safe_log import exception_summary
+from airedale.safe_log import exception_summary, install_mcp_log_guard
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -36,6 +36,9 @@ if TYPE_CHECKING:
     from airedale.config.experiment import McpServerConfig as McpServerConfigExperiment
 
 logger = logging.getLogger(__name__)
+
+# The SDK logs data that servers sent (invalid output, the parameters of a request it does not support): hide it.
+install_mcp_log_guard()
 
 # Constants for managed MCP server start/health
 MANAGED_MCP_HEALTH_TIMEOUT_SECONDS = 30.0
