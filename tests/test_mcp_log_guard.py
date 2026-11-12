@@ -105,10 +105,16 @@ def test_a_record_from_another_file_is_not_changed(caplog):
             raise ValueError(f"detail {MARKER}")
         except ValueError:
             other.exception("message %s", MARKER)
-        logging.getLogger("mcp.something").warning("a record that the SDK did not make: %s", MARKER)
+        logging.getLogger("airedale.mcp").warning("a record of Airedale, not of the SDK: %s", MARKER)
     texts = [record.getMessage() for record in caplog.records]
     assert any(MARKER in text for text in texts) and all("details hidden" not in text for text in texts)
     assert any(record.exc_info is not None for record in caplog.records if record.name == "not.mcp")
+
+
+def test_a_logger_called_mcp_is_hidden_even_when_the_file_is_unknown(caplog):
+    with caplog.at_level(logging.DEBUG):
+        logging.getLogger("mcp.client.other").warning("data of a server: %s", MARKER)
+    assert MARKER not in caplog.text and "MCP SDK WARNING at test_mcp_log_guard:" in caplog.text
 
 
 def test_the_guard_is_installed_once():
@@ -118,3 +124,78 @@ def test_the_guard_is_installed_once():
     install_mcp_log_guard()
     install_mcp_log_guard()
     assert logging.getLogRecordFactory() is factory
+
+
+# --------------------------------------------------------------------------- #
+# A bytecode-only copy of the SDK keeps the path where it was built in ``record.pathname``
+# --------------------------------------------------------------------------- #
+PROBE_SCRIPT = textwrap.dedent(
+    """
+    import asyncio, io, logging, sys
+    sys.path.insert(0, sys.argv[1])
+    import mcp
+    assert mcp.__file__.startswith(sys.argv[1]), mcp.__file__
+    from airedale.mcp import McpServerSpec, _mcp_tool_metadata_catalog
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    logging.getLogger().addHandler(handler)
+    logging.getLogger().setLevel(logging.DEBUG)
+    server = McpServerSpec(name="fake", command=sys.executable, args=("-c", sys.argv[2], sys.argv[3], sys.argv[4]))
+    asyncio.run(_mcp_tool_metadata_catalog([server], {}))
+    print("LOGGED-BEGIN")
+    print(stream.getvalue())
+    print("LOGGED-END")
+    """
+)
+
+
+def _bytecode_copy(tmp_path, as_zip: bool):
+    """Copy the installed SDK as ``.pyc`` files only, built as if they came from another directory."""
+    import py_compile
+    import zipfile
+    from pathlib import Path
+
+    import mcp
+
+    source = Path(mcp.__file__).parent
+    target = tmp_path / ("sdk.zip" if as_zip else "sdk")
+    entries: dict[str, Path] = {}
+    build = tmp_path / "compiled"
+    for py_file in source.rglob("*.py"):
+        relative = py_file.relative_to(source.parent)
+        compiled = build / relative.with_suffix(".pyc")
+        compiled.parent.mkdir(parents=True, exist_ok=True)
+        # (The code objects keep this build path, which does not exist: it is not under the place the SDK is loaded from.)
+        py_compile.compile(
+            str(py_file), cfile=str(compiled), dfile=f"/nonexistent-build-dir/{relative.as_posix()}", doraise=True
+        )
+        entries[relative.with_suffix(".pyc").as_posix()] = compiled
+    if as_zip:
+        with zipfile.ZipFile(target, "w") as archive:
+            for name, compiled in entries.items():
+                archive.write(compiled, name)
+    else:
+        for name, compiled in entries.items():
+            destination = target / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(compiled.read_bytes())
+    return target
+
+
+@pytest.mark.parametrize("as_zip", [False, True], ids=["pyc-directory", "pyc-zip"])
+@pytest.mark.parametrize("mode", ["invalid-output", "unsupported-request"])
+def test_a_bytecode_only_copy_of_the_sdk_is_recognized(tmp_path, mode, as_zip):
+    import subprocess
+
+    location = _bytecode_copy(tmp_path, as_zip)
+    result = subprocess.run(
+        [sys.executable, "-c", PROBE_SCRIPT, str(location), SERVER, MARKER, mode],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
+    logged = result.stdout.split("LOGGED-BEGIN", 1)[1].split("LOGGED-END", 1)[0]
+    assert "MCP SDK" in logged and "(details hidden)" in logged, logged  # The SDK did log, and the guard hid it.
+    assert MARKER not in logged + result.stderr

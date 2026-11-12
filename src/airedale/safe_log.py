@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 import threading
 from typing import Any
 
@@ -45,12 +46,99 @@ def _leaves(error: BaseException) -> list[BaseException]:
 # --------------------------------------------------------------------------- #
 # Log records made inside the MCP SDK
 # --------------------------------------------------------------------------- #
-_mcp_guard_lock = threading.Lock()
-_mcp_guard_installed = False
+_GUARD_MARK = "_airedale_mcp_log_guard"
+_guard_lock = threading.Lock()
 
 
-def install_mcp_log_guard() -> None:
-    """Rewrite every log record that the MCP SDK makes to a fixed text. Idempotent; permanent; thread-safe.
+class _McpOrigins:
+    """Tell whether a log record was made by code of the installed ``mcp`` package.
+
+    ``record.pathname`` is the ``co_filename`` of the calling code, which is not always inside the directory where the
+    package is loaded from: a bytecode-only install (a relocated ``.pyc`` directory, a ``.pyc`` in a ZIP) keeps the
+    path where the code was built. So the origins are collected from the loaded ``mcp`` modules themselves: the
+    directories of their ``__file__`` and spec origin, and the ``co_filename`` of the functions they define. They are
+    collected again when a file name is not known (one answer for each file name is kept).
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._filenames: set[str] = set()
+        self._prefixes: set[str] = set()
+        self._answers: dict[str, bool] = {}
+
+    def is_sdk(self, logger_name: str, filename: str) -> bool:
+        if logger_name == "mcp" or logger_name.startswith("mcp."):
+            return True
+        key = os.path.normcase(filename)
+        answer = self._answers.get(key)
+        if answer is None:
+            with self._lock:
+                self._collect()
+                answer = key in self._filenames or key.startswith(tuple(self._prefixes))
+                self._answers[key] = answer
+        return answer
+
+    def _collect(self) -> None:
+        for name, module in list(sys.modules.items()):
+            if name != "mcp" and not name.startswith("mcp."):
+                continue
+            try:
+                self._collect_module(module)
+            except Exception:  # noqa: BLE001 - a module with odd attributes must not break logging
+                continue
+
+    def _collect_module(self, module: Any) -> None:
+        origins = [getattr(module, "__file__", None), getattr(getattr(module, "__spec__", None), "origin", None)]
+        origins.extend(getattr(module, "__path__", None) or ())
+        for origin in origins:
+            if isinstance(origin, str) and origin:
+                directory = origin if os.path.isdir(origin) else os.path.dirname(origin)
+                for candidate in {os.path.abspath(directory), os.path.realpath(directory)}:
+                    self._prefixes.add(os.path.normcase(candidate) + os.sep)
+        for value in list(vars(module).values()):
+            for function in _functions_of(value):
+                self._filenames.add(os.path.normcase(function.__code__.co_filename))
+
+
+def _functions_of(value: Any) -> list[Any]:
+    """Return the functions that ``value`` is, or defines if it is a class (one level of classes)."""
+    found = []
+    candidates = list(vars(value).values()) if isinstance(value, type) else [value]
+    for candidate in candidates:
+        candidate = getattr(candidate, "__func__", candidate)  # static and class methods
+        if hasattr(candidate, "__code__") and hasattr(candidate.__code__, "co_filename"):
+            found.append(candidate)
+    return found
+
+
+_origins = _McpOrigins()
+
+
+def _guard(previous: Any) -> Any:
+    def factory(
+        name: str,
+        level: int,
+        fn: str,
+        lno: int,
+        msg: Any,
+        args: Any,
+        exc_info: Any,
+        func: str | None = None,
+        sinfo: str | None = None,
+        **kwargs: Any,
+    ) -> logging.LogRecord:
+        if _origins.is_sdk(name, fn):
+            module = os.path.splitext(os.path.basename(fn))[0]
+            msg = f"MCP SDK {logging.getLevelName(level)} at {module}:{lno} (details hidden)"
+            args, exc_info, sinfo = (), None, None
+        return previous(name, level, fn, lno, msg, args, exc_info, func, sinfo, **kwargs)
+
+    setattr(factory, _GUARD_MARK, True)
+    return factory
+
+
+def ensure_mcp_log_guard() -> None:
+    """Make sure that every log record made by the MCP SDK has a fixed text. Cheap; call it before each use of the SDK.
 
     The SDK logs data that an MCP server sent, before any code of Airedale can catch it: a line of invalid JSON on
     stdout is logged with its text and a traceback (``mcp.client.stdio``), and a request that the client does not
@@ -59,41 +147,19 @@ def install_mcp_log_guard() -> None:
 
     A filter on the ``mcp`` or the root logger would miss the records of child loggers, since the filter of a logger
     does not run for the records that its children pass up. So the log record factory is wrapped: it runs for every
-    record, knows the source file, and replaces the message of a record whose source file is inside the installed
-    ``mcp`` package with ``MCP SDK <level> at <module>:<line> (details hidden)``, without arguments, exception,
-    traceback or stack. The level and the logger name are kept; records from other files are not touched.
-    The wrapper keeps the factory that was there before it, and is installed once, so concurrent probes are safe.
+    record and knows the source file. A record of the SDK (see :class:`_McpOrigins`, or a logger called ``mcp`` or
+    ``mcp.*``) gets the message ``MCP SDK <level> at <module>:<line> (details hidden)``, without arguments, exception,
+    traceback or stack; the level and the logger name are kept. Records from other code are not touched.
+
+    The application can replace the factory later (``logging.setLogRecordFactory``), and a factory that does not call
+    the one before it removes the guard. So this function looks at the factory that is current: if it is not the guard,
+    it wraps it (the factory of the application still runs, and sees the fixed text). Thread-safe.
     """
-    global _mcp_guard_installed
-    with _mcp_guard_lock:
-        if _mcp_guard_installed:
-            return
-        import mcp
+    with _guard_lock:
+        current = logging.getLogRecordFactory()
+        if not getattr(current, _GUARD_MARK, False):
+            logging.setLogRecordFactory(_guard(current))
 
-        package_file = getattr(mcp, "__file__", None)
-        if not package_file:  # pragma: no cover - a namespace package: nothing to recognize
-            return
-        directory = os.path.dirname(os.path.abspath(package_file))
-        prefixes = tuple({os.path.normcase(directory) + os.sep, os.path.normcase(os.path.realpath(directory)) + os.sep})
-        previous = logging.getLogRecordFactory()
 
-        def factory(
-            name: str,
-            level: int,
-            fn: str,
-            lno: int,
-            msg: Any,
-            args: Any,
-            exc_info: Any,
-            func: str | None = None,
-            sinfo: str | None = None,
-            **kwargs: Any,
-        ) -> logging.LogRecord:
-            if os.path.normcase(fn).startswith(prefixes):
-                module = os.path.splitext(os.path.basename(fn))[0]
-                msg = f"MCP SDK {logging.getLevelName(level)} at {module}:{lno} (details hidden)"
-                args, exc_info, sinfo = (), None, None
-            return previous(name, level, fn, lno, msg, args, exc_info, func, sinfo, **kwargs)
-
-        logging.setLogRecordFactory(factory)
-        _mcp_guard_installed = True
+#: The name that the first version of the guard had.
+install_mcp_log_guard = ensure_mcp_log_guard
