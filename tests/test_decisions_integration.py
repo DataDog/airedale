@@ -277,7 +277,7 @@ async def test_config_loader_selection_and_metadata(tmp_path, monkeypatch, extra
         }
 
 
-@pytest.mark.parametrize("failure", ["exit", "timeout"])
+@pytest.mark.parametrize("failure", ["exit", "timeout", "oserror", "decode"])
 async def test_failing_helper_with_inline_secret_is_not_logged_or_raised(monkeypatch, mocker, caplog, failure):
     import logging
     import subprocess
@@ -289,12 +289,13 @@ async def test_failing_helper_with_inline_secret_is_not_logged_or_raised(monkeyp
     command = f"print-token --api-key {secret}"
     mocker.patch("airedale.gateway.time.sleep")
     gateway_module._credential_cache.clear()
-    error: Exception = (
-        subprocess.TimeoutExpired(command, 30)
-        if failure == "timeout"
-        else subprocess.CalledProcessError(7, command, stderr=f"denied for {secret}")
-    )
-    mocker.patch("airedale.gateway.subprocess.run", side_effect=error)
+    errors = {
+        "exit": subprocess.CalledProcessError(7, command, stderr=f"denied for {secret}"),
+        "timeout": subprocess.TimeoutExpired(command, 30),
+        "oserror": OSError(f"cannot run {command}"),
+        "decode": UnicodeDecodeError("utf-8", b"\xff" + secret.encode(), 0, 1, "invalid start byte"),
+    }
+    mocker.patch("airedale.gateway.subprocess.run", side_effect=errors[failure])
     gateway = GatewayConfig(
         providers={
             "openai": ProviderGatewayConfig(
@@ -310,7 +311,11 @@ async def test_failing_helper_with_inline_secret_is_not_logged_or_raised(monkeyp
     with caplog.at_level(logging.DEBUG), pytest.raises(RuntimeError) as direct:
         gateway_module.resolve_provider_config("openai", gateway)
     for raised in (through_evaluator.value, direct.value):
+        # The raw error of the helper must not stay anywhere: not in a printed chain, not in the attributes.
+        assert raised.__cause__ is None
+        assert raised.__context__ is None
         assert secret not in "".join(traceback.format_exception(raised))
+        assert secret not in str(raised) and secret not in repr(raised)
     assert secret not in caplog.text
     assert command not in caplog.text
     gateway_module._credential_cache.clear()
