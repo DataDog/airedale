@@ -44,6 +44,8 @@
 "referencing","https://github.com/python-jsonschema/referencing","['MIT']","['Julian Berman']"
 "rich","https://github.com/Textualize/rich","['MIT']","['Will McGugan']"
 "rpds-py","https://github.com/crate-py/rpds","['MIT']","['Julian Berman']"
+"ruamel.yaml","https://sourceforge.net/p/ruamel-yaml/code/ci/default/tree/","['MIT license']","['Anthon van der Neut']"
+"ruamel.yaml.clib","https://sourceforge.net/p/ruamel-yaml-clib/code/ci/default/tree/","['MIT']","['Anthon van der Neut']"
 "sniffio","https://github.com/python-trio/sniffio","['MIT OR Apache-2.0']","['python-trio']"
 "sse-starlette","https://github.com/sysid/sse-starlette","['BSD-3-Clause']","['sysid']"
 "starlette","https://github.com/Kludex/starlette","['BSD-3-Clause']","['Encode OSS Ltd']"

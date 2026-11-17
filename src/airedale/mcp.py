@@ -8,19 +8,25 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
+import itertools
 import json
 import logging
 import os
 import re
 import signal
+import threading
 import time
-from collections.abc import Mapping
+from collections import Counter
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TextIO
 
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamablehttp_client
+
+from airedale.safe_log import ensure_mcp_log_guard, exception_summary
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -30,6 +36,9 @@ if TYPE_CHECKING:
     from airedale.config.experiment import McpServerConfig as McpServerConfigExperiment
 
 logger = logging.getLogger(__name__)
+
+# The SDK logs data that servers sent (invalid output, the parameters of a request it does not support): hide it.
+ensure_mcp_log_guard()
 
 # Constants for managed MCP server start/health
 MANAGED_MCP_HEALTH_TIMEOUT_SECONDS = 30.0
@@ -44,6 +53,12 @@ MCP_TOOL_METADATA_TIMEOUT_SECONDS = 10.0
 # of recent output for error reporting.
 MANAGED_MCP_OUTPUT_TAIL_BYTES = 64 * 1024
 MANAGED_MCP_DRAIN_CHUNK_BYTES = 4096
+
+
+# Pi accepts only these characters in MCP server names (see pi docs/mcp.md).
+PI_MCP_SERVER_NAME_RE = re.compile(r"[A-Za-z0-9_-]+")
+_PI_TOOL_NAME_SAFE_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_")
+PI_MAX_TOOL_NAME_LENGTH = 64
 
 
 @dataclass(frozen=True)
@@ -113,7 +128,7 @@ class McpServerSpec:
             return McpStdioServerConfig(
                 type="stdio", command=self._require_command(), args=list[str](self.args), env=dict[str, str](self.env)
             )
-        raise ValueError(f"MCP server {self.name!r} has unsupported type {self.type!r}")
+        raise ValueError(f"MCP server {self.name!r} has unsupported type (expected 'stdio' or 'http')")
 
     def to_codex_config_overrides(self, trace_headers: Mapping[str, str]) -> list[str]:
         """Render this spec as Codex CLI config override strings."""
@@ -132,7 +147,45 @@ class McpServerSpec:
             if self.env:
                 overrides.append(f"{key_prefix}.env={_toml_value(dict(self.env))}")
             return overrides
-        raise ValueError(f"MCP server {self.name!r} has unsupported type {self.type!r}")
+        raise ValueError(f"MCP server {self.name!r} has unsupported type (expected 'stdio' or 'http')")
+
+    def to_pi_config(self, trace_headers: Mapping[str, str]) -> dict[str, Any]:
+        """Render this spec as a pi ``mcp.json`` ``mcpServers`` entry.
+
+        Every tool gets ``direct`` exposure, so the model sees MCP tools as
+        declared tools (the same as with Claude and Codex), not through pi's
+        ``codemode`` scripts. When ``tool_names`` is set, all other tools of the
+        server are ``hidden``. Pi resolves ``$NAME`` and ``!command`` in header
+        and env values; :func:`pi_literal` escapes the values so they stay
+        literal.
+        """
+        if not PI_MCP_SERVER_NAME_RE.fullmatch(self.name):
+            raise ValueError(
+                f"MCP server name {self.name!r} is not valid for pi; use only letters, digits, '_' and '-'"
+            )
+        entry: dict[str, Any]
+        if self.type == "http":
+            entry = {"type": "http", "url": self.url}
+            headers = self.merged_headers(trace_headers)
+            if headers:
+                entry["headers"] = {name: pi_literal(value) for name, value in headers.items()}
+        elif self.type == "stdio":
+            entry = {"type": "stdio", "command": self.command, "args": list(self.args)}
+            if self.env:
+                entry["env"] = {name: pi_literal(value) for name, value in self.env.items()}
+        else:
+            raise ValueError(f"MCP server {self.name!r} has unsupported type (expected 'stdio' or 'http')")
+        tool_names = configured_tool_names(self)
+        if any("*" in tool_name for tool_name in tool_names):
+            # Pi reads `*` in a `toolExposure` key as a pattern; `tool_names`
+            # is a list of exact names.
+            raise ValueError(f"MCP server {self.name!r} tool_names must be exact tool names; '*' is not allowed")
+        if tool_names:
+            entry["exposure"] = "hidden"
+            entry["toolExposure"] = dict.fromkeys(tool_names, "direct")
+        else:
+            entry["exposure"] = "direct"
+        return entry
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serializable representation for runtime config."""
@@ -151,6 +204,8 @@ class McpServerSpec:
         """Return a non-secret representation for LLMObs metadata/config."""
         data = self.to_dict()
         data["headers"] = dict.fromkeys(self.headers, "<redacted>")
+        # Environment values often hold credentials: keep the variable names only.
+        data["env"] = dict.fromkeys(self.env, "<set>")
         return data
 
 
@@ -165,13 +220,44 @@ def discover_claude_project_mcp_servers(cwd: str | Path) -> list[McpServerSpec]:
     """
     from pathlib import Path
 
-    path = Path(cwd) / ".mcp.json"
+    return _parse_mcp_json(Path(cwd) / ".mcp.json")
+
+
+#: Replaces a value that is not reported.
+REDACTED = "<redacted>"
+
+
+def url_without_secrets(url: str | None) -> str | None:
+    """Keep only the scheme, host and port of ``url``: the user info, path, query
+    and fragment can hold tokens (for example ``/s/<token>/mcp``).
+
+    The URL is read like pi reads it (``airedale.whatwg_url``): ``\\`` ends the host as ``/`` does, and tabs and
+    newlines inside the URL are ignored. A URL that cannot be read, or whose host the reader cannot decide in
+    every detail, is replaced by ``<redacted>``.
+    """
+    if not url:
+        return url
+    from airedale.whatwg_url import parse_url
+
+    try:
+        parsed = parse_url(url)
+    except Exception:  # noqa: BLE001 - a report must not abort a run: what cannot be read is not reported
+        return REDACTED
+    # A host that the reader is not sure about (``exact=False``: IDNA, odd IPv6) can hold what pi reads as a path
+    # or as user info (full-width slashes, ``@``, brackets): it is not reported.
+    if parsed is None or not parsed.exact or not parsed.hostname:
+        return REDACTED
+    return f"{parsed.scheme}://{parsed.hostname}" + (f":{parsed.port}" if parsed.port else "")
+
+
+def _parse_mcp_json(path: Path) -> list[McpServerSpec]:
+    """Parse an ``{"mcpServers": {...}}`` file; a missing or bad file gives ``[]``."""
     if not path.is_file():
         return []
     try:
         data = json.loads(path.read_text())
-    except (OSError, ValueError):
-        logger.warning("Ignoring unreadable project MCP config at %s", path, exc_info=True)
+    except (OSError, ValueError) as error:
+        logger.warning("Ignoring unreadable project MCP config at %s (%s)", path, exception_summary(error))
         return []
 
     servers_raw = data.get("mcpServers") if isinstance(data, Mapping) else None
@@ -182,18 +268,33 @@ def discover_claude_project_mcp_servers(cwd: str | Path) -> list[McpServerSpec]:
     for name, cfg in servers_raw.items():
         if not isinstance(cfg, Mapping):
             continue
+        args, env, headers = cfg.get("args") or [], cfg.get("env") or {}, cfg.get("headers") or {}
+        if not (
+            all(isinstance(cfg.get(key), str | None) for key in ("type", "url", "command"))
+            and isinstance(args, list)
+            and all(isinstance(arg, str) for arg in args)
+            and _is_str_mapping(env)
+            and _is_str_mapping(headers)
+        ):
+            # The value is not logged: it can hold a credential.
+            logger.warning("Ignoring MCP server %r in %s: a field has the wrong type", str(name), path)
+            continue
         specs.append(
             McpServerSpec(
                 name=str(name),
                 type=cfg.get("type"),
                 url=cfg.get("url"),
                 command=cfg.get("command"),
-                args=tuple(cfg.get("args", []) or []),
-                env=dict(cfg.get("env", {}) or {}),
-                headers=dict(cfg.get("headers", {}) or {}),
+                args=tuple(args),
+                env=dict(env),
+                headers=dict(headers),
             )
         )
     return specs
+
+
+def _is_str_mapping(value: Any) -> bool:
+    return isinstance(value, Mapping) and all(isinstance(k, str) and isinstance(v, str) for k, v in value.items())
 
 
 def configured_tool_names(spec: McpServerSpec) -> list[str]:
@@ -205,7 +306,218 @@ def provider_mcp_tool_name(server_name: str, tool_name: str, *, sdk_name: str) -
     """Return the provider-specific MCP tool name format."""
     if sdk_name == "claude-agent-sdk":
         return f"mcp__{server_name}__{tool_name}"
+    if sdk_name == "pi":
+        return pi_mcp_tool_name(server_name, tool_name)
     return f"mcp.{server_name}.{tool_name}"
+
+
+def pi_mcp_tool_name(server_name: str, tool_name: str) -> str:
+    """Return the name pi gives an MCP tool: ``mcp__<server>__<tool>``.
+
+    Same rule as pi's ``createMcpToolName``: every character other than letters,
+    digits and ``_`` becomes ``_``; a name longer than 64 characters is cut and
+    gets ``_`` + the first 8 hex digits of ``sha256("<server>\0<tool>")``. Pi
+    also adds that suffix when two tools of the server get the same name after
+    sanitizing: use :func:`pi_mcp_tool_names` with the tool list of the server
+    for that case.
+    """
+    name = _pi_plain_tool_name(server_name, tool_name)
+    if len(name) <= PI_MAX_TOOL_NAME_LENGTH:
+        return name
+    return _pi_hashed_tool_name(server_name, tool_name)
+
+
+def pi_mcp_tool_names(server_name: str, tool_names: Iterable[str]) -> dict[str, str]:
+    """Return the pi name of each tool of one server (keys: MCP tool names).
+
+    Same as pi's MCP extension: when two or more tools of the server get the
+    same name after sanitizing (for example ``get-doc`` and ``get_doc``), all
+    of them get the hash suffix, whatever their order. ``tool_names`` must be
+    the complete tool list of the server for the result to match pi. As in
+    pi, the names compared are the names after shortening (a long name with
+    its hash suffix). Not reproduced: a collision with a tool of another
+    server (``mcp__a__b__c`` from server ``a`` and from server ``a__b``),
+    where pi's result depends on which server connects first; see
+    :func:`pi_possible_tool_name_collisions`.
+    """
+    unique = list(dict.fromkeys(tool_names))
+    plain = {tool: pi_mcp_tool_name(server_name, tool) for tool in unique}
+    counts = Counter(plain.values())
+    return {
+        tool: pi_mcp_tool_name(server_name, tool)
+        if counts[plain[tool]] == 1
+        else _pi_hashed_tool_name(server_name, tool)
+        for tool in unique
+    }
+
+
+def _pi_plain_tool_name(server_name: str, tool_name: str) -> str:
+    """Return ``mcp__<server>__<tool>`` with every unsafe character replaced by ``_``, as pi does.
+
+    Pi works with JavaScript strings (UTF-16): its regular expression replaces
+    each UTF-16 code unit, so a character outside the Basic Multilingual Plane
+    (for example an emoji) becomes two ``_``, and the length that pi limits is
+    the number of UTF-16 code units.
+    """
+    return "".join(
+        char if char in _PI_TOOL_NAME_SAFE_CHARS else ("__" if ord(char) > 0xFFFF else "_")
+        for char in f"mcp__{server_name}__{tool_name}"
+    )
+
+
+def _pi_hashed_tool_name(server_name: str, tool_name: str) -> str:
+    name = _pi_plain_tool_name(server_name, tool_name)
+    # Node encodes a lone surrogate of a JavaScript string as U+FFFD.
+    text = f"{server_name}\0{tool_name}".encode("utf-16", "surrogatepass").decode("utf-16", "replace")
+    digest = hashlib.sha256(text.encode()).hexdigest()[:8]
+    return f"{name[: PI_MAX_TOOL_NAME_LENGTH - len(digest) - 1]}_{digest}"
+
+
+def pi_registered_tool_names(
+    servers: Sequence[tuple[str, Iterable[str]]],
+) -> dict[tuple[str, str], str]:
+    """Return the name that pi gives each ``(server, tool)`` when the servers connect in the order of ``servers``.
+
+    This is the registration loop of pi's MCP extension (1.4.0 and 1.5.0) with
+    the one name map that all servers share: a tool takes the plain name
+    ``mcp__<server>__<tool>`` unless it is longer than 64 characters, unless
+    another tool of the same server has that name after shortening, or unless a
+    tool of another server (or an earlier tool of this server) already has it.
+    Then the tool gets the hash suffix. Pi does not check the name with the suffix
+    again: it can be the name of another tool (that is rare, but it happens, for
+    example for a tool called ``c_01b8a75b``).
+    """
+    owners: dict[str, tuple[str, str]] = {}
+    names: dict[tuple[str, str], str] = {}
+    for server, tools in servers:
+        unique = list(dict.fromkeys(tools))
+        plain = Counter(pi_mcp_tool_name(server, tool) for tool in unique)
+        current: set[str] = set()
+        for tool in unique:
+            owner = (server, tool)
+            sanitized = _pi_plain_tool_name(server, tool)
+            taken = (sanitized in owners and owners[sanitized] != owner) or sanitized in current or plain[sanitized] > 1
+            name = (
+                sanitized
+                if len(sanitized) <= PI_MAX_TOOL_NAME_LENGTH and not taken
+                else _pi_hashed_tool_name(server, tool)
+            )
+            owners[name] = owner
+            current.add(name)
+            names[owner] = name
+    return names
+
+
+#: Most servers of one group (servers that can take the same tool name) for which every connection order is tried.
+_PI_MAX_SERVERS_FOR_ALL_ORDERS = 6
+
+
+class PiToolNameOrderError(ValueError):
+    """Too many servers can take the same tool names for every connection order to be checked."""
+
+
+def _pi_possible_names(server: str, tools: Iterable[str]) -> set[str]:
+    """Return every name that a tool of ``server`` can get in pi: the plain name or the one with a hash suffix.
+
+    Pi uses the plain name only when it has at most 64 characters (``createMcpToolName`` in ``naming.js``, pi 1.5.0 and
+    1.5.1); a longer one is always cut and given a hash suffix, so it can never be a name of a tool.
+    """
+    names: set[str] = set()
+    for tool in tools:
+        plain = _pi_plain_tool_name(server, tool)
+        if len(plain) <= PI_MAX_TOOL_NAME_LENGTH:
+            names.add(plain)
+        names.add(_pi_hashed_tool_name(server, tool))
+    return names
+
+
+def _pi_server_groups(catalog: Mapping[str, list[str]]) -> list[list[str]]:
+    """Group the servers so that two servers are in one group when a name can be the name of a tool of both.
+
+    A tool takes a name away from another tool only when the two can get the same name, so the connection order of
+    servers in different groups does not change any name: each group is checked alone.
+    """
+    names = {server: _pi_possible_names(server, tools) for server, tools in catalog.items()}
+    groups: list[tuple[list[str], set[str]]] = []
+    for server in catalog:
+        merged = ([server], set(names[server]))
+        rest = []
+        for members, taken in groups:
+            if taken & merged[1]:
+                merged = ([*members, *merged[0]], taken | merged[1])
+            else:
+                rest.append((members, taken))
+        groups = [*rest, merged]
+    return [members for members, _ in groups]
+
+
+def pi_possible_tool_name_collisions(tools_by_server: Mapping[str, Iterable[str]]) -> dict[str, list[tuple[str, str]]]:
+    """Return the tool names that depend on the connection order of the servers, with the ``(server, tool)`` pairs.
+
+    Pi registers the tools of each server when it connects. A tool whose name
+    is taken by a tool of another server gets a hash suffix, so which tool keeps
+    the plain name depends on which server connects first, and the runner
+    cannot know that order. The names are computed with :func:`pi_registered_tool_names`
+    for every order. A name is listed when, in some order, a tool does not get the name
+    that it has alone with its server (``pi_mcp_tool_names``), or when two tools get
+    the same name. The names that a hash suffix makes are included: a suffix is not
+    checked again by pi.
+
+    Servers are grouped: servers that cannot get a common name (plain or with a hash suffix) cannot
+    change each other's names, so each group is checked alone, with all its orders. When a group has more than 6
+    servers, not all the orders can be tried and no approximation is made: :class:`PiToolNameOrderError`
+    is raised (the result would not be reliable).
+
+    ``tools_by_server`` has the tools that are known for each server. For a
+    server with a ``tool_names`` allow-list, the list is not the whole catalog:
+    a tool that the list hides is also registered, can take a hash suffix, and
+    so can remove a collision (or make another one). The result is the
+    collisions that are possible from the tools that are known.
+    """
+    catalog = {server: list(dict.fromkeys(tools)) for server, tools in tools_by_server.items()}
+    alone = {
+        (server, tool): name
+        for server, tools in catalog.items()
+        for tool, name in pi_mcp_tool_names(server, tools).items()
+    }
+    position = {pair: index for index, pair in enumerate(alone)}
+    claims: dict[str, set[tuple[str, str]]] = {}
+    for group in _pi_server_groups(catalog):
+        if len(group) > _PI_MAX_SERVERS_FOR_ALL_ORDERS:
+            raise PiToolNameOrderError(
+                f"{len(group)} MCP servers can take the same pi tool names (the limit is "
+                f"{_PI_MAX_SERVERS_FOR_ALL_ORDERS}): the names that pi gives them depend on the order in which they "
+                "connect, and not all the orders can be checked. Rename servers so that fewer of them share tool names."
+            )
+        for order in itertools.permutations(group):
+            names = pi_registered_tool_names([(server, catalog[server]) for server in order])
+            by_name: dict[str, list[tuple[str, str]]] = {}
+            for pair, name in names.items():
+                by_name.setdefault(name, []).append(pair)
+            for name, pairs in by_name.items():
+                if len(pairs) > 1:  # Two tools with one name.
+                    claims.setdefault(name, set()).update(pairs)
+            for pair, name in names.items():
+                if name != alone[pair]:  # This tool lost its name to another one.
+                    claim = claims.setdefault(alone[pair], set())
+                    claim.add(pair)
+                    claim.update(other for other, other_name in names.items() if other_name == alone[pair])
+    return {
+        name: sorted(pairs, key=lambda pair: position[pair]) for name, pairs in sorted(claims.items()) if len(pairs) > 1
+    }
+
+
+def pi_literal(value: str) -> str:
+    """Escape a value so that pi config resolution keeps it literal.
+
+    Pi treats a leading ``!`` as a shell command and ``$NAME`` / ``${NAME}`` as
+    environment interpolation in ``models.json`` and ``mcp.json`` values. In
+    those values, ``$$`` gives a literal ``$`` and ``$!`` a literal ``!``.
+    """
+    escaped = str(value).replace("$", "$$")
+    if escaped.startswith("!"):
+        escaped = "$!" + escaped[1:]
+    return escaped
 
 
 @dataclass(frozen=True)
@@ -217,21 +529,29 @@ class McpToolMetadata:
 
 
 async def _mcp_tool_metadata_catalog(
-    servers: list[McpServerSpec], trace_headers: Mapping[str, str]
+    servers: list[McpServerSpec],
+    trace_headers: Mapping[str, str],
+    notes: list[str] | None = None,
+    cwd: str | Path | None = None,
 ) -> dict[tuple[str, str], McpToolMetadata]:
     """Return actual MCP tool metadata keyed by (server_name, tool_name).
 
     Metadata is fetched through the standard MCP tools/list protocol. Failures are
     logged at debug level and represented by missing catalog entries.
+
+    The stderr of a stdio server never goes to the terminal. When a probe fails, the last
+    :data:`MCP_PROBE_STDERR_TAIL_BYTES` bytes of that stderr are added to ``notes`` (for the private report of a failed
+    run); otherwise they are dropped.
+
+    ``cwd`` is the directory where stdio servers start (the workspace of the run, like pi does): a relative command or
+    a relative ``PATH`` entry is found from there. Default: the directory of this process.
     """
+    ensure_mcp_log_guard()
     if not servers:
         return {}
 
     server_catalogs = await asyncio.gather(
-        *[
-            _mcp_server_tool_metadata(server, trace_headers, configured_tool_names=set(configured_tool_names(server)))
-            for server in servers
-        ]
+        *[_mcp_server_tool_metadata(server, trace_headers, notes, cwd) for server in servers]
     )
     catalog: dict[tuple[str, str], McpToolMetadata] = {}
     for server_catalog in server_catalogs:
@@ -239,32 +559,119 @@ async def _mcp_tool_metadata_catalog(
     return catalog
 
 
+#: How much of the stderr of a stdio MCP server is kept when its metadata probe fails (the same size as the pi tail).
+MCP_PROBE_STDERR_TAIL_BYTES = 16 * 1024
+
+
 async def _mcp_server_tool_metadata(
-    server: McpServerSpec, trace_headers: Mapping[str, str], *, configured_tool_names: set[str]
+    server: McpServerSpec,
+    trace_headers: Mapping[str, str],
+    notes: list[str] | None = None,
+    cwd: str | Path | None = None,
 ) -> dict[tuple[str, str], McpToolMetadata]:
-    """Fetch tool metadata from a single MCP server."""
+    """Fetch the metadata of every tool of a single MCP server.
+
+    All tools are kept, also the tools that ``tool_names`` does not list: pi
+    names a tool from the complete tool list of the server (collision
+    suffixes, see :func:`pi_mcp_tool_names`). The tool definitions use only
+    the configured tools.
+    """
+    # A pipe that a thread empties into a ring buffer takes the stderr of a stdio server: the SDK default is the
+    # terminal, where a credential that the server prints would go to the CI log, and a file would grow with a noisy
+    # server. Only the last ``MCP_PROBE_STDERR_TAIL_BYTES`` bytes are ever stored.
+    stderr_tail = _StderrTail(MCP_PROBE_STDERR_TAIL_BYTES) if server.type == "stdio" else None
+    errlog = stderr_tail.errlog if stderr_tail is not None else None
     try:
         tools = await asyncio.wait_for(
-            _list_mcp_tools(server, trace_headers), timeout=MCP_TOOL_METADATA_TIMEOUT_SECONDS
+            _list_mcp_tools(
+                server,
+                trace_headers,
+                all_pages=True,
+                errlog=errlog,
+                cwd=cwd,
+            ),
+            timeout=MCP_TOOL_METADATA_TIMEOUT_SECONDS,
         )
-    except Exception:
-        logger.debug("Unable to fetch MCP tool metadata for server %s", server.name, exc_info=True)
+    except Exception as error:
+        # Fixed text: the message of the error (the validation error of the MCP SDK holds the whole tool object
+        # that the server sent) and its traceback are not logged.
+        logger.debug("Unable to fetch MCP tool metadata for server %s (%s)", server.name, exception_summary(error))
+        if notes is not None and stderr_tail is not None:
+            tail = stderr_tail.finish()
+            if tail:
+                notes.append(f"stderr of MCP server {server.name!r} during the metadata probe (last bytes):\n{tail}")
         return {}
+    finally:
+        if stderr_tail is not None:
+            stderr_tail.finish()
 
     catalog: dict[tuple[str, str], McpToolMetadata] = {}
     for mcp_tool in tools:
         tool_name = _mcp_tool_field(mcp_tool, "name")
         if not isinstance(tool_name, str):
             continue
-        # If configured_tool_names is empty, it means all tools are allowed
-        if configured_tool_names and tool_name not in configured_tool_names:
-            continue
         catalog[(server.name, tool_name)] = _mcp_tool_metadata(mcp_tool)
     return catalog
 
 
-async def _list_mcp_tools(server: McpServerSpec, trace_headers: Mapping[str, str]) -> list[Any]:
-    """List tools from an MCP server using the standard protocol."""
+class _StderrTail:
+    """A pipe for the stderr of a child process that keeps only the last ``limit`` bytes.
+
+    ``errlog`` is the write end (a text file object with a file descriptor, what ``stdio_client`` takes). A thread
+    empties the read end for as long as a process holds the write end, so the child never blocks on a full pipe,
+    and nothing but the ring buffer grows: no memory or disk use in proportion to the output.
+    """
+
+    def __init__(self, limit: int) -> None:
+        read_fd, write_fd = os.pipe()
+        self._buffer = _BoundedByteBuffer(limit)
+        self._lock = threading.Lock()
+        self.errlog: TextIO = os.fdopen(write_fd, "w", encoding="utf-8", errors="replace")
+        self._thread = threading.Thread(target=self._drain, args=(read_fd,), name="mcp-probe-stderr", daemon=True)
+        self._thread.start()
+
+    def _drain(self, read_fd: int) -> None:
+        try:
+            while chunk := os.read(read_fd, 65536):
+                with self._lock:
+                    self._buffer.append(chunk)
+        except OSError:
+            pass
+        finally:
+            with contextlib.suppress(OSError):
+                os.close(read_fd)
+
+    def finish(self) -> str:
+        """Close our copy of the write end, wait a moment for the end of the output, and return the tail as text.
+
+        If a grandchild still holds the pipe, the thread stays (it is a daemon thread and ends with that process);
+        what was read is returned.
+        """
+        with contextlib.suppress(OSError, ValueError):
+            self.errlog.close()
+        self._thread.join(timeout=1.0)
+        with self._lock:
+            return self._buffer.text().strip()
+
+
+async def _list_mcp_tools(
+    server: McpServerSpec,
+    trace_headers: Mapping[str, str],
+    *,
+    all_pages: bool = False,
+    errlog: TextIO | None = None,
+    cwd: str | Path | None = None,
+) -> list[Any]:
+    """List tools from an MCP server using the standard protocol.
+
+    With ``all_pages``, every ``tools/list`` page is read (the tool metadata
+    needs the complete list). Without it, only the first page (enough for a
+    health probe, which must stay fast).
+
+    ``errlog``: where the stderr of a stdio server goes (a file with a file descriptor); the default of the
+    SDK is the terminal. ``cwd``: the directory where a stdio server starts.
+    """
+    ensure_mcp_log_guard()  # (Before the transport and the session: the SDK logs what the server sends.)
     if server.type == "http":
         async with (
             streamablehttp_client(server._require_url(), headers=server.merged_headers(trace_headers)) as (
@@ -275,18 +682,57 @@ async def _list_mcp_tools(server: McpServerSpec, trace_headers: Mapping[str, str
             ClientSession(read_stream, write_stream) as session,
         ):
             await session.initialize()
-            return list((await session.list_tools()).tools)
+            return await _list_all_tools(session) if all_pages else list((await session.list_tools()).tools)
     if server.type == "stdio":
         stdio_server = StdioServerParameters(
-            command=server._require_command(), args=list(server.args), env=dict(server.env) or None
+            command=server._require_command(), args=list(server.args), env=dict(server.env) or None, cwd=cwd
         )
         async with (
-            stdio_client(stdio_server) as (read_stream, write_stream),
+            stdio_client(stdio_server, errlog=errlog) if errlog is not None else stdio_client(stdio_server) as (
+                read_stream,
+                write_stream,
+            ),
             ClientSession(read_stream, write_stream) as session,
         ):
             await session.initialize()
-            return list((await session.list_tools()).tools)
-    raise ValueError(f"MCP server {server.name!r} has unsupported type {server.type!r}")
+            return await _list_all_tools(session) if all_pages else list((await session.list_tools()).tools)
+    raise ValueError(f"MCP server {server.name!r} has unsupported type (expected 'stdio' or 'http')")
+
+
+#: Most ``tools/list`` pages read from one server (a bad server cannot loop).
+MCP_TOOL_LIST_MAX_PAGES = 50
+
+
+class McpToolListIncompleteError(RuntimeError):
+    """The ``tools/list`` of a server cannot be read to its end (too many pages, or a repeated cursor)."""
+
+
+async def _list_all_tools(session: ClientSession) -> list[Any]:
+    """Return the tools of every ``tools/list`` page (follows ``nextCursor``).
+
+    The complete list is necessary: pi names tools from all the tools of the
+    server. It never returns a partial list: it raises :class:`McpToolListIncompleteError` when
+    :data:`MCP_TOOL_LIST_MAX_PAGES` pages leave a next cursor, or when a cursor repeats. The caller's timeout
+    also bounds this.
+    """
+    tools: list[Any] = []
+    cursor: str | None = None
+    seen: set[str] = set()
+    for _ in range(MCP_TOOL_LIST_MAX_PAGES):
+        result = await session.list_tools(cursor=cursor) if cursor is not None else await session.list_tools()
+        tools.extend(result.tools)
+        cursor = getattr(result, "nextCursor", None)
+        if not cursor:
+            return tools
+        if cursor in seen:
+            # A server that repeats a cursor never ends its list: what was read is not the whole list.
+            raise McpToolListIncompleteError("the MCP server repeated a tools/list cursor; the tool list is incomplete")
+        seen.add(cursor)
+    # A partial list would give wrong tool names (pi names a tool from the whole list) and a catalog without the later
+    # tools: the listing fails, like any other failure of the probe.
+    raise McpToolListIncompleteError(
+        f"the MCP server sent more than {MCP_TOOL_LIST_MAX_PAGES} tools/list pages; the tool list is incomplete"
+    )
 
 
 def _mcp_tool_metadata(tool: Any) -> McpToolMetadata:
@@ -357,6 +803,7 @@ class ManagedMcpServer:
         }
 
     async def __aenter__(self) -> ManagedMcpServer:
+        ensure_mcp_log_guard()
         if not self.spec.is_managed:
             # Not an http server, or no auto-start command configured
             return self

@@ -1,0 +1,60 @@
+{
+ "_comment": "Answers of pi to the requests of the tests. Record again: see tests/conftest.py (pi_reference).",
+ "cases": {
+  "{\"action\":\"home_paths\",\"entries\":[\"~\",\"~/\",\"~//\",\"~/extra\",\"~//extra\",\"~///a//b\",\"~/./extra\",\"~/a/../extra\",\"~/../extra\",\"~/a/./b/\",\"~/a//\",\"~x\",\"~x/skills\",\"~user/skills\",\"/abs/path\",\"rel/path\",\"./rel\",\"../up\",\"~.\",\"~~\",\" ~/extra\",\"~ /extra\"],\"home\":\"/home/review\"}": {
+   "1.4.0": [
+    "/home/review",
+    "/home/review",
+    "/home/review/",
+    "/home/review/extra",
+    "/home/review/extra",
+    "/home/review/a/b",
+    "/home/review/extra",
+    "/home/review/extra",
+    "/home/extra",
+    "/home/review/a/b/",
+    "/home/review/a/",
+    "~x",
+    "~x/skills",
+    "~user/skills",
+    "/abs/path",
+    "rel/path",
+    "./rel",
+    "../up",
+    "~.",
+    "~~",
+    " ~/extra",
+    "~ /extra"
+   ],
+   "1.5.0": [
+    "/home/review",
+    "/home/review",
+    "/home/review/",
+    "/home/review/extra",
+    "/home/review/extra",
+    "/home/review/a/b",
+    "/home/review/extra",
+    "/home/review/extra",
+    "/home/extra",
+    "/home/review/a/b/",
+    "/home/review/a/",
+    "~x",
+    "~x/skills",
+    "~user/skills",
+    "/abs/path",
+    "rel/path",
+    "./rel",
+    "../up",
+    "~.",
+    "~~",
+    " ~/extra",
+    "~ /extra"
+   ]
+  }
+ },
+ "node": "v26.13.0",
+ "pi_versions": [
+  "1.4.0",
+  "1.5.0"
+ ]
+}

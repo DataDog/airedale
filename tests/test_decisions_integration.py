@@ -269,6 +269,7 @@ async def test_config_loader_selection_and_metadata(tmp_path, monkeypatch, extra
         assert kwargs["config"]["judge_model"] == config.judge_model
         assert kwargs["tags"] == {
             "scenario": "basic",
+            "harness": "native",
             "prompt_version": "basic",
             "model_name": "openai/gpt-4.1",
             "task_slug": "one",
