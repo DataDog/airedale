@@ -56,9 +56,8 @@ def _run_credentials_helper(command: str) -> str:
     last_error: subprocess.CalledProcessError | None = None
     for attempt in range(1, _CREDENTIALS_HELPER_MAX_ATTEMPTS + 1):
         try:
-            logger.debug(
-                f"Running credentials helper (attempt {attempt}/{_CREDENTIALS_HELPER_MAX_ATTEMPTS}): {command}"
-            )
+            # (The command is never logged or put in an error: it can hold an inline secret.)
+            logger.debug("Running credentials helper (attempt %d/%d)", attempt, _CREDENTIALS_HELPER_MAX_ATTEMPTS)
             result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=30, check=True)
             output = result.stdout.strip()
 
@@ -86,35 +85,35 @@ def _run_credentials_helper(command: str) -> str:
 
             return token
 
-        except subprocess.TimeoutExpired as e:
-            raise RuntimeError(f"Credentials helper timed out: {command}") from e
+        except subprocess.TimeoutExpired:
+            # (``from None``: the message of the timeout error holds the command.)
+            raise RuntimeError("Credentials helper timed out") from None
         except subprocess.CalledProcessError as e:
             # Non-zero exit: retry a bounded number of times before giving up.
             last_error = e
             # (The stderr of the helper is never logged or put in an error: it can hold a credential.)
             if attempt < _CREDENTIALS_HELPER_MAX_ATTEMPTS:
                 logger.warning(
-                    "Credentials helper failed (exit %s, attempt %d/%d): %s. Retrying...",
+                    "Credentials helper failed (exit %s, attempt %d/%d). Retrying...",
                     e.returncode,
                     attempt,
                     _CREDENTIALS_HELPER_MAX_ATTEMPTS,
-                    command,
                 )
                 time.sleep(_CREDENTIALS_HELPER_RETRY_DELAY_SECONDS * attempt)
                 continue
             break
         except _HelperOutputError as e:
-            raise RuntimeError(f"Failed to run credentials helper: {command}\nError: {e}") from e
+            raise RuntimeError(f"Failed to run credentials helper\nError: {e}") from e
         except Exception as e:
             # (Not the message of the error: it can hold data of the helper.)
-            raise RuntimeError(f"Failed to run credentials helper: {command}\nError: {exception_summary(e)}") from e
+            raise RuntimeError(f"Failed to run credentials helper\nError: {exception_summary(e)}") from None
 
     # Exhausted all attempts on non-zero exit.
     assert last_error is not None
     raise RuntimeError(
         f"Credentials helper failed after {_CREDENTIALS_HELPER_MAX_ATTEMPTS} attempts "
-        f"(exit {last_error.returncode}): {command}. Run the command yourself to see its error output."
-    ) from last_error
+        f"(exit {last_error.returncode}). Run the command yourself to see its error output."
+    ) from None
 
 
 def resolve_provider_config(provider: str, gateway_config: GatewayConfig | None = None) -> ResolvedGatewayConfig:

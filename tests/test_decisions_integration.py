@@ -275,3 +275,42 @@ async def test_config_loader_selection_and_metadata(tmp_path, monkeypatch, extra
             "task_slug": "one",
             "judge_model": config.judge_model,
         }
+
+
+@pytest.mark.parametrize("failure", ["exit", "timeout"])
+async def test_failing_helper_with_inline_secret_is_not_logged_or_raised(monkeypatch, mocker, caplog, failure):
+    import logging
+    import subprocess
+    import traceback
+
+    from airedale import gateway as gateway_module
+
+    secret = "sk-INLINE-HELPER-SECRET-0123456789"
+    command = f"print-token --api-key {secret}"
+    mocker.patch("airedale.gateway.time.sleep")
+    gateway_module._credential_cache.clear()
+    error: Exception = (
+        subprocess.TimeoutExpired(command, 30)
+        if failure == "timeout"
+        else subprocess.CalledProcessError(7, command, stderr=f"denied for {secret}")
+    )
+    mocker.patch("airedale.gateway.subprocess.run", side_effect=error)
+    gateway = GatewayConfig(
+        providers={
+            "openai": ProviderGatewayConfig(
+                provider="openai", base_url="https://gateway.example/v1", credentials_helper=command
+            )
+        }
+    )
+    evaluator = DecisionsRubricEvaluator(gateway=gateway)
+    # Through the evaluator, the failure shows up as the generic provider error.
+    with caplog.at_level(logging.DEBUG), pytest.raises(RuntimeError) as through_evaluator:
+        await evaluator.evaluate(context())
+    # Direct resolution gives the error of the helper itself.
+    with caplog.at_level(logging.DEBUG), pytest.raises(RuntimeError) as direct:
+        gateway_module.resolve_provider_config("openai", gateway)
+    for raised in (through_evaluator.value, direct.value):
+        assert secret not in "".join(traceback.format_exception(raised))
+    assert secret not in caplog.text
+    assert command not in caplog.text
+    gateway_module._credential_cache.clear()

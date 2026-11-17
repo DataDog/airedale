@@ -133,6 +133,22 @@ class TestResolveCredentialsHelper:
         assert "Failed to get credentials for anthropic (RuntimeError" in caplog.text
         assert all(record.exc_info is None for record in caplog.records)
 
+    def test_command_of_the_helper_is_not_logged_or_raised(self, mocker, clear_credential_cache, caplog):
+        import logging
+        import subprocess
+        import traceback
+
+        secret = "sk-INLINE-COMMAND-SECRET-0123456789"
+        command = f"helper --api-key {secret}"
+        mocker.patch("airedale.gateway.time.sleep")
+        for error in (subprocess.CalledProcessError(7, command), subprocess.TimeoutExpired(command, 30)):
+            mocker.patch("airedale.gateway.subprocess.run", side_effect=error)
+            with caplog.at_level(logging.DEBUG), pytest.raises(RuntimeError) as raised:
+                _run_credentials_helper(command)
+            assert secret not in "".join(traceback.format_exception(raised.value))
+        assert secret not in caplog.text
+        assert "Running credentials helper (attempt 1/" in caplog.text
+
     def test_other_errors_of_the_helper_are_summarized_not_quoted(self, mocker, clear_credential_cache):
         secret = "sk-OSERROR-SECRET-0123456789"
         mocker.patch("airedale.gateway.subprocess.run", side_effect=OSError(f"cannot run {secret}"))
