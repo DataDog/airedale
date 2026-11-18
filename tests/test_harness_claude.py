@@ -258,7 +258,6 @@ def _records_text(caplog) -> str:
     return "\n".join(f"{record.name}: {record.getMessage()}|{record.exc_text}" for record in caplog.records)
 
 
-@pytest.mark.skipif(os.name == "nt", reason="the private report is not written on Windows")
 @pytest.mark.parametrize("path", [1, 2], ids=["exception-in-the-stream", "error-result-message"])
 def test_a_failed_claude_run_has_no_raw_text_in_the_logs_and_a_private_report(
     tmp_path, monkeypatch, caplog, capfd, path
@@ -273,11 +272,19 @@ def test_a_failed_claude_run_has_no_raw_text_in_the_logs_and_a_private_report(
     assert all(record.exc_info is None for record in caplog.records if record.name.startswith("airedale"))
     [failure] = [r for r in caplog.records if r.getMessage().startswith("Claude Agent SDK eval run failed (")]
     assert failure.levelno == logging.ERROR
-    [report] = list((tmp_path / "reports").glob("claude-run-*.log"))
-    assert str(report) in failure.getMessage()
-    assert stat.S_IMODE(report.stat().st_mode) == 0o600
-    contents = report.read_text()
-    assert STDERR_MARKER in contents and RESULT_MARKER in contents  # O2: the private report has them.
+    reports = list((tmp_path / "reports").glob("claude-run-*.log"))
+    if os.name == "nt":  # Windows writes no private report: the line says so, and a fixed warning is logged.
+        assert reports == []
+        assert "no private file was written" in failure.getMessage()
+        assert any(
+            r.getMessage() == "Unable to write the private report of the failed Claude run" for r in caplog.records
+        )
+    else:
+        [report] = reports
+        assert str(report) in failure.getMessage()
+        assert stat.S_IMODE(report.stat().st_mode) == 0o600
+        contents = report.read_text()
+        assert STDERR_MARKER in contents and RESULT_MARKER in contents  # O2: the private report has them.
     # O5: the raised error is not changed (accepted). O6: the progress and the console output (accepted).
     assert (READER_MARKER if path == 1 else RESULT_MARKER) in str(error)
     assert RESULT_MARKER in captured.out + captured.err
