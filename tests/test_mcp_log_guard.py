@@ -1015,13 +1015,23 @@ def test_a_cached_app_answer_read_before_a_collection_is_not_used_after_it(app_l
     try:
         thread.start()
         assert paused.wait(30)
-        origins.classify("app", "/nonexistent-build-dir/another-path-that-makes-a-collection.py")  # 4. A collection.
-        assert os.path.normcase(path) in origins._filenames  # The new snapshot has the SDK file.
+        competing = origins.classify("app", "/nonexistent-build-dir/another-path-that-makes-a-collection.py")  # 4.
+        if safe_log._gil_disabled():
+            # Without a GIL the worker checks its answer under the lock (it holds it at the pause): the competing
+            # classification does not wait, does not collect, and answers ``unknown``.
+            assert competing == "unknown"
+        else:
+            # With a GIL the worker has no lock: the competing classification collects, and the new snapshot has the
+            # SDK file before the worker goes on.
+            assert os.path.normcase(path) in origins._filenames
     finally:
         release.set()
         thread.join(30)
         logging.setLogRecordFactory(previous)
     assert not thread.is_alive() and not errors
+    if safe_log._gil_disabled():  # (The worker released the lock: the refresh is made by the next classification.)
+        origins.classify("app", "/nonexistent-build-dir/another-path-that-makes-a-collection.py")
+        assert os.path.normcase(path) in origins._filenames
     assert RACE_MARKER not in _messages(handled)
     assert len(handled) == 2  # (The app seed, and the hidden SDK record.)
 
