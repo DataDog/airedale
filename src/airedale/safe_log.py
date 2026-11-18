@@ -12,6 +12,7 @@ code, never ``exc_info`` and never ``str(exception)``.
 
 from __future__ import annotations
 
+import contextlib
 import importlib
 import inspect
 import logging
@@ -76,6 +77,72 @@ def _is_ambiguous(filename: str) -> bool:
     return not filename or (filename.startswith("<") and filename.endswith(">"))
 
 
+class _McpImportWatcher:
+    """A finder at the start of ``sys.meta_path`` that notes the name of every import of an ``mcp`` module.
+
+    It never finds anything (``find_spec`` returns ``None``): it only tells :class:`_McpOrigins` that an ``mcp`` import has
+    started. The importer calls it **before** the new module is put in ``sys.modules``, so the module itself is not
+    visible yet: :class:`_McpOrigins` keeps the name until the import is over (see ``_refresh``).
+    """
+
+    def __init__(self) -> None:
+        self.names: set[str] = set()  # (``add`` and ``pop`` of a ``set`` are atomic.)
+
+    def find_spec(self, fullname: str, path: Any = None, target: Any = None) -> None:
+        if _is_mcp_name(fullname):
+            self.names.add(fullname)
+
+    def drain(self) -> list[str]:
+        names = []
+        while True:
+            try:
+                names.append(self.names.pop())
+            except KeyError:
+                return names
+
+
+_import_watcher = _McpImportWatcher()
+
+
+def _install_import_watcher() -> None:
+    """Put the watcher first in ``sys.meta_path`` (again, when another hook was put before it)."""
+    finders = sys.meta_path
+    if finders and finders[0] is _import_watcher:
+        return
+    with contextlib.suppress(ValueError):
+        finders.remove(_import_watcher)
+    finders.insert(0, _import_watcher)
+
+
+def _mcp_snapshot() -> dict[str, tuple[Any, bool]]:
+    """Return ``{name: (module, initializing)}`` for every ``mcp`` / ``mcp.*`` entry of ``sys.modules``.
+
+    ``initializing`` is the ``_initializing`` flag of the spec: CPython sets it while the module runs its code.
+    """
+    snapshot = {}
+    for name, module in list(sys.modules.items()):
+        if _is_mcp_name(name):
+            snapshot[name] = (module, bool(getattr(getattr(module, "__spec__", None), "_initializing", False)))
+    return snapshot
+
+
+def _same_snapshot(first: dict[str, tuple[Any, bool]], second: dict[str, tuple[Any, bool]]) -> bool:
+    return first.keys() == second.keys() and all(
+        first[name][0] is second[name][0] and first[name][1] == second[name][1] for name in first
+    )
+
+
+def _importing_mcp_names() -> set[str] | None:
+    """Return the ``mcp`` names whose import is running now (a module lock exists), or ``None`` when that is not known."""
+    locks = getattr(sys.modules.get("importlib._bootstrap"), "_module_locks", None)
+    if locks is None:
+        return None
+    try:
+        return {name for name in list(locks) if _is_mcp_name(name)}
+    except Exception:  # noqa: BLE001
+        return None
+
+
 class _McpOrigins:
     """Tell whether a log record was made by code of the installed ``mcp`` package.
 
@@ -84,57 +151,119 @@ class _McpOrigins:
     path where the code was built. So the origins are collected from the loaded ``mcp`` modules themselves: the
     directories of their ``__file__`` and spec origin, and the ``co_filename`` of the functions that they **define**
     (not the ones that they import: a function belongs to a module when its ``__globals__`` is the dictionary of that
-    module, after :func:`inspect.unwrap`). They are collected again when a file name is not known.
+    module, after :func:`inspect.unwrap`).
 
     A file name is not always enough. ``<string>`` is the name of any code made by ``exec`` or ``compile``, and the SDK
     has such code too (the methods that ``dataclasses`` writes), so a record from ``<string>`` can come from the
     application or from the SDK. :meth:`classify` gives ``_UNKNOWN`` for these names, and the caller decides with other
     evidence (see :func:`_frame_origin`).
+
+    **When the origins are collected again.** The collection is not a count of modules: it is a snapshot of the identity
+    and the import state of every ``mcp`` module (:func:`_mcp_snapshot`), and it is made again when the snapshot is
+    not the same as the one of the last collection.
+
+    * A module that is still importing (``_initializing``) has not defined all its functions. While one is, the
+      collection is **not complete**: a path that is not known is ``_UNKNOWN``, and that answer is never cached.
+    * A cached answer "not the SDK" (``_APP``) is valid for the snapshot that it was made with. A full snapshot costs
+      about 200 µs (4,000 loaded modules), about 100 times a logging call, so it is made only when a cheap trigger says
+      that something can have changed: an ``mcp`` import has started (:class:`_McpImportWatcher`, which sees the
+      import of a name also when another module leaves ``sys.modules`` in the same step), ``len(sys.modules)``, a module
+      of the last snapshot that is not the same object in ``sys.modules`` any more, or an incomplete collection.
+    * The import watcher is called **before** the new module is in ``sys.modules``. A name that it noted stays
+      *unresolved* until the import is over (the module is in the snapshot, or its import lock is gone: it failed, or it
+      was not an import). It is not given up when a snapshot that is made before the module exists is the same as the
+      last one: the module can come after that, when another module leaves ``sys.modules`` and ``len`` is the same.
+
+    It never waits for an import and never imports, and it never waits for its own lock (another thread that holds it
+    while it reads a module attribute could wait for an import that this thread has started): the answer is then
+    ``_UNKNOWN``. Nothing is logged while the lock is held.
     """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._modules_seen = -1  # How many ``mcp`` modules were loaded when the origins were last collected.
+        self._owner: int | None = None
+        self._last: dict[str, tuple[Any, bool]] | None = None  # The snapshot of the last collection.
+        self._last_len = -1  # ``len(sys.modules)`` before that snapshot.
+        self._complete = False  # No module of that snapshot was importing.
+        self._unresolved: set[str] = set()  # Names of imports that started and are not over (see above).
         self._filenames: frozenset[str] = frozenset()
         self._prefixes: tuple[str, ...] = ()
-        self._answers: dict[str, bool] = {}
+        self._answers: dict[str, bool] = {}  # Normalized file name -> is the SDK. Valid for ``self._last``.
 
     def classify(self, logger_name: str, filename: str) -> str:
-        """Return ``_SDK`` or ``_APP`` for the file name, or ``_UNKNOWN`` when it is an ambiguous name of the SDK."""
+        """Return ``_SDK`` or ``_APP`` for the file name, or ``_UNKNOWN`` when it is not known (yet) who owns it."""
         if _is_mcp_name(logger_name):
             return _SDK
         key = os.path.normcase(filename)
-        if _is_ambiguous(key):
-            with self._lock:  # (Not cached: the same name can be the name of other code the next time.)
-                self._collect()
-                return _UNKNOWN if key in self._filenames else _APP
-        answer = self._answers.get(key)
-        if answer is None:
-            with self._lock:
-                self._collect()
-                answer = key in self._filenames or key.startswith(self._prefixes)
-                self._answers[key] = answer
-        return _SDK if answer else _APP
+        ambiguous = _is_ambiguous(key)
+        if not ambiguous:
+            answer = self._answers.get(key)
+            if answer is True:
+                return _SDK
+            if answer is False and not self._stale():
+                return _APP
+        return self._decide(key, ambiguous)
 
     def is_sdk(self, logger_name: str, filename: str) -> bool:
         return self.classify(logger_name, filename) == _SDK
 
-    def _collect(self) -> None:
-        count = sum(1 for name in list(sys.modules) if _is_mcp_name(name))
-        if count == self._modules_seen:
-            return  # Nothing new was loaded since the last time: the answer for a new file name is "not the SDK".
-        filenames: set[str] = set()
-        prefixes: set[str] = set()
-        for name, module in list(sys.modules.items()):
-            if not _is_mcp_name(name):
-                continue
-            try:
-                _collect_module(module, filenames, prefixes)
-            except Exception:  # noqa: BLE001 - a module with odd attributes must not break logging
-                continue
-        self._filenames, self._prefixes = frozenset(filenames), tuple(prefixes)
-        self._answers.clear()
-        self._modules_seen = count
+    def _stale(self) -> bool:
+        """Cheap triggers: tell whether the last collection can be out of date (it never makes a snapshot)."""
+        last = self._last
+        if last is None or not self._complete or _import_watcher.names or self._unresolved:
+            return True
+        if len(sys.modules) != self._last_len:
+            return True
+        modules = sys.modules
+        return any(modules.get(name) is not module for name, (module, _initializing) in last.items())
+
+    def _decide(self, key: str, ambiguous: bool) -> str:
+        me = threading.get_ident()
+        if self._owner == me or not self._lock.acquire(blocking=False):
+            return _UNKNOWN  # (A log record inside the collection, or another thread is collecting: do not wait.)
+        self._owner = me
+        try:
+            if self._stale():
+                self._refresh()
+            if ambiguous:
+                return _UNKNOWN if key in self._filenames or not self._complete else _APP
+            if key in self._filenames or key.startswith(self._prefixes):
+                self._answers[key] = True
+                return _SDK
+            if not self._complete:
+                return _UNKNOWN  # A module that is importing can define code in this file: not cached.
+            self._answers[key] = False
+            return _APP
+        finally:
+            self._owner = None
+            self._lock.release()
+
+    def _refresh(self) -> None:
+        """Collect again when the snapshot is not the one of the last collection, and settle the imports that are over."""
+        self._unresolved.update(_import_watcher.drain())  # (Before the snapshot: a later import is in the next drain.)
+        importing = (
+            _importing_mcp_names()
+        )  # (Before the snapshot: a module that is not in it, and whose import is over, has failed.)
+        length = len(
+            sys.modules
+        )  # (Before the snapshot: a module that comes in after it makes the length differ later.)
+        snapshot = _mcp_snapshot()
+        if self._last is None or not _same_snapshot(snapshot, self._last):
+            filenames: set[str] = set()
+            prefixes: set[str] = set()
+            for module, _initializing in snapshot.values():
+                try:
+                    _collect_module(module, filenames, prefixes)
+                except Exception:  # noqa: BLE001 - a module with odd attributes must not break logging
+                    continue
+            self._filenames, self._prefixes = frozenset(filenames), tuple(prefixes)
+            self._answers = {}
+            self._last = snapshot
+        self._last_len = length
+        self._complete = not any(initializing for _module, initializing in snapshot.values())
+        for name in list(self._unresolved):
+            if name in snapshot or importing is None or name not in importing:
+                self._unresolved.discard(name)
 
 
 def _collect_module(module: Any, filenames: set[str], prefixes: set[str]) -> None:
@@ -196,10 +325,7 @@ def _hidden_message(level: int, filename: str, lineno: int) -> str:
 # The origin of a record that has an ambiguous file name: the frame that ``Logger.findCaller`` picks
 # --------------------------------------------------------------------------- #
 def _frame_state(frame: Any) -> str:
-    name = frame.f_globals.get("__name__")
-    if not isinstance(name, str):
-        return _UNKNOWN
-    return _SDK if _is_mcp_name(name) else _APP
+    return _SDK if _is_mcp_name(frame.f_globals.get("__name__")) else _APP
 
 
 def _frame_origin(fn: str, lno: int, func: str | None) -> str:
@@ -251,8 +377,6 @@ def _frame_origin(fn: str, lno: int, func: str | None) -> str:
         if (code.co_filename, selected.f_lineno, code.co_name) != (fn, lno, func):
             return _UNKNOWN
         state = _frame_state(selected)
-        if state == _UNKNOWN:
-            return _UNKNOWN
         other = log_frame.f_back
         while other is not None:
             if (other.f_code.co_filename, other.f_lineno, other.f_code.co_name) == (fn, lno, func) and (
@@ -445,6 +569,7 @@ def ensure_mcp_log_guard() -> None:
     a probe (the SDK makes its loggers when its modules are imported). Thread-safe.
     """
     with _guard_lock:
+        _install_import_watcher()
         _import_client_side_sdk()
         current = logging.getLogRecordFactory()
         if not _is_guard(current):  # (By identity: an attribute can be copied, and a proxy can be equal to a guard.)
