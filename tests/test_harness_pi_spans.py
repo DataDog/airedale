@@ -1224,7 +1224,8 @@ class TestEmit:
 # --------------------------------------------------------------------------- #
 DRIVER = textwrap.dedent(
     """
-    const { default: register } = await import(process.argv[2]);
+    const { pathToFileURL } = await import("node:url");
+    const { default: register } = await import(pathToFileURL(process.argv[2]).href);
     const steps = JSON.parse(process.argv[3]);
     const handlers = {};
     const entries = [];

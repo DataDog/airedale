@@ -867,7 +867,7 @@ def test_skills_of_a_tree_with_links_are_those_of_pi(pi_reference, tmp_path, lab
                     continue
                 seen_files.add(real)
                 seen_names.add(name)
-                loaded.add((name, os.path.relpath(real, real_cwd)))
+                loaded.add((name, Path(os.path.relpath(real, real_cwd)).as_posix()))
     except ValueError:
         ours_collides = True
     request = {"action": "skill_tree", "files": files, "links": links}
@@ -966,6 +966,6 @@ def test_aliases_with_an_explicit_target_name_are_kept(pi_reference, tmp_path, r
     loaded = set()
     for path in pi_skill_dirs([], str(cwd)):
         for name, skill_file in _pi_skills(Path(path)):
-            loaded.add((name, os.path.relpath(os.path.realpath(skill_file), os.path.realpath(cwd))))
+            loaded.add((name, Path(os.path.relpath(os.path.realpath(skill_file), os.path.realpath(cwd))).as_posix()))
     for version, answer in pi_reference({"action": "skill_tree", "files": files, "links": links}).items():
         assert loaded == {tuple(pair) for pair in answer["skills"]}, version
