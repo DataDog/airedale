@@ -967,3 +967,153 @@ def test_an_sdk_module_that_is_importing_in_another_thread_is_not_cached_as_not_
     assert logged.count("(details hidden)") == 3, logged  # During the import, the kept record, after the import.
     assert logged.count("app data while the import waits " + MARKER) == 1, logged
     assert logged.count(MARKER) == 1, logged  # Only the app record has the marker.
+
+
+# --------------------------------------------------------------------------- #
+# A cached "not the SDK" answer never crosses a collection (two races of review round 1)
+# --------------------------------------------------------------------------- #
+RACE_MARKER = "sk-SDK-RACE-MARKER-0123456789"
+
+
+def test_a_cached_app_answer_read_before_a_collection_is_not_used_after_it(app_logger, monkeypatch):
+    """R1: thread A reads the cached answer, thread B collects, then A checks staleness against the new snapshot.
+
+    The record factory is replaced by ``logging.LogRecord`` (layer 1 is gone), so only the filter protects.
+    """
+    logger, handled = app_logger
+    path = _unique_file("cache_race")
+    name = f"mcp._airedale_test_cache_race{next(_counter)}"
+    origins = safe_log._origins
+    _app_log(logger, path)  # 1. The answer "not the SDK" for this file is cached.
+    assert origins._answers[os.path.normcase(path)] is False
+    module = _fake_sdk_module(monkeypatch, name, path)  # 2. Code of the SDK with this file (it is now in the snapshot).
+    previous = logging.getLogRecordFactory()
+    logging.setLogRecordFactory(logging.LogRecord)
+    paused, release = threading.Event(), threading.Event()
+    real_stale = origins._stale
+    worker: list[int] = []
+    first = [True]
+
+    def stale_after_a_pause():
+        if worker and threading.get_ident() == worker[0] and first[0]:
+            first[0] = False
+            paused.set()  # 3. The worker has read the old answer.
+            assert release.wait(30)  # 5. ... and goes on only after the collection.
+        return real_stale()
+
+    monkeypatch.setattr(origins, "_stale", stale_after_a_pause)
+    errors: list[BaseException] = []
+
+    def log_from_the_sdk():
+        worker.append(threading.get_ident())
+        try:
+            module.sdk_function(logger, RACE_MARKER)  # pyright: ignore[reportAttributeAccessIssue]
+        except BaseException as error:  # noqa: BLE001
+            errors.append(error)
+
+    thread = threading.Thread(target=log_from_the_sdk)
+    try:
+        thread.start()
+        assert paused.wait(30)
+        origins.classify("app", "/nonexistent-build-dir/another-path-that-makes-a-collection.py")  # 4. A collection.
+        assert os.path.normcase(path) in origins._filenames  # The new snapshot has the SDK file.
+    finally:
+        release.set()
+        thread.join(30)
+        logging.setLogRecordFactory(previous)
+    assert not thread.is_alive() and not errors
+    assert RACE_MARKER not in _messages(handled)
+    assert len(handled) == 2  # (The app seed, and the hidden SDK record.)
+
+
+def test_a_cached_app_answer_is_not_used_while_a_collection_holds_the_watcher_names(
+    app_logger, tmp_path, monkeypatch, request
+):
+    """R2: a collection has drained the watcher and has not yet put the names in ``_unresolved``.
+
+    Meanwhile the import goes on (one non-MCP module leaves, so ``len(sys.modules)`` is the same), and the new module
+    logs from the build path that has a cached "not the SDK" answer.
+    """
+    import importlib
+    import importlib.machinery
+    import py_compile
+
+    import mcp
+
+    logger, handled = app_logger
+    name = "mcp._airedale_test_drain_race"
+    build_path = "/nonexistent-build-dir/drain_race/_airedale_test_drain_race.py"
+    body = (
+        "import logging, sys\n"
+        "sys.modules.pop('airedale_test_drain_spare', None)\n"
+        "def emit():\n"
+        f"    logging.getLogger({logger.name!r}).warning('data of the SDK {RACE_MARKER}')\n"
+        "emit()\n"
+    )
+    source = tmp_path / "_airedale_test_drain_race.py"
+    source.write_text(body)
+    py_compile.compile(
+        str(source), cfile=str(tmp_path / "_airedale_test_drain_race.pyc"), dfile=build_path, doraise=True
+    )
+    source.unlink()
+    monkeypatch.setattr(mcp, "__path__", [*mcp.__path__, str(tmp_path)])
+    monkeypatch.setitem(sys.modules, "airedale_test_drain_spare", types.ModuleType("airedale_test_drain_spare"))
+    request.addfinalizer(lambda: (sys.modules.pop(name, None), mcp.__dict__.pop("_airedale_test_drain_race", None)))
+    paused, release_import = threading.Event(), threading.Event()
+    drained, release_drain = threading.Event(), threading.Event()
+
+    class PauseBeforeInsertion:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname != name:
+                return None
+            paused.set()
+            assert release_import.wait(30)
+            return importlib.machinery.PathFinder.find_spec(fullname, path)
+
+    pause = PauseBeforeInsertion()
+    request.addfinalizer(lambda: sys.meta_path.remove(pause) if pause in sys.meta_path else None)
+    sys.meta_path.insert(1, pause)
+    origins = safe_log._origins
+    errors: list[BaseException] = []
+    _app_log(logger, build_path)  # 1. The answer "not the SDK" for this file is cached.
+    assert origins._answers[os.path.normcase(build_path)] is False
+    count = len(sys.modules)
+
+    def import_it():
+        try:
+            importlib.import_module(name)
+        except BaseException as error:  # noqa: BLE001
+            errors.append(error)
+
+    importer = threading.Thread(target=import_it)
+    collector = threading.Thread(
+        target=lambda: origins.classify("app", "/nonexistent-build-dir/another-path-that-makes-a-collection.py")
+    )
+    real_drain = safe_log._import_watcher.drain
+
+    def drain_then_hold():
+        names = real_drain()
+        if threading.current_thread() is collector and name in names:
+            drained.set()  # 4. The names are out of the watcher, and not yet in ``_unresolved``.
+            assert release_drain.wait(30)
+        return names
+
+    monkeypatch.setattr(safe_log._import_watcher, "drain", drain_then_hold)
+    try:
+        importer.start()
+        assert paused.wait(30)  # 2. The watcher has seen the import.
+        collector.start()  # 3. A collection starts.
+        assert drained.wait(30)
+        assert origins._lock.locked()
+        release_import.set()  # 5. The import goes on: the module logs from the build path, and a module leaves.
+        importer.join(30)
+        assert not importer.is_alive() and not errors
+        assert "airedale_test_drain_spare" not in sys.modules and len(sys.modules) == count
+    finally:
+        release_import.set()
+        release_drain.set()
+        importer.join(30)
+        if collector.ident is not None:
+            collector.join(30)
+    assert RACE_MARKER not in _messages(handled)
+    assert any(record.getMessage().endswith("(details hidden)") for record in handled)

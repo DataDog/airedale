@@ -187,6 +187,8 @@ class _McpOrigins:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._owner: int | None = None
+        #: Odd while ``_refresh`` runs, even otherwise; it grows by 2 for each collection (only ``_refresh`` writes it).
+        self._sequence = 0
         self._last: dict[str, tuple[Any, bool]] | None = None  # The snapshot of the last collection.
         self._last_len = -1  # ``len(sys.modules)`` before that snapshot.
         self._complete = False  # No module of that snapshot was importing.
@@ -202,11 +204,19 @@ class _McpOrigins:
         key = os.path.normcase(filename)
         ambiguous = _is_ambiguous(key)
         if not ambiguous:
+            # A cached "not the SDK" answer is trusted only when it, the snapshot and the watcher are of one generation:
+            # ``_sequence`` is read first, and read again after the stale check. A collection (``_refresh``) makes it odd
+            # while it runs, and even and higher when it is over, so an answer that was read before or during a
+            # collection is never used. Nothing here waits: when in doubt, the answer is ``_UNKNOWN`` or ``_decide``.
+            sequence = self._sequence
             answer = self._answers.get(key)
             if answer is True:
                 return _SDK
-            if answer is False and not self._stale():
-                return _APP
+            if answer is False:
+                if sequence & 1:
+                    return _UNKNOWN  # A collection is running: its watcher names are in no state that can be read.
+                if not self._stale() and self._sequence == sequence:
+                    return _APP
         return self._decide(key, ambiguous)
 
     def is_sdk(self, logger_name: str, filename: str) -> bool:
@@ -244,7 +254,18 @@ class _McpOrigins:
             self._lock.release()
 
     def _refresh(self) -> None:
-        """Collect again when the snapshot is not the one of the last collection, and settle the imports that are over."""
+        """Collect again when the snapshot is not the one of the last collection, and settle the imports that are over.
+
+        Called with ``_lock`` held. The sequence number is odd for the whole call, so that a thread that has no lock
+        (the cached answers of :meth:`classify`) cannot use a cache, a snapshot or a watcher that is half changed.
+        """
+        self._sequence += 1
+        try:
+            self._refresh_locked()
+        finally:
+            self._sequence += 1
+
+    def _refresh_locked(self) -> None:
         self._unresolved.update(_import_watcher.drain())  # (Before the snapshot: a later import is in the next drain.)
         importing = (
             _importing_mcp_names()
