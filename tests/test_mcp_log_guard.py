@@ -1029,7 +1029,7 @@ def test_a_cached_app_answer_read_before_a_collection_is_not_used_after_it(app_l
 def test_a_cached_app_answer_is_not_used_while_a_collection_holds_the_watcher_names(
     app_logger, tmp_path, monkeypatch, request
 ):
-    """R2: a collection has drained the watcher and has not yet put the names in ``_unresolved``.
+    """R2: a collection has read the watcher names and has not yet put them in ``_unresolved``.
 
     Meanwhile the import goes on (one non-MCP module leaves, so ``len(sys.modules)`` is the same), and the new module
     logs from the build path that has a cached "not the SDK" answer.
@@ -1089,16 +1089,16 @@ def test_a_cached_app_answer_is_not_used_while_a_collection_holds_the_watcher_na
     collector = threading.Thread(
         target=lambda: origins.classify("app", "/nonexistent-build-dir/another-path-that-makes-a-collection.py")
     )
-    real_drain = safe_log._import_watcher.drain
+    real_pending = safe_log._import_watcher.pending
 
-    def drain_then_hold():
-        names = real_drain()
+    def read_then_hold():
+        names = real_pending()
         if threading.current_thread() is collector and name in names:
-            drained.set()  # 4. The names are out of the watcher, and not yet in ``_unresolved``.
+            drained.set()  # 4. The collection has read the names, and has not yet put them in ``_unresolved``.
             assert release_drain.wait(30)
         return names
 
-    monkeypatch.setattr(safe_log._import_watcher, "drain", drain_then_hold)
+    monkeypatch.setattr(safe_log._import_watcher, "pending", read_then_hold)
     try:
         importer.start()
         assert paused.wait(30)  # 2. The watcher has seen the import.
@@ -1117,3 +1117,112 @@ def test_a_cached_app_answer_is_not_used_while_a_collection_holds_the_watcher_na
             collector.join(30)
     assert RACE_MARKER not in _messages(handled)
     assert any(record.getMessage().endswith("(details hidden)") for record in handled)
+
+
+class _FailsOnceOnUpdate(set):
+    """A set whose ``update`` raises once, when it gets the name that the test looks for (a fault injection)."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__()
+        self.name = name
+        self.failed = False
+
+    def update(self, *others):
+        if not self.failed and any(self.name in other for other in others):
+            self.failed = True
+            raise RuntimeError("injected fault between the read of the watcher names and their record")
+        super().update(*others)
+
+
+def test_an_interrupted_collection_does_not_lose_the_notice_of_an_import_that_is_running(
+    app_logger, tmp_path, monkeypatch, request
+):
+    """The collection fails after it read the watcher names and before it recorded them (import lock still there).
+
+    Then the import ends with one non-MCP module less, so ``len(sys.modules)`` is the same, and its module logs from a
+    build path that has a cached "not the SDK" answer. The even sequence number alone does not tell that a name was lost.
+    """
+    import importlib
+    import importlib.machinery
+    import py_compile
+
+    import mcp
+
+    logger, handled = app_logger
+    name = "mcp._airedale_test_interrupted"
+    build_path = "/nonexistent-build-dir/interrupted/_airedale_test_interrupted.py"
+    body = (
+        "import logging, sys\n"
+        "sys.modules.pop('airedale_test_interrupted_spare', None)\n"
+        "def emit():\n"
+        f"    logging.getLogger({logger.name!r}).warning('data of the SDK {RACE_MARKER}')\n"
+        "emit()\n"
+    )
+    source = tmp_path / "_airedale_test_interrupted.py"
+    source.write_text(body)
+    py_compile.compile(
+        str(source), cfile=str(tmp_path / "_airedale_test_interrupted.pyc"), dfile=build_path, doraise=True
+    )
+    source.unlink()
+    monkeypatch.setattr(mcp, "__path__", [*mcp.__path__, str(tmp_path)])
+    spare = "airedale_test_interrupted_spare"
+    monkeypatch.setitem(sys.modules, spare, types.ModuleType(spare))
+    request.addfinalizer(lambda: (sys.modules.pop(name, None), mcp.__dict__.pop("_airedale_test_interrupted", None)))
+    paused, release_import = threading.Event(), threading.Event()
+
+    class PauseBeforeInsertion:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname != name:
+                return None
+            paused.set()
+            assert release_import.wait(30)
+            return importlib.machinery.PathFinder.find_spec(fullname, path)
+
+    pause = PauseBeforeInsertion()
+    request.addfinalizer(lambda: sys.meta_path.remove(pause) if pause in sys.meta_path else None)
+    sys.meta_path.insert(1, pause)
+    origins = safe_log._origins
+    _app_log(logger, build_path)  # 1. The answer "not the SDK" for this file is cached.
+    assert origins._answers[os.path.normcase(build_path)] is False
+    count = len(sys.modules)
+    errors: list[BaseException] = []
+    collector_errors: list[BaseException] = []
+    failing = _FailsOnceOnUpdate(name)
+    monkeypatch.setattr(origins, "_unresolved", failing)
+
+    def import_it():
+        try:
+            importlib.import_module(name)
+        except BaseException as error:  # noqa: BLE001
+            errors.append(error)
+
+    def collect():
+        try:
+            origins.classify("app", "/nonexistent-build-dir/another-path-that-makes-a-collection.py")
+        except BaseException as error:  # noqa: BLE001 - the build before the fix lets the fault out
+            collector_errors.append(error)
+
+    importer, collector = threading.Thread(target=import_it), threading.Thread(target=collect)
+    try:
+        importer.start()
+        assert paused.wait(30)  # 2. The watcher has seen the import; its lock is held.
+        collector.start()  # 3. A collection starts and fails after it read the names.
+        collector.join(30)
+        assert failing.failed and not collector.is_alive()
+        # The notice is not lost, and no cached "not the SDK" answer is trusted until the import is accounted for.
+        assert origins._stale()
+        release_import.set()  # 4. The import goes on: a module leaves, and the new module logs from the build path.
+        importer.join(30)
+        assert not importer.is_alive() and not errors
+        assert spare not in sys.modules and len(sys.modules) == count
+    finally:
+        release_import.set()
+        importer.join(30)
+        if collector.ident is not None:
+            collector.join(30)
+    assert RACE_MARKER not in _messages(handled)
+    assert any(record.getMessage().endswith("(details hidden)") for record in handled)
+    # 5. Recovery: the next collection settles the import, and a path of the application is "not the SDK" again.
+    monkeypatch.undo()
+    assert origins.classify("app", "/nonexistent-build-dir/after-the-recovery.py") == "app"
+    assert not origins._unresolved and origins._complete and not safe_log._import_watcher.names

@@ -97,13 +97,14 @@ class _McpImportWatcher:
         if _is_mcp_name(fullname):
             self.names.add(fullname)
 
-    def drain(self) -> list[str]:
-        names = []
-        while True:
-            try:
-                names.append(self.names.pop())
-            except KeyError:
-                return names
+    def pending(self) -> list[str]:
+        """Return a copy of the noted names. It removes nothing: see :meth:`commit`."""
+        return list(self.names)
+
+    def commit(self, names: list[str]) -> None:
+        """Forget these names, once the caller has recorded them. A name is never in neither place."""
+        for name in names:
+            self.names.discard(name)
 
 
 _import_watcher = _McpImportWatcher()
@@ -239,7 +240,10 @@ class _McpOrigins:
         self._owner = me
         try:
             if self._stale():
-                self._refresh()
+                try:
+                    self._refresh()
+                except Exception:  # noqa: BLE001 - a failed collection must not break logging, nor be trusted
+                    return _UNKNOWN
             if ambiguous:
                 return _UNKNOWN if key in self._filenames or not self._complete else _APP
             if key in self._filenames or key.startswith(self._prefixes):
@@ -262,11 +266,21 @@ class _McpOrigins:
         self._sequence += 1
         try:
             self._refresh_locked()
+        except BaseException:
+            # The collection did not end: no cached answer is trusted until another one does (``_stale`` is true while
+            # ``_complete`` is false). The names of the imports are still in the watcher or in ``_unresolved``: they
+            # are moved, not removed, before they are recorded.
+            self._complete = False
+            raise
         finally:
             self._sequence += 1
 
     def _refresh_locked(self) -> None:
-        self._unresolved.update(_import_watcher.drain())  # (Before the snapshot: a later import is in the next drain.)
+        # Before the snapshot: a later import is in the next collection. The names are copied, recorded, and only then
+        # forgotten by the watcher: if this is interrupted between two of these steps, a name is still in one place.
+        noted = _import_watcher.pending()
+        self._unresolved.update(noted)
+        _import_watcher.commit(noted)
         importing = (
             _importing_mcp_names()
         )  # (Before the snapshot: a module that is not in it, and whose import is over, has failed.)
