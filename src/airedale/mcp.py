@@ -416,18 +416,54 @@ class PiToolNameOrderError(ValueError):
     """Too many servers can take the same tool names for every connection order to be checked."""
 
 
-def _pi_possible_names(server: str, tools: Iterable[str]) -> set[str]:
-    """Return every name that a tool of ``server`` can get in pi: the plain name or the one with a hash suffix.
+def _pi_possible_names(catalog: Mapping[str, list[str]]) -> dict[tuple[str, str], set[str]]:
+    """For each ``(server, tool)``, return every name that pi can give the tool, in some connection order.
 
-    Pi uses the plain name only when it has at most 64 characters (``createMcpToolName``: ``tools.js`` of pi 1.4.0 and 1.5.0,
-    ``naming.js`` of pi-mcp in 1.5.1); a longer one is always cut and given a hash suffix, so it can never be a name of a tool.
+    Pi gives the plain name ``mcp__<server>__<tool>`` unless it is longer than 64 characters (``createMcpToolName``:
+    ``tools.js`` of pi 1.4.0 and 1.5.0, ``naming.js`` of pi-mcp in 1.5.1), unless another tool of the same server gets the
+    same name after shortening, or unless an earlier tool already has the name. Then it gives the name with a hash suffix
+    (see :func:`pi_registered_tool_names`). The sets are made like this:
+
+    1. A tool whose plain name is too long, or that has the same shortened name as another tool of its server, always
+       gets the hash name, in every order. The set of this tool has only its hash name.
+    2. Every other tool starts with only its plain name.
+    3. When the plain name of a tool is in the set of another ``(server, tool)`` (of this server or of another one), that
+       tool can take the plain name first, so this tool can get its hash name: add it.
+    4. Repeat 3 until no set changes (a hash name can be the plain name of a third tool, and so on).
+
+    Invariant: for every connection order and every ``(server, tool)``, the name that
+    :func:`pi_registered_tool_names` gives the tool is in its set. By induction on the registration steps: pi gives the
+    plain name only when it has at most 64 characters and is not taken, and then the tool has no forced hash, so rule 2
+    put the plain name in its set. Pi gives the hash name when the plain name is too long or is shared inside the server
+    (rule 1 put it in the set), or when an earlier step gave the plain name to another tool (by induction that name is in
+    the set of the other tool, so rule 3 added the hash name). The sets are an upper bound: an extra name can only
+    join servers in a group (more orders to check, or a refusal), and it never hides a collision.
     """
-    names: set[str] = set()
-    for tool in tools:
-        plain = _pi_plain_tool_name(server, tool)
-        if len(plain) <= PI_MAX_TOOL_NAME_LENGTH:
-            names.add(plain)
-        names.add(_pi_hashed_tool_name(server, tool))
+    names: dict[tuple[str, str], set[str]] = {}
+    plain: dict[tuple[str, str], str] = {}
+    owners: dict[str, set[tuple[str, str]]] = {}
+    for server, tools in catalog.items():
+        unique = list(dict.fromkeys(tools))
+        shortened = Counter(pi_mcp_tool_name(server, tool) for tool in unique)
+        for tool in unique:
+            key = (server, tool)
+            sanitized = _pi_plain_tool_name(server, tool)
+            if len(sanitized) > PI_MAX_TOOL_NAME_LENGTH or shortened[sanitized] > 1:
+                name = _pi_hashed_tool_name(server, tool)
+            else:
+                name = sanitized
+                plain[key] = sanitized
+            names[key] = {name}
+            owners.setdefault(name, set()).add(key)
+    changed = True
+    while changed:
+        changed = False
+        for key, sanitized in plain.items():
+            hashed = _pi_hashed_tool_name(*key)
+            if hashed not in names[key] and owners[sanitized] - {key}:
+                names[key].add(hashed)
+                owners.setdefault(hashed, set()).add(key)
+                changed = True
     return names
 
 
@@ -437,7 +473,10 @@ def _pi_server_groups(catalog: Mapping[str, list[str]]) -> list[list[str]]:
     A tool takes a name away from another tool only when the two can get the same name, so the connection order of
     servers in different groups does not change any name: each group is checked alone.
     """
-    names = {server: _pi_possible_names(server, tools) for server, tools in catalog.items()}
+    possible = _pi_possible_names(catalog)
+    names: dict[str, set[str]] = {server: set() for server in catalog}
+    for (server, _tool), tool_names in possible.items():
+        names[server] |= tool_names
     groups: list[tuple[list[str], set[str]]] = []
     for server in catalog:
         merged = ([server], set(names[server]))
