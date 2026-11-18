@@ -67,9 +67,14 @@ experiment so the tokens it consumes are rolled into the experiment's total. See
 ### Private report of a failed run
 
 The raw text that pi, the Claude CLI, a provider or a gateway writes about a
-failed run (stderr, error messages, request IDs) can hold credentials. It never
-goes to an error message, a log line or a span. Instead, a failed run writes it
-to one private file, and the error (or the log line) gives the name of that file.
+failed run (stderr, error messages, request IDs) can hold credentials. A failed
+run writes it to one private file, and the error (or the log line) gives the name
+of that file.
+
+- **Pi:** the raw text never goes to an error message, a log line or a span.
+- **Claude:** only the Airedale log line of the failed run and the logs of the
+  Claude Agent SDK are protected. The raw text of the other outputs stays: see
+  "Claude runs" below.
 
 - **File name:** `pi-run-<time>-<id>.log` for a pi run, `claude-run-<time>-<id>.log`
   for a Claude run. The file has mode `0600`.
@@ -83,7 +88,8 @@ to one private file, and the error (or the log line) gives the name of that file
 - **Claude runs:** three outputs still have raw text: the error that the run
   raises, the progress and console output of an error result, and the
   retry summary of `ddtrace` (only when retries are on; Airedale does not use
-  retries).
+  retries). Romain accepted this; DD-64 (progress and console output) and DD-65
+  (`ddtrace` retry summary) follow it.
 
 ### Windows support
 

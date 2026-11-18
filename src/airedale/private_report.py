@@ -5,8 +5,12 @@
 """The private report of a failed run: one file that only the user can read, for raw values that logs must not have.
 
 Pi and Claude runs use it. A raw value of a provider, a gateway, a CLI or a model (stderr, error text) can hold
-credentials, so it never goes to an error message, a log line or a span; a failed run writes it here, and the error
-or the log line gives the name of the file.
+credentials, so a failed run writes it here, and the error or the log line gives the name of the file.
+
+* **Pi:** the raw text never goes to an error message, a log line or a span.
+* **Claude:** only the Airedale log line and the logs of the Claude Agent SDK are protected (the diagnostic tail, the
+  exception text and the SDK records have no raw text). The raised error, the progress and console output of an error
+  result, and the ``ddtrace`` retry summary still have the raw text (accepted, see ``README.md``).
 """
 
 from __future__ import annotations
