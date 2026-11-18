@@ -399,6 +399,7 @@ def _frame_origin(fn: str, lno: int, func: str | None) -> str:
 # The evidence of a record: kept by the identity of the record, never by its hash or its equality
 # --------------------------------------------------------------------------- #
 _EVIDENCE_PURGE_AT = 256
+_evidence_purge_at = _EVIDENCE_PURGE_AT
 
 
 class _Evidence:
@@ -426,11 +427,15 @@ def _remember_app_record(record: Any) -> None:
         )
     except TypeError:  # No weak reference is possible: the record has no evidence, and it is hidden.
         return
+    global _evidence_purge_at
     with _evidence_lock:
         _evidence[id(record)] = entry
-        if len(_evidence) > _EVIDENCE_PURGE_AT:
+        if len(_evidence) > _evidence_purge_at:
             for key in [key for key, item in list(_evidence.items()) if item.ref() is None]:
                 _evidence.pop(key, None)
+            # (Amortized: the next purge is when the store has doubled. Records that live on, for example in a test
+            # handler, would else make each new record scan the whole store.)
+            _evidence_purge_at = max(_EVIDENCE_PURGE_AT, 2 * len(_evidence))
 
 
 def _has_app_evidence(record: Any) -> bool:
@@ -462,13 +467,14 @@ def _guard(previous: Any) -> Any:
         **kwargs: Any,
     ) -> logging.LogRecord:
         state = _SDK if _is_claude_name(name) else _origins.classify(name, fn)
-        if state == _UNKNOWN:  # An ambiguous file name: the frame of the caller tells.
+        decided_by_frame = state == _UNKNOWN
+        if decided_by_frame:  # An ambiguous file name, or an import is running: the frame of the caller tells.
             state = _frame_origin(fn, lno, func)
         if state != _APP:  # The SDK, or not sure: hide.
             msg = _hidden_message(level, fn, lno, name)
             args, exc_info, sinfo = (), None, None
         record = previous(name, level, fn, lno, msg, args, exc_info, func, sinfo, **kwargs)
-        if state == _APP:
+        if decided_by_frame and state == _APP:  # (The filter looks for this only when it cannot decide by the file.)
             _remember_app_record(record)
         return record
 
