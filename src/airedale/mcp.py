@@ -378,7 +378,7 @@ def pi_registered_tool_names(
 ) -> dict[tuple[str, str], str]:
     """Return the name that pi gives each ``(server, tool)`` when the servers connect in the order of ``servers``.
 
-    This is the registration loop of pi's MCP extension (1.4.0 and 1.5.0) with
+    This is the registration loop of pi's MCP extension (1.4.0, 1.5.0 and 1.5.1) with
     the one name map that all servers share: a tool takes the plain name
     ``mcp__<server>__<tool>`` unless it is longer than 64 characters, unless
     another tool of the same server has that name after shortening, or unless a
@@ -419,8 +419,8 @@ class PiToolNameOrderError(ValueError):
 def _pi_possible_names(server: str, tools: Iterable[str]) -> set[str]:
     """Return every name that a tool of ``server`` can get in pi: the plain name or the one with a hash suffix.
 
-    Pi uses the plain name only when it has at most 64 characters (``createMcpToolName`` in ``naming.js``, pi 1.5.0 and
-    1.5.1); a longer one is always cut and given a hash suffix, so it can never be a name of a tool.
+    Pi uses the plain name only when it has at most 64 characters (``createMcpToolName``: ``tools.js`` of pi 1.4.0 and 1.5.0,
+    ``naming.js`` of pi-mcp in 1.5.1); a longer one is always cut and given a hash suffix, so it can never be a name of a tool.
     """
     names: set[str] = set()
     for tool in tools:

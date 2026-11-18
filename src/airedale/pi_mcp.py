@@ -8,15 +8,15 @@ Airedale gives its scenario MCP servers to pi in the ``mcp.json`` of a private
 agent directory (the "global" servers of pi). Pi also reads the repo file
 ``<cwd>/.pi/mcp.json`` and merges it over them. The merge and the validation of
 each entry are in :mod:`airedale.pi_mcp_config` (a translation of the code of
-pi 1.4.0 and 1.5.0). This module uses them to know:
+pi 1.4.0, 1.5.0 and 1.5.1). This module uses them to know:
 
 * which scenario servers a repo file would replace or change (the run must fail:
   the scenario must win, as for the other harnesses, and pi cannot do that);
 * which servers the repo file adds (for the span metadata and the agent
   manifest).
 
-Where pi 1.4.0 and 1.5.0 differ, the more permissive rule is used (an entry is
-valid when one of the two versions accepts it): a wrong "valid" only stops a run
+Where these pi versions differ, the more permissive rule is used (an entry is
+valid when one of the versions accepts it): a wrong "valid" only stops a run
 that could have run, and a wrong "invalid" would let a repo file change a
 scenario server.
 """

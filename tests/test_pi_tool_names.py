@@ -43,7 +43,7 @@ CATALOGS = [
 
 @pytest.mark.parametrize("catalog", CATALOGS)
 def test_names_match_pi(pi_reference, catalog):
-    """One server: the names are the ones of pi 1.4.0 and 1.5.0."""
+    """One server: the names are the ones of pi 1.4.0, 1.5.0 and 1.5.1."""
     for server, tools in catalog:
         answers = pi_reference({"action": "names", "servers": [[server, tools]]})
         ours = pi_mcp_tool_names(server, tools)

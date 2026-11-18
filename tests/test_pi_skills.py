@@ -850,7 +850,7 @@ def test_the_graph_of_round_16_is_refused_with_a_scenario_skill_too(tmp_path):
 
 @pytest.mark.parametrize("label", SKILL_TREES)
 def test_skills_of_a_tree_with_links_are_those_of_pi(pi_reference, tmp_path, label):
-    """Same ``(name, real file)`` pairs as pi 1.4.0 and 1.5.0 (or both fail on a name collision)."""
+    """Same ``(name, real file)`` pairs as pi 1.4.0, 1.5.0 and 1.5.1 (or both fail on a name collision)."""
     files, links = SKILL_TREES[label]
     cwd = tmp_path / "cwd"
     _write_tree(cwd, files, links)
