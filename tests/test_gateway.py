@@ -133,12 +133,58 @@ class TestResolveCredentialsHelper:
         assert "Failed to get credentials for anthropic (RuntimeError" in caplog.text
         assert all(record.exc_info is None for record in caplog.records)
 
+    @pytest.mark.parametrize("failure", ["exit", "timeout", "oserror", "decode"])
+    def test_command_of_the_helper_is_not_logged_or_raised(self, mocker, clear_credential_cache, caplog, failure):
+        import logging
+        import subprocess
+        import traceback
+
+        secret = "sk-INLINE-COMMAND-SECRET-0123456789"
+        command = f"helper --api-key {secret}"
+        errors = {
+            "exit": subprocess.CalledProcessError(7, command, stderr=f"denied for {secret}"),
+            "timeout": subprocess.TimeoutExpired(command, 30),
+            "oserror": OSError(f"cannot run {command}"),
+            "decode": UnicodeDecodeError("utf-8", b"\xff" + secret.encode(), 0, 1, "invalid start byte"),
+        }
+        mocker.patch("airedale.gateway.time.sleep")
+        mocker.patch("airedale.gateway.subprocess.run", side_effect=errors[failure])
+        gw = _make_gateway("anthropic", base_url="https://gw.example.com", credentials_helper=command)
+        for call in (
+            lambda: _run_credentials_helper(command),
+            lambda: resolve_provider_config("anthropic", gw),
+        ):
+            with caplog.at_level(logging.DEBUG), pytest.raises(RuntimeError) as raised:
+                call()
+            error = raised.value
+            # The raw error of the helper must not stay anywhere: not in a printed chain, not in the attributes.
+            assert error.__cause__ is None
+            assert error.__context__ is None
+            assert secret not in "".join(traceback.format_exception(error))
+            assert secret not in str(error) and secret not in repr(error)
+        assert secret not in caplog.text
+        assert "Running credentials helper (attempt 1/" in caplog.text
+
+    def test_invalid_utf8_output_of_a_real_helper_does_not_leak_through_the_context(
+        self, clear_credential_cache, caplog
+    ):
+        import logging
+
+        secret = "sk-REAL-HELPER-SECRET-0123456789"
+        command = f"printf '\\377{secret}'"
+        with caplog.at_level(logging.DEBUG), pytest.raises(RuntimeError) as raised:
+            _run_credentials_helper(command)
+        error = raised.value
+        assert error.__cause__ is None and error.__context__ is None
+        assert secret not in repr(error) and secret not in caplog.text
+
     def test_other_errors_of_the_helper_are_summarized_not_quoted(self, mocker, clear_credential_cache):
         secret = "sk-OSERROR-SECRET-0123456789"
         mocker.patch("airedale.gateway.subprocess.run", side_effect=OSError(f"cannot run {secret}"))
         with pytest.raises(RuntimeError) as raised:
             _run_credentials_helper("odd-helper")
         assert secret not in str(raised.value) and "OSError" in str(raised.value)
+        assert raised.value.__context__ is None and raised.value.__cause__ is None
 
     def test_empty_output_keeps_its_fixed_message(self, mocker, clear_credential_cache):
         mocker.patch("airedale.gateway.subprocess.run", return_value=MagicMock(stdout="\n", returncode=0))
