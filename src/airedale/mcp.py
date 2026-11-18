@@ -14,7 +14,9 @@ import json
 import logging
 import os
 import re
+import selectors
 import signal
+import sys
 import threading
 import time
 from collections import Counter
@@ -620,6 +622,7 @@ async def _mcp_server_tool_metadata(
     # server. Only the last ``MCP_PROBE_STDERR_TAIL_BYTES`` bytes are ever stored.
     stderr_tail = _StderrTail(MCP_PROBE_STDERR_TAIL_BYTES) if server.type == "stdio" else None
     errlog = stderr_tail.errlog if stderr_tail is not None else None
+    failed = False
     try:
         tools = await asyncio.wait_for(
             _list_mcp_tools(
@@ -635,14 +638,14 @@ async def _mcp_server_tool_metadata(
         # Fixed text: the message of the error (the validation error of the MCP SDK holds the whole tool object
         # that the server sent) and its traceback are not logged.
         logger.debug("Unable to fetch MCP tool metadata for server %s (%s)", server.name, exception_summary(error))
-        if notes is not None and stderr_tail is not None:
-            tail = stderr_tail.finish()
-            if tail:
-                notes.append(f"stderr of MCP server {server.name!r} during the metadata probe (last bytes):\n{tail}")
+        failed = True
         return {}
     finally:
         if stderr_tail is not None:
-            stderr_tail.finish()
+            # Once, on every path (also a cancellation): it stops the reader and does not block the event loop.
+            tail = await stderr_tail.finish()
+            if failed and notes is not None and tail:
+                notes.append(f"stderr of MCP server {server.name!r} during the metadata probe (last bytes):\n{tail}")
 
     catalog: dict[tuple[str, str], McpToolMetadata] = {}
     for mcp_tool in tools:
@@ -653,42 +656,119 @@ async def _mcp_server_tool_metadata(
     return catalog
 
 
+#: How long the reader of the stderr of a probed server waits for the end of the output, after the probe is over.
+_STDERR_TAIL_GRACE_SECONDS = 1.0
+
+#: How often the reader looks at its deadline when no data arrives.
+_STDERR_TAIL_POLL_SECONDS = 0.05
+
+
 class _StderrTail:
     """A pipe for the stderr of a child process that keeps only the last ``limit`` bytes.
 
     ``errlog`` is the write end (a text file object with a file descriptor, what ``stdio_client`` takes). A thread
-    empties the read end for as long as a process holds the write end, so the child never blocks on a full pipe,
-    and nothing but the ring buffer grows: no memory or disk use in proportion to the output.
+    empties the read end, so the child never blocks on a full pipe, and nothing but the ring buffer grows: no memory
+    or disk use in proportion to the output.
+
+    The end of the output is not sure. A server that exits normally can leave a child process that keeps the write end
+    (its stderr) open, and on Windows the server can run without a Job Object. So the reader thread waits for data with
+    a timeout, and it stops at the end of the file or at its deadline. :meth:`finish` sets the deadline (1 second after
+    it is called). The reader thread is the only code that closes the read end: another thread must not close it,
+    because the OS can give the same number to a new file at once.
+
+    After the read end is closed, a child that still writes to its stderr gets ``EPIPE`` (``SIGPIPE`` on POSIX) and can
+    stop. That is intended: nobody reads this output any more.
     """
 
     def __init__(self, limit: int) -> None:
         read_fd, write_fd = os.pipe()
+        #: The read end. Only the reader thread closes it (tests look at it to see that it is closed).
+        self._read_fd = read_fd
         self._buffer = _BoundedByteBuffer(limit)
         self._lock = threading.Lock()
-        self.errlog: TextIO = os.fdopen(write_fd, "w", encoding="utf-8", errors="replace")
+        #: ``time.monotonic()`` value after which the reader stops (``None``: no deadline yet).
+        self._deadline: float | None = None
+        try:
+            self.errlog: TextIO = os.fdopen(write_fd, "w", encoding="utf-8", errors="replace")
+        except BaseException:
+            os.close(read_fd)
+            os.close(write_fd)
+            raise
         self._thread = threading.Thread(target=self._drain, args=(read_fd,), name="mcp-probe-stderr", daemon=True)
-        self._thread.start()
+        try:
+            self._thread.start()
+        except BaseException:
+            os.close(read_fd)
+            self.errlog.close()
+            raise
+
+    def _expired(self) -> bool:
+        deadline = self._deadline
+        return deadline is not None and time.monotonic() >= deadline
 
     def _drain(self, read_fd: int) -> None:
+        """Read until the end of the file or the deadline; then close the read end (only here)."""
         try:
-            while chunk := os.read(read_fd, 65536):
-                with self._lock:
-                    self._buffer.append(chunk)
-        except OSError:
+            if sys.platform == "win32":
+                self._drain_windows(read_fd)
+            else:
+                self._drain_posix(read_fd)
+        except (OSError, ValueError):
             pass
         finally:
             with contextlib.suppress(OSError):
                 os.close(read_fd)
 
-    def finish(self) -> str:
-        """Close our copy of the write end, wait a moment for the end of the output, and return the tail as text.
+    def _store(self, chunk: bytes) -> None:
+        with self._lock:
+            self._buffer.append(chunk)
 
-        If a grandchild still holds the pipe, the thread stays (it is a daemon thread and ends with that process);
-        what was read is returned.
+    def _drain_posix(self, read_fd: int) -> None:
+        # (``selectors``, not ``select.select``: that one fails for descriptors of 1024 and more.)
+        with selectors.DefaultSelector() as selector:
+            selector.register(read_fd, selectors.EVENT_READ)
+            while not self._expired():  # (Also while data keeps arriving: a child can write without end.)
+                if not selector.select(timeout=_STDERR_TAIL_POLL_SECONDS):
+                    continue
+                chunk = os.read(read_fd, 65536)
+                if not chunk:  # The end of the file: no process holds the write end any more.
+                    return
+                self._store(chunk)
+
+    def _drain_windows(self, read_fd: int) -> None:
+        # A read on an anonymous pipe cannot time out, so the thread reads only what is ready (``PeekNamedPipe``). The
+        # module ``_winapi`` is private, but the standard library (``multiprocessing``) uses it in the same way.
+        if sys.platform != "win32":
+            raise NotImplementedError("only for Windows")
+        import _winapi  # noqa: PLC0415
+        import msvcrt  # noqa: PLC0415
+
+        handle = msvcrt.get_osfhandle(read_fd)
+        while not self._expired():
+            try:
+                ready, _left = _winapi.PeekNamedPipe(handle, 0)
+            except BrokenPipeError:  # The end of the file: no process holds the write end any more.
+                return
+            if ready:
+                chunk = os.read(read_fd, min(ready, 65536))
+                if not chunk:
+                    return
+                self._store(chunk)
+            else:
+                time.sleep(_STDERR_TAIL_POLL_SECONDS)
+
+    async def finish(self) -> str:
+        """Stop the reader and return the tail as text. Call it once. It never blocks the event loop.
+
+        It closes our copy of the write end, and gives the reader a second to read the end of the output. If a
+        grandchild still holds the pipe, the reader stops at its deadline and closes the read end; what was read is
+        returned. A cancellation does not stop a join that has started, but the deadline is set before the first
+        ``await``, so the reader ends by itself.
         """
         with contextlib.suppress(OSError, ValueError):
             self.errlog.close()
-        self._thread.join(timeout=1.0)
+        self._deadline = time.monotonic() + _STDERR_TAIL_GRACE_SECONDS
+        await asyncio.to_thread(self._thread.join, _STDERR_TAIL_GRACE_SECONDS + 1.0)
         with self._lock:
             return self._buffer.text().strip()
 
