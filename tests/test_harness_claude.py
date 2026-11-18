@@ -12,9 +12,15 @@ explicit list -> exactly those.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
+import os
+import stat
 
+import claude_agent_sdk
 import pytest
+from claude_agent_sdk._internal.transport import Transport
 
 from airedale.config.experiment import ScenarioConfig
 from airedale.harness import create_runner
@@ -134,3 +140,180 @@ class TestCreateRunnerProjectMcpMerge:
         openai_model = ModelSpec.parse("openai/gpt-4o")
         runner = create_runner(openai_model, scenario=self._scenario(), gateway=None, cwd=str(tmp_path))
         assert runner.mcp_servers == []
+
+
+# --------------------------------------------------------------------------- #
+# A failed run keeps the raw text of the Claude CLI and of the provider out of the logs
+# --------------------------------------------------------------------------- #
+STDERR_MARKER = "sk-STDERR-MARKER"
+RESULT_MARKER = "sk-RESULT-MARKER"
+READER_MARKER = "sk-READER-MARKER"
+STDOUT_MARKER = "sk-STDOUT-MARKER"
+RETRY_MARKER = "sk-RETRY-MARKER"
+_END = object()
+
+
+class _FakeTransport(Transport):
+    """A Claude Code CLI that answers ``initialize``, then fails the run. ``options`` is set by the test.
+
+    It writes the CLI stderr (``options.stderr``), emits an error ``ResultMessage`` and then either raises an exception
+    in the reader (path 1) or ends the stream (path 2).
+    """
+
+    def __init__(self, *, raises: bool) -> None:
+        self.options: claude_agent_sdk.ClaudeAgentOptions | None = None
+        self._raises = raises
+        self._queue: asyncio.Queue = asyncio.Queue()
+        self._ready = False
+
+    async def connect(self) -> None:
+        self._ready = True
+
+    async def write(self, data: str) -> None:
+        for line in data.splitlines():
+            message = json.loads(line)
+            if message.get("type") == "control_request" and message["request"]["subtype"] == "initialize":
+                response = {"subtype": "success", "request_id": message["request_id"], "response": {"commands": []}}
+                self._queue.put_nowait({"type": "control_response", "response": response})
+            elif message.get("type") == "user":
+                assert self.options is not None and self.options.stderr is not None
+                self.options.stderr(STDERR_MARKER)
+                self._queue.put_nowait(
+                    {
+                        "type": "result",
+                        "subtype": "error_during_execution",
+                        "duration_ms": 1,
+                        "duration_api_ms": 1,
+                        "is_error": True,
+                        "num_turns": 1,
+                        "session_id": "s",
+                        "errors": [RESULT_MARKER],
+                    }
+                )
+                self._queue.put_nowait(RuntimeError(f"stream broke {READER_MARKER}") if self._raises else _END)
+
+    async def read_messages(self):
+        while True:
+            item = await self._queue.get()
+            if item is _END:
+                return
+            if isinstance(item, BaseException):
+                raise item
+            yield item
+
+    async def close(self) -> None:
+        self._ready = False
+
+    def is_ready(self) -> bool:
+        return self._ready
+
+    async def end_input(self) -> None:
+        pass
+
+
+def _claude_runner(tmp_path, *, path: int):
+    """``(runner, transport)``: path 1 uses ``query()`` with the transport, path 2 uses ``ClaudeSDKClient``."""
+    transport = _FakeTransport(raises=path == 1)
+    if path == 1:
+
+        def query_func(*, prompt, options):
+            transport.options = options
+            return claude_agent_sdk.query(prompt=prompt, options=options, transport=transport)
+
+        return ClaudeRunner(cwd=tmp_path, claude_query_func=query_func), transport
+
+    def client_factory(options):
+        transport.options = options
+        return claude_agent_sdk.ClaudeSDKClient(options, transport=transport)
+
+    return ClaudeRunner(cwd=tmp_path, claude_client_factory=client_factory), transport
+
+
+def _failed_run(tmp_path, monkeypatch, *, path: int):
+    """Run a Claude run that fails; return the raised error."""
+    from airedale.progress import ProgressReporter
+
+    monkeypatch.setenv("AIREDALE_OUTPUT_DIR", str(tmp_path / "reports"))
+    (tmp_path / "cwd").mkdir()
+    runner, _transport = _claude_runner(tmp_path / "cwd", path=path)
+    reporter = ProgressReporter(enabled=True)  # (Not started: plain mode, one line for each message.)
+    with pytest.raises(Exception) as raised:  # noqa: PT011
+        asyncio.run(
+            asyncio.wait_for(
+                runner.run(
+                    model=ANTHROPIC_MODEL,
+                    system_prompt="S",
+                    user_prompt="Q",
+                    prompt_version="v",
+                    harness="h",
+                    progress=reporter.message,
+                ),
+                timeout=60,
+            )
+        )
+    return raised.value
+
+
+def _records_text(caplog) -> str:
+    return "\n".join(f"{record.name}: {record.getMessage()}|{record.exc_text}" for record in caplog.records)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the private report is not written on Windows")
+@pytest.mark.parametrize("path", [1, 2], ids=["exception-in-the-stream", "error-result-message"])
+def test_a_failed_claude_run_has_no_raw_text_in_the_logs_and_a_private_report(
+    tmp_path, monkeypatch, caplog, capfd, path
+):
+    caplog.set_level(logging.DEBUG)
+    error = _failed_run(tmp_path, monkeypatch, path=path)
+    captured = capfd.readouterr()
+    # O1 and O2: the log lines of Airedale and of the SDK have no raw text, no exception text and no traceback.
+    text = _records_text(caplog)
+    for marker in (STDERR_MARKER, RESULT_MARKER, READER_MARKER):
+        assert marker not in text, marker
+    assert all(record.exc_info is None for record in caplog.records if record.name.startswith("airedale"))
+    [failure] = [r for r in caplog.records if r.getMessage().startswith("Claude Agent SDK eval run failed (")]
+    assert failure.levelno == logging.ERROR
+    [report] = list((tmp_path / "reports").glob("claude-run-*.log"))
+    assert str(report) in failure.getMessage()
+    assert stat.S_IMODE(report.stat().st_mode) == 0o600
+    contents = report.read_text()
+    assert STDERR_MARKER in contents and RESULT_MARKER in contents  # O2: the private report has them.
+    # O5: the raised error is not changed (accepted). O6: the progress and the console output (accepted).
+    assert (READER_MARKER if path == 1 else RESULT_MARKER) in str(error)
+    assert RESULT_MARKER in captured.out + captured.err
+    if path == 1:
+        # O3: the SDK log of the error that stops its reader has a fixed text.
+        [sdk_record] = [r for r in caplog.records if r.name == "claude_agent_sdk._internal.query" and r.levelno == 40]
+        assert sdk_record.getMessage().startswith("Claude Agent SDK ERROR at query:")
+        assert sdk_record.getMessage().endswith("(details hidden)")
+
+
+def test_the_claude_sdk_stdout_debug_log_has_a_fixed_text(caplog):
+    """O4: the SDK logs the first 200 characters of a stdout line of the CLI that is not JSON."""
+    from claude_agent_sdk._internal.transport import subprocess_cli
+
+    from airedale.safe_log import ensure_mcp_log_guard
+
+    ensure_mcp_log_guard()
+    caplog.set_level(logging.DEBUG)
+    assert subprocess_cli._parse_stdout_line(f"not json {STDOUT_MARKER}") is None
+    [record] = [r for r in caplog.records if r.name == "claude_agent_sdk._internal.transport.subprocess_cli"]
+    assert STDOUT_MARKER not in record.getMessage()
+    assert record.getMessage().startswith("Claude Agent SDK DEBUG at subprocess_cli:")
+    assert record.getMessage().endswith("(details hidden)")
+
+
+def test_the_ddtrace_retry_summary_is_not_changed(caplog):
+    """O7 (accepted): the experiment summary of ddtrace has the text of the retries. Airedale does not change it."""
+    from ddtrace.llmobs._experiment import Experiment
+
+    experiment = object.__new__(Experiment)
+    experiment.name = "experiment"
+    experiment._runs = 1
+    experiment._interrupted = False
+    experiment._retries = [f"task row 0: attempt 1/2 failed: {RETRY_MARKER}"]
+    with caplog.at_level(logging.DEBUG):
+        experiment._log_experiment_summary({"summary_evaluations": {}, "rows": [], "runs": []})
+    assert any(
+        RETRY_MARKER in record.getMessage() and record.name == "ddtrace.llmobs._experiment" for record in caplog.records
+    )

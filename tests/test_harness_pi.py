@@ -4848,9 +4848,9 @@ class TestPrivateReportDirectory:
         assert result is not None and (parent / "saved").glob("pi-run-*.log")
 
     def test_system_without_dir_fd_writes_nothing_and_warns(self, tmp_path, monkeypatch, caplog):
-        import airedale.harness.pi as pi_module
+        from airedale import private_report
 
-        monkeypatch.setattr(pi_module, "_OPEN_TAKES_DIR_FD", False)
+        monkeypatch.setattr(private_report, "_OPEN_TAKES_DIR_FD", False)
         monkeypatch.setenv("AIREDALE_OUTPUT_DIR", str(tmp_path / "out"))
         with caplog.at_level("WARNING"):
             assert self._write(tmp_path) is None

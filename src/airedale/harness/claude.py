@@ -30,7 +30,9 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import time
+import uuid
 from collections import deque
 from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, Any
@@ -49,6 +51,8 @@ from airedale.harness.base import (
     json_safe,
 )
 from airedale.mcp import McpServerSpec, configured_tool_names
+from airedale.private_report import open_private_report
+from airedale.safe_log import ensure_mcp_log_guard, exception_summary
 from airedale.skills import (
     discover_claude_skill_names,
     exclude_staged_skills_from_git,
@@ -193,6 +197,9 @@ class ClaudeRunner(AgentRunner):
         trace_headers: Mapping[str, str],
         progress: ProgressCallback | None,
     ) -> AgentRunResult:
+        # The SDK logs raw text of the Claude CLI (stdout lines, the error that stops its reader): its records get a
+        # fixed text. (Before the first record: the filters go on the loggers that exist.)
+        ensure_mcp_log_guard()
         diagnostics = _ClaudeEvalDiagnostics()
         options = self._build_options(model=model, system_prompt=system_prompt, trace_headers=trace_headers)
         options.stderr = diagnostics.record_stderr
@@ -200,12 +207,16 @@ class ClaudeRunner(AgentRunner):
             if self._uses_custom_claude_query:
                 agent_stream = self._claude_query(prompt=user_prompt, options=options)
                 try:
-                    return await _collect_claude_stream(
-                        agent_stream,
-                        model=model,
-                        max_turns=self.max_turns,
-                        progress=progress,
-                        diagnostics=diagnostics,
+                    return _reported_if_failed(
+                        await _collect_claude_stream(
+                            agent_stream,
+                            model=model,
+                            max_turns=self.max_turns,
+                            progress=progress,
+                            diagnostics=diagnostics,
+                        ),
+                        model,
+                        diagnostics,
                     )
                 finally:
                     close = getattr(agent_stream, "aclose", None)
@@ -218,21 +229,22 @@ class ClaudeRunner(AgentRunner):
                 await client.connect()
                 await _wait_for_claude_mcp_servers(client, self.mcp_servers, diagnostics)
                 await client.query(user_prompt)
-                return await _collect_claude_stream(
-                    client.receive_response(),
-                    model=model,
-                    max_turns=self.max_turns,
-                    progress=progress,
-                    diagnostics=diagnostics,
+                return _reported_if_failed(
+                    await _collect_claude_stream(
+                        client.receive_response(),
+                        model=model,
+                        max_turns=self.max_turns,
+                        progress=progress,
+                        diagnostics=diagnostics,
+                    ),
+                    model,
+                    diagnostics,
                 )
             finally:
                 with contextlib.suppress(Exception):
                     await client.disconnect()
-        except Exception:  # pragma: no cover - defensive runtime path
-            if diagnostic_summary := diagnostics.summary():
-                logger.exception("Claude Agent SDK eval run failed\n%s", diagnostic_summary)
-            else:
-                logger.exception("Claude Agent SDK eval run failed")
+        except Exception as error:  # pragma: no cover - defensive runtime path
+            _report_claude_failure(model, diagnostics, error)
             raise
 
     def _build_options(
@@ -359,6 +371,54 @@ class _ClaudeEvalDiagnostics:
         if self._system_tail:
             parts.append("claude system diagnostic tail:\n" + "\n".join(self._system_tail))
         return "\n".join(parts)
+
+
+def _reported_if_failed(
+    result: AgentRunResult, model: ModelSpec, diagnostics: _ClaudeEvalDiagnostics
+) -> AgentRunResult:
+    """Report an error result of the provider (no exception: ``run`` raises ``result.error`` later), and return it."""
+    if result.error is not None:
+        _report_claude_failure(model, diagnostics, result.error)
+    return result
+
+
+def _report_claude_failure(model: ModelSpec, diagnostics: _ClaudeEvalDiagnostics, error: BaseException) -> None:
+    """Log one fixed line about a failed Claude run; the raw diagnostics go to the private file that it names.
+
+    The diagnostics hold raw text of the Claude CLI and of the provider (its stderr, the retry and error texts of the
+    stream), which can hold credentials, so they are never in a log line. The line has the type name and the place of the
+    error (:func:`~airedale.safe_log.exception_summary`): no ``str(error)``, no traceback with values, no ``exc_info``.
+    """
+    path = _write_claude_private_report(model, diagnostics)
+    where = f"raw diagnostics in the private file {path}" if path is not None else "no private file was written"
+    logger.error("Claude Agent SDK eval run failed (%s); %s", exception_summary(error), where)
+
+
+def _write_claude_private_report(model: ModelSpec, diagnostics: _ClaudeEvalDiagnostics) -> Path | None:
+    """Write the raw diagnostics of a failed run to one private file (mode 0600); return its path.
+
+    Same rules as the pi report (:func:`airedale.private_report.open_private_report`). ``None``: nothing to write, or the
+    file cannot be written (a fixed warning is logged; the error of the run is never hidden).
+    """
+    summary = diagnostics.summary()
+    if not summary:
+        return None
+    try:
+        name = f"claude-run-{time.strftime('%Y%m%dT%H%M%S', time.gmtime())}-{uuid.uuid4().hex[:8]}.log"
+        lines = [
+            "Raw diagnostics of a failed Claude run. They can hold credentials: keep this file private.",
+            f"model: {model.label}",
+            "",
+            summary,
+            "",
+        ]
+        fd, path = open_private_report(name)
+        with os.fdopen(fd, "w", encoding="utf-8", errors="backslashreplace") as handle:
+            handle.write("\n".join(lines))
+        return path
+    except Exception:  # noqa: BLE001 - the report must never hide the error of the run (not BaseException)
+        logger.warning("Unable to write the private report of the failed Claude run", exc_info=False)
+        return None
 
 
 def _bounded_claude_diagnostic_value(value: Any) -> str:

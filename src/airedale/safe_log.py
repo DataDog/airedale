@@ -72,6 +72,11 @@ def _is_mcp_name(name: Any) -> bool:
     return isinstance(name, str) and (name == "mcp" or name.startswith("mcp."))
 
 
+def _is_claude_name(name: Any) -> bool:
+    """Tell whether a logger belongs to the Claude Agent SDK (its loggers are made with ``__name__``)."""
+    return isinstance(name, str) and (name == "claude_agent_sdk" or name.startswith("claude_agent_sdk."))
+
+
 def _is_ambiguous(filename: str) -> bool:
     """Tell whether a file name can be the name of code of many origins: empty, or ``<string>``, ``<stdin>`` and so on."""
     return not filename or (filename.startswith("<") and filename.endswith(">"))
@@ -316,9 +321,10 @@ def _functions_defined_by(value: Any, module: Any, namespace: dict[str, Any]) ->
 _origins = _McpOrigins()
 
 
-def _hidden_message(level: int, filename: str, lineno: int) -> str:
+def _hidden_message(level: int, filename: str, lineno: int, name: str = "") -> str:
     module = os.path.splitext(os.path.basename(filename))[0]
-    return f"MCP SDK {logging.getLevelName(level)} at {module}:{lineno} (details hidden)"
+    sdk = "Claude Agent SDK" if _is_claude_name(name) else "MCP SDK"
+    return f"{sdk} {logging.getLevelName(level)} at {module}:{lineno} (details hidden)"
 
 
 # --------------------------------------------------------------------------- #
@@ -455,11 +461,11 @@ def _guard(previous: Any) -> Any:
         sinfo: str | None = None,
         **kwargs: Any,
     ) -> logging.LogRecord:
-        state = _origins.classify(name, fn)
+        state = _SDK if _is_claude_name(name) else _origins.classify(name, fn)
         if state == _UNKNOWN:  # An ambiguous file name: the frame of the caller tells.
             state = _frame_origin(fn, lno, func)
         if state != _APP:  # The SDK, or not sure: hide.
-            msg = _hidden_message(level, fn, lno)
+            msg = _hidden_message(level, fn, lno, name)
             args, exc_info, sinfo = (), None, None
         record = previous(name, level, fn, lno, msg, args, exc_info, func, sinfo, **kwargs)
         if state == _APP:
@@ -483,11 +489,11 @@ class _SdkRecordFilter(logging.Filter):
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
-        state = _origins.classify(record.name, record.pathname)
+        state = _SDK if _is_claude_name(record.name) else _origins.classify(record.name, record.pathname)
         if state == _UNKNOWN and _has_app_evidence(record):
             state = _APP
         if state != _APP:
-            record.msg = _hidden_message(record.levelno, record.pathname, record.lineno)
+            record.msg = _hidden_message(record.levelno, record.pathname, record.lineno, record.name)
             record.args = ()
             record.exc_info = None
             record.exc_text = None
