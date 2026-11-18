@@ -1226,3 +1226,35 @@ def test_an_interrupted_collection_does_not_lose_the_notice_of_an_import_that_is
     monkeypatch.undo()
     assert origins.classify("app", "/nonexistent-build-dir/after-the-recovery.py") == "app"
     assert not origins._unresolved and origins._complete and not safe_log._import_watcher.names
+
+
+def test_a_free_threaded_build_checks_a_cached_answer_under_the_lock_and_hides_when_it_is_busy(app_logger, monkeypatch):
+    """The lock-free read is only for builds with a GIL. Without one, the answer is checked under the lock (no wait)."""
+    logger, handled = app_logger
+    path = _unique_file("no_gil")
+    origins = safe_log._origins
+    _app_log(logger, path)  # The answer "not the SDK" is cached.
+    assert origins._answers[os.path.normcase(path)] is False
+    monkeypatch.setattr(safe_log, "_gil_disabled", lambda: True)
+    # The lock is free: the cached answer is used, after a check under the lock, and no snapshot is made.
+    snapshots: list[int] = []
+    real_snapshot = safe_log._mcp_snapshot
+    monkeypatch.setattr(safe_log, "_mcp_snapshot", lambda: (snapshots.append(1), real_snapshot())[1])
+    assert origins.classify("app", path) == "app"
+    _app_log(logger, path)
+    assert handled[-1].getMessage() == "app data " + MARKER and snapshots == []
+    # The lock is busy: the answer is ``UNKNOWN``, nothing waits, and (layer 1 is gone) the record is hidden.
+    previous = logging.getLogRecordFactory()
+    logging.setLogRecordFactory(logging.LogRecord)
+    results: list[str] = []
+    origins._lock.acquire()
+    try:
+        thread = threading.Thread(target=lambda: results.append(origins.classify("app", path)))
+        thread.start()
+        thread.join(30)
+        assert not thread.is_alive() and results == ["unknown"]
+        _app_log(logger, path, "data of the SDK")
+    finally:
+        origins._lock.release()
+        logging.setLogRecordFactory(previous)
+    assert MARKER not in handled[-1].getMessage() and handled[-1].getMessage().endswith("(details hidden)")

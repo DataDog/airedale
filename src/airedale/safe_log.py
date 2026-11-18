@@ -110,6 +110,12 @@ class _McpImportWatcher:
 _import_watcher = _McpImportWatcher()
 
 
+def _gil_disabled() -> bool:
+    """Tell whether this is a free-threaded build that runs without the GIL (``sys._is_gil_enabled()`` is false)."""
+    is_gil_enabled = getattr(sys, "_is_gil_enabled", None)
+    return callable(is_gil_enabled) and not is_gil_enabled()
+
+
 def _install_import_watcher() -> None:
     """Put the watcher first in ``sys.meta_path`` (again, when another hook was put before it)."""
     finders = sys.meta_path
@@ -214,6 +220,10 @@ class _McpOrigins:
             if answer is True:
                 return _SDK
             if answer is False:
+                if _gil_disabled():
+                    # Free-threaded build: a reader that has no lock has no guarantee to see the writes of a collection
+                    # (reading the size of a ``set`` is a relaxed load). The cached answer is checked under the lock.
+                    return self._decide(key, ambiguous)
                 if sequence & 1:
                     return _UNKNOWN  # A collection is running: its watcher names are in no state that can be read.
                 if not self._stale() and self._sequence == sequence:
