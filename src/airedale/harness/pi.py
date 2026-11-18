@@ -281,7 +281,7 @@ class PiRunner(DecoratorSpanAgentRunner):
         #: them, so they do not reach pi either.
         self.other_gateway_api_key_envs = list(other_gateway_api_key_envs)
         self.pi_models = [dict(model) for model in pi_models]
-        #: The servers of the repo ``.pi/mcp.json`` as they were when the run started (see ``_project_servers``).
+        #: The servers of the repo ``.pi/mcp.json`` as they were after the metadata probe, when pi starts (see ``_project_servers``).
         self._project_snapshot: list[McpServerSpec] | None = None
         #: True when the repo ``.pi/mcp.json`` turns ``autoEnableCodemode`` on over the scenario's setting (``False``).
         self._project_enables_codemode = False
@@ -303,8 +303,12 @@ class PiRunner(DecoratorSpanAgentRunner):
         progress: ProgressCallback | None,
     ) -> tuple[AgentRunResult, RuntimeError | None]:
         """Run pi and make one span for each model call, tool call and compaction."""
-        self._project_snapshot = discover_pi_project_mcp_servers(self.cwd, self._scenario_pi_configs())
+        # No snapshot while the probe runs: the probe starts the scenario servers, and one of them can change
+        # ``.pi/mcp.json``. The snapshot comes right after it, so it is the file that pi reads when it starts.
+        # (Nothing from outside airedale runs between the snapshot and the start of pi.)
+        self._project_snapshot = None
         trace_headers, mcp_tool_metadata = await self._span_context()
+        self._project_snapshot = discover_pi_project_mcp_servers(self.cwd, self._scenario_pi_configs())
         llmobs = _base.LLMObs
         spans: PiSpanRecorder | None = None
         if llmobs.enabled:
@@ -720,8 +724,9 @@ class PiRunner(DecoratorSpanAgentRunner):
         """Return the servers that pi loads from the repo ``.pi/mcp.json``: the snapshot of the run, if there is one.
 
         Pi reads the file once, at startup. The task can change or delete the file while it runs, so everything
-        that is reported about the run (tool definitions, agent manifest, dependencies) uses the list from the
-        start of the run (``_run_model_calls`` takes it), not a new read after the run.
+        that is reported about the run (tool definitions, agent manifest, dependencies) uses the list that
+        ``_run_model_calls`` takes after the metadata probe, right before pi starts (a probed server can change the
+        file), not a new read after the run.
         """
         if self._project_snapshot is not None:
             return self._project_snapshot

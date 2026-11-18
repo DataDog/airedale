@@ -2727,6 +2727,41 @@ class TestPiToolNames:
         _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
         assert reported[-1] == ["apm"]
 
+    def test_project_servers_are_read_after_the_metadata_probe(self, tmp_path, fake_pi, monkeypatch, fake_span_llmobs):
+        """A probed server can change ``.pi/mcp.json``: pi starts with the new file, and the report shows it."""
+        import airedale.harness.base as base
+        import airedale.harness.pi as pi_module
+
+        mcp_file = tmp_path / ".pi" / "mcp.json"
+        mcp_file.parent.mkdir()
+        mcp_file.write_text(json.dumps({"mcpServers": {"early": {"command": "node"}}}))
+        monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
+        monkeypatch.setattr(base, "agent", lambda **kwargs: lambda func: func)
+
+        async def _probe(servers, headers, notes=None, cwd=None):
+            # The probe starts the servers of the scenario; one of them rewrites the file of the repo.
+            mcp_file.write_text(json.dumps({"mcpServers": {"early": {"command": "node"}, "late": {"command": "node"}}}))
+            return {}
+
+        monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _probe)
+        manifest: list[list[str]] = []
+        definitions: list[list[str]] = []
+        real_definitions = pi_module._llmobs_tool_definitions
+
+        def _definitions(servers, **kwargs):
+            definitions.append([server.name for server in servers])
+            return real_definitions(servers, **kwargs)
+
+        monkeypatch.setattr(pi_module, "_llmobs_tool_definitions", _definitions)
+        monkeypatch.setattr(
+            base, "_annotate_agent_loop_span", lambda **kwargs: manifest.append([s.name for s in kwargs["mcp_servers"]])
+        )
+        command, _ = fake_pi(_events_tool_run())
+        runner = PiRunner(cwd=tmp_path, pi_command=command, mcp_servers=[McpServerSpec(name="apm", command="y")])
+        _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
+        assert definitions == [["apm", "early", "late"]]
+        assert manifest == [["apm", "early", "late"]]
+
     def test_reported_mcp_servers_without_project_file(self, tmp_path):
         scenario = McpServerSpec(name="apm", url="http://localhost/mcp")
         assert PiRunner(cwd=tmp_path, mcp_servers=[scenario])._reported_mcp_servers() == [scenario]
