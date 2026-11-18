@@ -269,7 +269,9 @@ def test_a_failed_claude_run_has_no_raw_text_in_the_logs_and_a_private_report(
     text = _records_text(caplog)
     for marker in (STDERR_MARKER, RESULT_MARKER, READER_MARKER):
         assert marker not in text, marker
-    assert all(record.exc_info is None for record in caplog.records if record.name.startswith("airedale"))
+    assert not any(
+        record.exc_info for record in caplog.records if record.name.startswith("airedale")
+    )  # (No traceback.)
     [failure] = [r for r in caplog.records if r.getMessage().startswith("Claude Agent SDK eval run failed (")]
     assert failure.levelno == logging.ERROR
     reports = list((tmp_path / "reports").glob("claude-run-*.log"))
