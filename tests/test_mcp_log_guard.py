@@ -11,13 +11,19 @@ from __future__ import annotations
 
 import asyncio
 import io
+import itertools
 import logging
+import os
 import sys
 import textwrap
+import threading
+import types
 
 import pytest
 
+from airedale import safe_log
 from airedale.mcp import McpServerSpec, _mcp_tool_metadata_catalog
+from airedale.safe_log import ensure_mcp_log_guard
 
 MARKER = "sk-SDK-LOG-MARKER-0123456789"
 
@@ -463,3 +469,244 @@ def test_an_sdk_module_that_is_only_imported_on_use_has_the_filter_too(route, le
     logged = result.stdout.split("LOGGED-BEGIN", 1)[1].split("LOGGED-END", 1)[0]
     assert "MCP SDK WARNING" in logged, logged  # The record was handled (not lost) and was hidden.
     assert MARKER not in logged + result.stderr
+
+
+# --------------------------------------------------------------------------- #
+# An ambiguous file name (``<string>``) is decided by the code that made the record, not by the name
+# --------------------------------------------------------------------------- #
+_counter = itertools.count()
+
+
+@pytest.fixture
+def restored_factory():
+    """Give back the record factory that the test found."""
+    factory = logging.getLogRecordFactory()
+    try:
+        yield
+    finally:
+        logging.setLogRecordFactory(factory)
+
+
+@pytest.fixture
+def app_logger(restored_factory):
+    """``(logger, handled)``: a logger of the application and the messages of the records that it handled."""
+    logger = logging.getLogger(f"airedale.test.app{next(_counter)}")
+    logger.setLevel(logging.DEBUG)
+    logger.propagate = False
+    handled: list[logging.LogRecord] = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record):
+            handled.append(record)
+
+    logger.addHandler(_Collect())
+    ensure_mcp_log_guard()  # (After the logger exists: the filter goes on every logger that exists.)
+    return logger, handled
+
+
+def _messages(handled) -> str:
+    return "\n".join(record.getMessage() for record in handled)
+
+
+def _run_string_code(code: str, **names):
+    """Run ``code`` as code of the application: ``compile(..., "<string>")`` and ``exec``."""
+    exec(compile(code, "<string>", "exec"), {"__name__": "__main__", **names})
+
+
+@pytest.fixture
+def sdk_string_module(monkeypatch):
+    """An ``mcp`` module that defines code made by ``compile(..., "<string>")``: like the methods that dataclasses write.
+
+    ``module.run(source, **names)`` runs ``source`` as code of that module (its globals are the ones of the module).
+    """
+    module = types.ModuleType(f"mcp._airedale_test{next(_counter)}")
+    exec(
+        compile("def marker_function():\n    return 1\n", "<string>", "exec"),
+        module.__dict__,
+    )
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+
+    def run(source: str, **names):
+        module.__dict__.update(names)
+        exec(compile(source, "<string>", "exec"), module.__dict__)
+
+    module.run = run  # pyright: ignore[reportAttributeAccessIssue]
+    return module
+
+
+def test_app_code_made_by_exec_keeps_its_log_text(app_logger, sdk_string_module):
+    logger, handled = app_logger
+    _run_string_code("logger.warning('app data %s', marker)", logger=logger, marker=MARKER)
+    assert "app data " + MARKER in _messages(handled)
+
+
+def test_app_code_of_python_dash_c_keeps_its_log_text():
+    import subprocess
+
+    script = textwrap.dedent(
+        """
+        import io, logging, sys
+        import airedale.mcp  # loads the SDK and installs the guard
+        from airedale.safe_log import ensure_mcp_log_guard
+        stream = io.StringIO()
+        logger = logging.getLogger("app")
+        logger.addHandler(logging.StreamHandler(stream))
+        logger.propagate = False
+        ensure_mcp_log_guard()
+        logger.warning("app data %s", sys.argv[1])
+        print(stream.getvalue())
+        """
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script, MARKER], capture_output=True, text=True, timeout=120, check=False
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
+    assert "app data " + MARKER in result.stdout
+
+
+def test_a_definition_that_the_sdk_imports_is_not_sdk_code(app_logger):
+    import mcp.server.sse  # noqa: F401  (Imports ``sse_starlette``: the module then holds definitions that it does not own.)
+    import sse_starlette.sse as sse
+
+    logger, handled = app_logger
+    code = "logger.warning('app data %s', marker)"
+    exec(compile(code, sse.__file__, "exec"), {"__name__": "__main__", "logger": logger, "marker": MARKER})
+    assert "app data " + MARKER in _messages(handled)
+
+
+def test_sdk_code_made_by_exec_is_hidden(app_logger, sdk_string_module):
+    logger, handled = app_logger
+    sdk_string_module.run("logger.warning('sdk data %s', marker)", logger=logger, marker=MARKER)
+    assert MARKER not in _messages(handled)
+    assert "MCP SDK WARNING" in _messages(handled)
+
+
+def test_two_nested_functions_with_one_file_line_and_name_are_hidden(app_logger, sdk_string_module, restored_factory):
+    """``findCaller`` picks the SDK ``emit`` (``stacklevel=2``), and the app ``emit`` has the same file, line and name."""
+    logger, handled = app_logger
+    namespace = {"__name__": "__main__"}
+    exec(
+        compile("def emit(logger, marker):\n    logger.warning(marker, stacklevel=2)\n", "<string>", "exec"), namespace
+    )
+    sdk_string_module.run("def emit(logger, marker, app_emit):\n    app_emit(logger, marker)\n")
+    results: list[str] = []
+    guard = logging.getLogRecordFactory()
+
+    def probe(name, level, fn, lno, msg, args, exc_info, func=None, sinfo=None, **kwargs):
+        results.append(safe_log._frame_origin(fn, lno, func))
+        return guard(name, level, fn, lno, msg, args, exc_info, func, sinfo, **kwargs)
+
+    logging.setLogRecordFactory(probe)
+    sdk_string_module.emit(logger, "data " + MARKER, namespace["emit"])
+    assert results == ["unknown"]  # Two frames with the same triple and different origins.
+    assert MARKER not in _messages(handled) and len(handled) == 1
+
+
+def test_a_record_that_another_thread_handles_inside_app_code_with_the_same_triple_is_hidden(
+    app_logger, sdk_string_module
+):
+    """The thread that handles a record can run app code with the same file, line and function: that is no proof."""
+    logger, handled = app_logger
+    record = logging.LogRecord(
+        "airedale.test.sdk", logging.WARNING, "<string>", 2, "data %s", (MARKER,), None, func="<module>"
+    )
+    errors: list[BaseException] = []
+
+    def handle_in_app_code():
+        try:
+            _run_string_code("x = 1\nlogger.handle(record)", logger=logger, record=record)
+        except BaseException as error:  # noqa: BLE001
+            errors.append(error)
+
+    thread = threading.Thread(target=handle_in_app_code)
+    thread.start()
+    thread.join(timeout=10)
+    assert not errors
+    assert MARKER not in _messages(handled) and len(handled) == 1
+    logger.handle(record)  # The same record, handled later by the thread that made it.
+    assert MARKER not in _messages(handled)
+
+
+def test_an_unhashable_record_class_is_kept_for_app_code_and_hidden_for_sdk_code(app_logger, sdk_string_module):
+    class Unhashable(logging.LogRecord):
+        __hash__ = None  # pyright: ignore[reportAssignmentType]
+
+    logger, handled = app_logger
+    base = logging.getLogRecordFactory()
+    logging.setLogRecordFactory(lambda *args, **kwargs: Unhashable(*args, **kwargs) if args else base(*args, **kwargs))
+    ensure_mcp_log_guard()
+    _run_string_code("logger.warning('app data %s', marker)", logger=logger, marker=MARKER)
+    sdk_string_module.run("logger.warning('sdk data %s', marker)", logger=logger, marker=MARKER)
+    texts = [record.getMessage() for record in handled]
+    assert texts[0] == "app data " + MARKER
+    assert MARKER not in texts[1] and texts[1].endswith("(details hidden)")
+    assert all(isinstance(record, Unhashable) for record in handled)
+
+
+def test_an_equal_record_that_the_guard_did_not_make_does_not_get_the_evidence_of_another(
+    app_logger, sdk_string_module
+):
+    class EqualByPlace(logging.LogRecord):
+        def _key(self):
+            return (self.pathname, self.lineno, self.funcName)
+
+        def __eq__(self, other):
+            return isinstance(other, EqualByPlace) and self._key() == other._key()
+
+        def __hash__(self):
+            return hash(self._key())
+
+    logger, handled = app_logger
+    base = logging.getLogRecordFactory()
+    logging.setLogRecordFactory(lambda *args, **kwargs: EqualByPlace(*args, **kwargs))
+    ensure_mcp_log_guard()
+    _run_string_code("x = 1\nlogger.warning('app data %s', marker)", logger=logger, marker=MARKER)
+    first = handled[0]  # (Kept alive: its evidence is in the store.)
+    assert first.getMessage() == "app data " + MARKER and first.lineno == 2 and first.funcName == "<module>"
+    logging.setLogRecordFactory(base)
+    second = EqualByPlace(
+        "airedale.test.sdk", logging.WARNING, "<string>", 2, "sdk data %s", (MARKER,), None, func="<module>"
+    )
+    assert second == first and hash(second) == hash(first)
+    logger.handle(second)
+    assert MARKER not in handled[1].getMessage()
+    assert first is not second
+
+
+def test_a_record_without_weak_reference_has_no_evidence_and_is_hidden(app_logger, sdk_string_module, monkeypatch):
+    logger, handled = app_logger
+
+    def no_reference(*args, **kwargs):
+        raise TypeError("cannot create weak reference")
+
+    monkeypatch.setattr(safe_log.weakref, "ref", no_reference)
+    _run_string_code("logger.warning('app data %s', marker)", logger=logger, marker=MARKER)  # Does not raise.
+    monkeypatch.undo()
+    assert len(handled) == 1
+    assert MARKER not in handled[0].getMessage() and handled[0].getMessage().endswith("(details hidden)")
+
+
+def test_the_origins_of_the_real_sdk_are_its_own_files():
+    import gc
+
+    ensure_mcp_log_guard()
+    origins = safe_log._origins
+    with origins._lock:
+        origins._modules_seen = -1  # Collect again.
+        origins._collect()
+    prefixes = origins._prefixes
+    assert prefixes
+    not_in_the_sdk = sorted(name for name in origins._filenames if not name.startswith(prefixes) and name != "<string>")
+    assert not_in_the_sdk == []  # (No file of ``contextlib``, ``dataclasses``, ``sse_starlette``, ``pydantic`` ...)
+    namespaces = {id(vars(module)) for name, module in list(sys.modules.items()) if safe_log._is_mcp_name(name)}
+    missing = set()
+    for item in gc.get_objects():
+        if isinstance(item, types.FunctionType) and id(item.__globals__) in namespaces:
+            if "<locals>" in item.__qualname__:
+                continue
+            name = item.__code__.co_filename
+            if not safe_log._is_ambiguous(name) and not (
+                os.path.normcase(name) in origins._filenames or os.path.normcase(name).startswith(prefixes)
+            ):
+                missing.add(name)
+    assert missing == set()
