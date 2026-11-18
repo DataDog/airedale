@@ -64,6 +64,43 @@ When an MCP server is itself LLMObs-instrumented, its spans link back to the
 experiment so the tokens it consumes are rolled into the experiment's total. See
 [How distributed tracing works](#how-distributed-tracing-works) for details.
 
+### Private report of a failed run
+
+The raw text that pi, the Claude CLI, a provider or a gateway writes about a
+failed run (stderr, error messages, request IDs) can hold credentials. It never
+goes to an error message, a log line or a span. Instead, a failed run writes it
+to one private file, and the error (or the log line) gives the name of that file.
+
+- **File name:** `pi-run-<time>-<id>.log` for a pi run, `claude-run-<time>-<id>.log`
+  for a Claude run. The file has mode `0600`.
+- **Directory:** `$AIREDALE_OUTPUT_DIR` if it is set, else `airedale-<uid>` in the
+  temporary directory of the system. The directory must belong to you, and it must
+  have mode `0700`. If it does not, no file is written, and Airedale logs a fixed
+  warning.
+- **When:** only for a run that failed and has raw text to keep. Airedale does not
+  delete the file. Remove it yourself when you no longer need it.
+- **Windows:** no file is written, and Airedale logs a fixed warning.
+- **Claude runs:** three outputs still have raw text: the error that the run
+  raises, the progress and console output of an error result, and the
+  retry summary of `ddtrace` (only when retries are on; Airedale does not use
+  retries).
+
+### Windows support
+
+Windows is **not a supported platform yet**. Some code is written for it: the
+lookup of the `pi` program, the start of pi, and a Windows Job Object that stops
+the whole process tree of a run. The required CI checks run on Linux only, so
+the tests of these three parts use a fake Windows API: they only simulate the
+real behavior.
+
+A separate CI job, `test-windows (py3.13, non-blocking)`, runs the test suite on
+`windows-latest`. It cannot block a merge, and it shows what fails there. The
+tests that need POSIX (shell scripts, file modes, process groups) are skipped on
+Windows, and so are the tests of the private report, which Windows does not
+write. The stderr reader of the MCP probe (it stops when a child process keeps
+stderr open, and leaves no thread or file descriptor behind) is tested on Windows
+by this job, with no skip.
+
 ---
 
 ## Installation
@@ -89,6 +126,7 @@ dependencies and are installed automatically.
 | `ANTHROPIC_API_KEY` | Anthropic API key                          | Anthropic models, without a gateway |
 | `OPENAI_API_KEY`    | OpenAI API key                             | OpenAI models, without a gateway    |
 | `AIREDALE_PI_COMMAND` | Command that starts pi: a command line (split with shell rules, or Windows rules on Windows) or a JSON array of arguments; default `pi` | Optional, `harness = "pi"` only |
+| `AIREDALE_OUTPUT_DIR` | Directory of the [private reports](#private-report-of-a-failed-run) of failed runs (mode `0700`, yours); default `airedale-<uid>` in the system temporary directory | Optional |
 
 ---
 
