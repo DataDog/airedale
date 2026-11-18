@@ -662,6 +662,9 @@ _STDERR_TAIL_GRACE_SECONDS = 1.0
 #: How often the reader looks at its deadline when no data arrives.
 _STDERR_TAIL_POLL_SECONDS = 0.05
 
+#: The first wait of the Windows reader when its pipe is empty (it doubles up to ``_STDERR_TAIL_POLL_SECONDS``).
+_STDERR_TAIL_FIRST_PAUSE_SECONDS = 0.001
+
 
 class _StderrTail:
     """A pipe for the stderr of a child process that keeps only the last ``limit`` bytes.
@@ -744,6 +747,10 @@ class _StderrTail:
         import msvcrt  # noqa: PLC0415
 
         handle = msvcrt.get_osfhandle(read_fd)
+        # An anonymous pipe has a small buffer, and a loud child waits for the reader each time that it is full. So the
+        # wait starts short (1 ms) and doubles up to the poll time while the pipe stays empty: a fixed 50 ms wait would
+        # give a throughput of one buffer for each 50 ms.
+        pause = _STDERR_TAIL_FIRST_PAUSE_SECONDS
         while not self._expired():
             try:
                 ready, _left = _winapi.PeekNamedPipe(handle, 0)
@@ -754,8 +761,10 @@ class _StderrTail:
                 if not chunk:
                     return
                 self._store(chunk)
+                pause = _STDERR_TAIL_FIRST_PAUSE_SECONDS
             else:
-                time.sleep(_STDERR_TAIL_POLL_SECONDS)
+                time.sleep(pause)
+                pause = min(pause * 2, _STDERR_TAIL_POLL_SECONDS)
 
     async def finish(self) -> str:
         """Stop the reader and return the tail as text. Call it once. It never blocks the event loop.
