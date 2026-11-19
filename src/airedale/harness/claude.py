@@ -32,6 +32,7 @@ import json
 import logging
 import os
 import time
+import traceback
 import uuid
 from collections import deque
 from collections.abc import Iterable, Mapping
@@ -389,28 +390,32 @@ def _report_claude_failure(model: ModelSpec, diagnostics: _ClaudeEvalDiagnostics
     stream), which can hold credentials, so they are never in a log line. The line has the type name and the place of the
     error (:func:`~airedale.safe_log.exception_summary`): no ``str(error)``, no traceback with values, no ``exc_info``.
     """
-    path = _write_claude_private_report(model, diagnostics)
+    path = _write_claude_private_report(model, diagnostics, error)
     where = f"raw diagnostics in the private file {path}" if path is not None else "no private file was written"
     logger.error("Claude Agent SDK eval run failed (%s); %s", exception_summary(error), where)
 
 
-def _write_claude_private_report(model: ModelSpec, diagnostics: _ClaudeEvalDiagnostics) -> Path | None:
-    """Write the raw diagnostics of a failed run to one private file (mode 0600); return its path.
+def _write_claude_private_report(
+    model: ModelSpec, diagnostics: _ClaudeEvalDiagnostics, error: BaseException
+) -> Path | None:
+    """Write the raw diagnostics and the error of a failed run to one private file (mode 0600); return its path.
 
-    Same rules as the pi report (:func:`airedale.private_report.open_private_report`). ``None``: nothing to write, or the
-    file cannot be written (a fixed warning is logged; the error of the run is never hidden).
+    The file has the diagnostics (when there are some) and the error with its type, its message, its traceback and its
+    cause chain: a connection or reader failure can come before any stderr or result, and the log line has only the
+    type and the place of the error. Same rules as the pi report (:func:`airedale.private_report.open_private_report`).
+    ``None``: the file cannot be written (a fixed warning is logged; the error of the run is never hidden).
     """
     summary = diagnostics.summary()
-    if not summary:
-        return None
     try:
         name = f"claude-run-{time.strftime('%Y%m%dT%H%M%S', time.gmtime())}-{uuid.uuid4().hex[:8]}.log"
         lines = [
             "Raw diagnostics of a failed Claude run. They can hold credentials: keep this file private.",
             f"model: {model.label}",
             "",
-            summary,
+            summary or "(no diagnostic from the Claude CLI before the failure)",
             "",
+            "== error (type, message, traceback and cause chain) ==",
+            "".join(traceback.format_exception(error)),
         ]
         fd, path = open_private_report(name)
         with os.fdopen(fd, "w", encoding="utf-8", errors="backslashreplace") as handle:

@@ -326,3 +326,52 @@ def test_the_ddtrace_retry_summary_is_not_changed(caplog):
     assert any(
         RETRY_MARKER in record.getMessage() and record.name == "ddtrace.llmobs._experiment" for record in caplog.records
     )
+
+
+class _FailsToConnect(_FakeTransport):
+    """A transport that cannot connect: no stderr, no result, only an exception with a cause."""
+
+    async def connect(self) -> None:
+        try:
+            raise OSError(f"cause {CAUSE_MARKER}")
+        except OSError as cause:
+            raise claude_agent_sdk.CLIConnectionError(f"cannot connect {CONNECT_MARKER}") from cause
+
+
+CONNECT_MARKER = "sk-CONNECT-MARKER"
+CAUSE_MARKER = "sk-CAUSE-MARKER"
+
+
+def test_a_connection_failure_with_no_stderr_and_no_result_still_has_a_private_report(tmp_path, monkeypatch, caplog):
+    """Copilot, finding 3: the report has the error (type, message, traceback, cause), also with no diagnostics."""
+    caplog.set_level(logging.DEBUG)
+    monkeypatch.setenv("AIREDALE_OUTPUT_DIR", str(tmp_path / "reports"))
+    (tmp_path / "cwd").mkdir()
+    transport = _FailsToConnect(raises=False)
+
+    def query_func(*, prompt, options):
+        transport.options = options
+        return claude_agent_sdk.query(prompt=prompt, options=options, transport=transport)
+
+    runner = ClaudeRunner(cwd=tmp_path / "cwd", claude_query_func=query_func)
+    with pytest.raises(claude_agent_sdk.CLIConnectionError):
+        asyncio.run(
+            asyncio.wait_for(
+                runner.run(model=ANTHROPIC_MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"),
+                timeout=60,
+            )
+        )
+    text = _records_text(caplog)
+    assert CONNECT_MARKER not in text and CAUSE_MARKER not in text  # The log line has only the type and the place.
+    [failure] = [r for r in caplog.records if r.getMessage().startswith("Claude Agent SDK eval run failed (")]
+    assert "CLIConnectionError" in failure.getMessage()
+    reports = list((tmp_path / "reports").glob("claude-run-*.log"))
+    if os.name == "nt":
+        assert reports == [] and "no private file was written" in failure.getMessage()
+        return
+    [report] = reports
+    assert str(report) in failure.getMessage()
+    contents = report.read_text()
+    assert "CLIConnectionError" in contents and f"cannot connect {CONNECT_MARKER}" in contents
+    assert "Traceback" in contents and f"cause {CAUSE_MARKER}" in contents  # The traceback and the cause chain.
+    assert "no diagnostic from the Claude CLI" in contents
