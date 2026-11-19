@@ -124,6 +124,7 @@ Names are a proposal. The implementation plan can change them.
 def _claude_result_error_progress(message: Any) -> str:
     """Return the safe progress text of an error ``ResultMessage``, without the model label (section 3.2)."""
 
+
 def _claude_api_retry_progress(message: Any) -> str:
     """Return the safe progress text of an ``api_retry`` ``SystemMessage``, without the model label (section 3.3)."""
 ```
