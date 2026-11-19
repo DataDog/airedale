@@ -67,6 +67,39 @@ assert that the bytes fail to decode with both `"utf-8"` and
 `locale.getpreferredencoding(False)`. If a future runner changes the code page,
 the test fails at this line with a clear message, not with `DID NOT RAISE`.
 
+### Where the decode fails on Windows (found in planning)
+
+`subprocess` does not decode in the same place on all platforms. (Checked in the
+CPython source of `subprocess.py`, 3.11 and 3.14: `Popen._readerthread` and the two
+`_communicate` methods. The CI job uses 3.13.)
+
+- **Linux and macOS:** `communicate()` decodes in the calling thread.
+  `subprocess.run` raises `UnicodeDecodeError`, and `_run_credentials_helper`
+  raises `RuntimeError("… UnicodeDecodeError at subprocess.py:…")`.
+- **Windows:** `communicate()` reads each pipe in a reader thread, and the decode
+  runs in that thread. The `UnicodeDecodeError` stops the thread and goes to
+  `threading.excepthook`. `subprocess.run` then returns `stdout=None` with exit
+  code 0, `result.stdout.strip()` raises `AttributeError`, and
+  `_run_credentials_helper` raises `RuntimeError("… AttributeError at gateway.py:62")`.
+
+So on Windows the test passes through a different path. This gives three rules for
+the test:
+
+1. Do not assert the error type in the `RuntimeError` message. It is not the same
+   on all platforms.
+2. Replace `threading.excepthook` with `monkeypatch` (a list `append`), and assert
+   that the secret is not in the formatted traceback of a captured thread
+   exception. On Windows, this is the text that the default hook writes to stderr.
+   It also stops the `PytestUnhandledThreadExceptionWarning` that pytest shows for
+   this test.
+3. Do not assert the number of captured thread exceptions. It is a CPython detail
+   (0 on Linux and macOS, 1 on Windows).
+
+Production note (out of scope, for the follow-up issue): on Windows, a real helper
+with output that is not valid in the code page writes a thread traceback to
+stderr, and the error says `AttributeError`. The traceback has no secret: the text
+of `UnicodeDecodeError` gives only the byte and its position.
+
 ### Fallback: `skipif` on Windows
 
 ```python
@@ -79,7 +112,7 @@ the test fails at this line with a clear message, not with `DID NOT RAISE`.
 |---|---|---|
 | Windows keeps coverage | Yes | No |
 | Linux and macOS coverage | Same | Same |
-| Test code size | ~6 more lines + precondition | 1 line |
+| Test code size | ~12 more lines (helper, precondition, thread hook) | 1 line |
 | Risk | Quoting in `cmd.exe`; code page change | None, but a silent gap on Windows |
 | Matches the issue preference | Yes | Only if the helper is not practical |
 
@@ -108,21 +141,44 @@ the cause is not a bug in the helper.
 
 ## Acceptance criteria
 
+Items 7 and 8 were changed, and items 9 to 11 were added, in planning. The
+ROMAIN-66 plan gives the check for each item.
+
 1. `[unit test]` The test uses a helper command that runs `sys.executable`, and not `printf`.
 2. `[unit test]` The test has a precondition: the raw helper bytes fail to decode with
    `utf-8` and with `locale.getpreferredencoding(False)`.
-3. `[unit test]` `uv run pytest tests/test_gateway.py -k invalid_utf8` passes on the developer
+3. `[unit test]` `uv run pytest tests/test_gateway.py -k invalid_utf8 -v` passes on the developer
    machine (macOS).
 4. `[CI]` The Linux jobs pass for the changed test.
 5. `[CI]` The `test-windows` job passes for the changed test (not skipped).
 6. `[CI]` The `test-windows` job is green on the PR. (Note: `ci.yml` on `main` has no
    Windows job yet. It comes with PR #64. Check this PR after #64 is merged, or rebased
    on it.)
-7. `[review]` `jj diff --stat` of the fix PR shows only `tests/test_gateway.py`.
-8. `[unit test]` The byte choice is proven in a one-line check that the PR description
-   shows: `0xFF` decodes with `cp1252` (this is the bug) and `0x81` does not.
+7. `[review]` The PR changes only `tests/test_gateway.py` and this design doc
+   (`gh pr view 69 --json files`). No production file changes.
+8. `[review]` The PR description shows a one-line check of the byte choice: `0xFF`
+   decodes with `cp1252` (this is the bug) and `0x81` does not.
+9. `[unit test]` The test captures `threading.excepthook` and asserts that the secret is
+   not in the formatted traceback of a captured thread exception.
+10. `[review]` The test does not assert the error type in the `RuntimeError` message, and
+    does not assert the number of captured thread exceptions.
+11. `[CI]` After PR #64 and this PR are both merged, the `test-windows` job of the `push`
+    run on `main` is green (definition of done of ROMAIN-66).
+
+## Review requirements
+
+- Classification: **trivial**. One test file changes. No production code, public API,
+  or security boundary changes.
+- Reviewers: the standard Reviewer only. No Adversarial Reviewer.
+- The Reviewer checks each acceptance criterion above with the check that the ROMAIN-66
+  plan gives, and records pass or fail for each item.
+- Focus: the test cannot pass for the wrong reason (precondition, no skip marker), and
+  no secret goes out through the error, the logs, or a thread exception.
+- If the review finds that a production change is necessary (for example, for the
+  Windows thread traceback), stop and escalate to Romain. It is out of scope here.
 
 ## Estimate
 
-About 30 minutes: 10 minutes to change the test, 5 minutes to run it locally,
-15 minutes to read the CI result.
+About 40 minutes of work: 15 minutes to change the test, 5 minutes to run it
+locally, 20 minutes to read the CI results. The `test-windows` result also waits
+for PR #64 (not included in the 40 minutes).
