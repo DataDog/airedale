@@ -1,24 +1,27 @@
 # Raw error text in the ddtrace experiment retry summary (ROMAIN-65, O7)
 
-Status: draft, for decision. Size: Small. Code: `src/airedale/experiment.py`,
-`src/airedale/scoring/rubric.py`, tests, `AGENTS.md`. No ddtrace change.
+Status: decided. Romain selected **C** (ROMAIN-65, Nov 19). Size: Small. Code:
+`src/airedale/experiment.py`, `src/airedale/scoring/rubric.py`, tests, `AGENTS.md`,
+`README.md`. No ddtrace change.
 
 All `_experiment.py` line numbers are for `ddtrace/llmobs/_experiment.py`. They are the
 same in ddtrace 4.16.3 and 4.17.0 (see [Constraints](#4-constraints)).
 
-## Decision for Romain
+## Decision
 
-Select one option. The recommendation is **C**.
+Romain selected **C**, the recommendation. The table compares the six experiment sinks of
+[§1](#1-scope-finding). Child spans are not in these sinks (see
+[Child spans](#child-spans-are-outside-the-guard)).
 
 | | A. Log filter | B. Safe task error | **C. Safe task and judge errors** |
 |---|---|---|---|
 | Change | A filter on the logger `ddtrace.llmobs._experiment` replaces the `Retries (N):` block | `experiment_task` raises a new error with the `exception_summary(e)` text | B, plus the same guard in `RubricEvaluator.evaluate` |
 | Summary log line, task retries | Hidden | Safe text | Safe text |
 | Summary log line, judge retries | Hidden | **Raw** | Safe text |
-| Task span tags, row error, failed-status text (LLM Obs) | **Raw** | Safe text | Safe text |
+| Experiment span tags, row error, failed-status text (LLM Obs) | **Raw** | Safe text | Safe text |
 | Judge eval error, message and stack (LLM Obs) | **Raw** | **Raw** | Safe text |
 | `--fail-fast` console line (`cli.py:155-156`) | **Raw** | Safe text | Safe text |
-| Debug text that LLM Obs keeps | All | Task: type, place, frames. Judge: all | Task and judge: type, place, frames |
+| Debug text that the experiment records keep | All | Task: type, place, frames. Judge: all | Task and judge: type, place, frames |
 | Depends on the text format of the ddtrace summary | Yes | No | No |
 | Meets the definition of done | Yes | **No** (judge retries stay raw) | Yes |
 | DD-35 step 8 test | Can keep the hand-set `_retries` | Must run a real retry | Must run a real retry |
@@ -55,6 +58,22 @@ The issue names one sink: the summary log line. In ddtrace, the raw `str(e)` goe
    stack. `cli.py:155-156` prints it.
 
 Sink 1 needs `max_retries > 0`. Sinks 2 to 6 occur **today**, with `max_retries=0`.
+
+### Child spans are outside the guard
+
+The six sinks are the experiment records: the experiment span, the row, the evaluator error,
+the status text, the summary log line and the fail-fast error. Child spans that are
+instrumented on their own record the original error **before** `experiment_task` gets it:
+
+- The `@agent` span of `DecoratorSpanAgentRunner` (Codex, pi): `run` raises
+  `run_result.error` inside the span (`harness/base.py:711-712`). The ddtrace decorator runs the
+  function in a `with` span block (`ddtrace/llmobs/decorators.py:241-264`), and the span records
+  the error when the block exits. The pi errors are fixed
+  texts already (`AGENTS.md`, option S). The Codex errors are not checked.
+- The native ddtrace Claude spans (accepted raw output of DD-35, `AGENTS.md` "Claude failed
+  runs").
+
+The C guards do not change these spans. They are out of scope (see [§8](#8-out-of-scope)).
 
 ```mermaid
 flowchart TD
@@ -97,19 +116,23 @@ Guard points: blue = B and C, green = C only, orange = A.
 - **Judge, safe today:** `DecisionsRubricEvaluator._request` raises a fixed text outside the
   handler (`scoring/decisions.py:100-113`). C does not change it.
 
-### Debug information that LLM Obs loses with B or C
+### Debug information that the experiment records lose
 
-| Field | Today | With B or C |
+The first three rows apply to B and C. The last row applies to C only.
+
+| Field | Today | With C |
 |---|---|---|
-| `error.message` (span, row, status text) | Raw message | `<Type> at <file>:<line>` |
+| `error.message` (experiment span, row, status text) | Raw message | `<Type> at <file>:<line>` |
 | `error.type` | Original class, for example `claude_agent_sdk._errors.ProcessError` | The wrapper class. The original class name stays in the message, without its module. |
 | `error.stack` | Frames, the message, each chained exception and its message | The original frames only. No message, no chained exception. |
-| Judge eval error | Provider message (status, body) | `<Type> at <file>:<line>`. The SDK class name (for example `RateLimitError`) stays. |
+| Judge eval error | Provider message (status, body) | `<Type> at <file>:<line>`. The SDK class name (for example `RateLimitError`) stays. With B: no change (raw). |
 
 Safe fixed texts are lost too. Example: the pi errors (`pi exited with status N for <model>`)
 and the path of the private report `pi-run-*.log`. The report files stay in the output
-directory. The path of the Claude private report stays in its WARNING log line (DD-35). For an
-error without a private report (for example a judge error), no copy of the message stays.
+directory. The path of the Claude private report stays in its log line (DD-35). For an error
+without a private report (for example a judge error), no copy of the message stays in the
+experiment records. A child span can still have a copy (see
+[Child spans](#child-spans-are-outside-the-guard)).
 
 ## 2. Design (option C)
 
@@ -185,9 +208,9 @@ The same pattern, with its own class (for example `RubricJudgeError(RuntimeError
 
 1. **Start from `main` after PR #64 merges** (Romain, Q2 = A). Do not stack on the PR #64
    branch.
-2. **Correction to the findings:** `exception_summary` is **already on `main`**
-   (`src/airedale/safe_log.py:27`, from PR #51). PR #64 has the same function at
-   `safe_log.py:29`. So the production code does not need PR #64. The test needs it:
+2. **Correction to the findings:** `exception_summary` was **already on `main`** before PR #64
+   (`src/airedale/safe_log.py:27`, from PR #51). After PR #64 it is at `safe_log.py:29`. So the
+   production code does not need PR #64. The test needs it:
    `test_the_ddtrace_retry_summary_is_not_changed` (`tests/test_harness_claude.py:315-329`) and
    its fixtures (`_FakeTransport`, `_claude_runner`, `RETRY_MARKER`) are only in PR #64.
    C does not use `_hidden_message`.
@@ -242,13 +265,12 @@ in that line makes the test fail for the wrong reason.
 7. `[review]` `src/airedale/experiment.py:272` does not pass `max_retries` (the default 0
    stays). There is no new config key and no new CLI flag.
 8. `[review]` `AGENTS.md` §8 has one new bullet: task and judge errors reach ddtrace as
-   `exception_summary` text, what LLM Obs loses, and where the private reports are.
+   `exception_summary` text, what the experiment records lose, where the private reports are,
+   and that child spans are not covered. The "Accepted raw outputs" of the "Claude failed
+   runs" bullet and the "Claude runs" item of `README.md` no longer list the experiment span,
+   the status, the retry summary and the `cli.py` line.
 9. `[CI]` `uv run ruff format --check .`, `uv run ruff check --no-fix .`, `uv run pyright` and
    `uv run pytest` pass.
-
-If Romain selects A: item 1 keeps the hand-set `_retries` and only inverts the assert. Items 2
-to 6 do not apply. Add one test that the filter is on the logger before `experiment.run`, and
-one test with a real retry.
 
 ## 6. Review requirements
 
@@ -264,8 +286,8 @@ thinking.
 | API and compatibility | The design depends on ddtrace internals and changes `error.type` in LLM Obs | Are the ddtrace facts true for the version that `main` pins? Does a dashboard or monitor use `error.type`? Is the `AGENTS.md` bullet correct? |
 | Tests and validation | An "is absent" assert can pass for the wrong reason | Do the tests use the real retry loop? Do they assert that the record exists? Is the DD-35 step 8 change correct? |
 
-After that, the squad Adversarial Reviewer challenges the scope choice (debug loss against
-coverage). Romain selects the option at the design gate, before implementation starts.
+After that, the squad Adversarial Reviewer challenges the result against the scope that Romain
+selected (C, with the debug loss and without the child spans).
 
 ## 7. Risks
 
@@ -276,11 +298,14 @@ coverage). Romain selects the option at the design gate, before implementation s
 | The guard wraps `CancelledError`, so the interrupt fails | Catch `Exception` only. Item 6. |
 | A new ddtrace version adds a sink (for example `exc_info` on the summary) | The tests run the real ddtrace code and check each record and the row error. Items 1 to 5. |
 | The rate limit drops the record, so a test passes for the wrong reason | DEBUG level and a "record exists" assert in each test. |
-| LLM Obs has less debug text | The frames stay. The private reports of pi and Claude stay. Romain decides. |
+| LLM Obs has less debug text | The frames stay. The private reports of pi and Claude stay. Romain accepted the loss (C). |
 
 ## 8. Out of scope
 
 - DD-64 (O6): the progress and console output of the runners.
+- Child spans that are instrumented on their own: the `@agent` span of
+  `DecoratorSpanAgentRunner` and the native ddtrace Claude spans (see
+  [Child spans](#child-spans-are-outside-the-guard)). A possible follow-up issue.
 - DD-35 O5: the error that the Claude runner raises.
 - A `max_retries` option in airedale.
 - Keep safe fixed texts (pi errors, report paths) in LLM Obs. A possible follow-up: an
