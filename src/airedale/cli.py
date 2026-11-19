@@ -63,7 +63,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--judge-model",
         metavar="M",
         default=None,
-        help="override the judge model",
+        help='override the rubric judge model; rejected when judge_type = "decisions"',
     )
     parser.add_argument(
         "--jobs",
@@ -149,6 +149,9 @@ def main(argv: list[str] | None = None) -> int:
         # 130 is the conventional "terminated by SIGINT" exit status.
         print("interrupted", file=sys.stderr)
         return 130
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     except Exception as exc:  # noqa: BLE001
         print(f"error: {exc}", file=sys.stderr)
         return 1
