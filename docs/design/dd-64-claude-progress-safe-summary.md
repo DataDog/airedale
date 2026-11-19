@@ -149,7 +149,7 @@ Why these rules:
 - "Exactly one of the list" refuses a listed value with more text (for example `"rate_limit sk-…"` or `"end_turn\n"`).
 - The bounds keep the line short. A very large `int` cannot raise an error when it is converted to text.
 - A count and `yes` show how many items there are, or that an item exists. They never show the content.
-- The output has only list strings, digits, `=`, `;`, `/`, spaces and `<other>`. So it is ASCII only and it cannot fail to encode on a Windows console code page. It has no `[` or `]`, so rich cannot read it as markup.
+- The generated fields (all text after the model label) have only list strings, digits, `=`, `;`, `/`, spaces and `<other>`. So they are ASCII only and they cannot fail to encode on a Windows console code page. They have no `[` or `]`, so rich cannot read them as markup. This does not apply to the configured model label at the start of the line: it is not changed or checked.
 - The placeholder is the same text as pi `OTHER_VALUE` (`<other>`). The implementation plan decides if the code imports it or defines it again.
 - Each list has a code comment that names its source (CLI 2.1.319 in SDK 0.2.179), so that the reviewer of an SDK bump can check the lists again.
 

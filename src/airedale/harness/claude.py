@@ -774,7 +774,8 @@ def _claude_result_error_summary(message: Any, *, max_turns: int | None) -> str:
 # Progress rendering
 # --------------------------------------------------------------------------- #
 # Values that the Claude Code CLI 2.1.319 (bundled in claude-agent-sdk 0.2.179) writes. When the SDK changes, check
-# them again. A value that is not in a list shows as OTHER_VALUE: the progress text never shows raw text.
+# them again. A value that is not in a list shows as OTHER_VALUE: the progress texts of an error result and of an
+# ``api_retry`` message never show raw text. Other progress texts (nested agent, tool inputs) are not covered.
 _CLAUDE_RESULT_SUBTYPES = frozenset(
     {
         "success",
