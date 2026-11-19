@@ -1,6 +1,6 @@
 # Credentials helper output: strict UTF-8, decoded in the calling thread (ROMAIN-70)
 
-Status: draft, version 2 (after challenge round 1). Scope: `_run_credentials_helper` in
+Status: draft, version 3 (after challenge round 2 and planning). Scope: `_run_credentials_helper` in
 `src/airedale/gateway.py`, its tests, one `README.md` line.
 Decision (Romain, option A): helper output is strict UTF-8 on all platforms.
 
@@ -106,7 +106,9 @@ byte `0x81`, precondition, `threading.excepthook` capture). It has three rules t
 decodes in a thread: do not assert the error type; do not count thread exceptions; capture `excepthook`.
 After this change, these can be stricter in the same test:
 
-- `pytest.raises(RuntimeError, match="UnicodeDecodeError")` (the type is the same on all platforms).
+- `pytest.raises(RuntimeError, match="is not valid UTF-8")` (the fixed text, the same on all platforms). Do not
+  match only `UnicodeDecodeError`: the code of today already puts that type name in the message on Linux and
+  macOS (`exception_summary`), so that match cannot fail there.
 - `assert thread_errors == []` (no thread exception on any platform). The `excepthook` capture stays.
 - The precondition can drop `locale.getpreferredencoding(False)`: only UTF-8 matters now.
 
@@ -115,8 +117,12 @@ After this change, these can be stricter in the same test:
 below (AC 3 to 5) close this gap.
 
 **Merge order: #69 first, then this PR.** #69 has no production change and turns `test-windows` green for this
-test today. This PR then rebases on `main` and tightens the same test. The other order would make #69 conflict
-on the same lines. If #69 is not merged when the Implementer starts, stack on #69's branch.
+test today. This PR then merges `main` into its branch (a merge commit, no rebase: pushed commits are
+immutable) and tightens the same test. The other order would make #69 conflict on the same lines. If #69 is not
+merged when the Implementer starts, merge #69's branch into this branch, and merge `main` again after #69 is
+merged. This PR is not merged before #69.
+
+The `test-windows` job is on `main` since PR #64 (merged). This branch already contains it.
 
 ## Other `subprocess` calls with `text=True` in `src/` (listed only, not changed)
 
@@ -140,8 +146,9 @@ The `asyncio.subprocess` calls (`pi.py`, `mcp.py`, `workdir.py:238`) use bytes a
 
 ## Acceptance criteria
 
-1. `[unit test]` `_run_credentials_helper` calls `subprocess.run` without `text=True` and without `encoding`
-   (assert on the mock call). The six `str` mocks and the two decode-error mocks are changed as above.
+1. `[unit test]` `_run_credentials_helper` calls `subprocess.run` without `text`, `universal_newlines` (an alias
+   of `text`), `encoding` and `errors` (assert on the mock call). The six `str` mocks and the two decode-error
+   mocks are changed as above.
 2. `[unit test]` Mocked valid non-ASCII UTF-8 output (`"tökén-é\n".encode()`) gives the same token on all
    platforms.
 3. `[unit test]` Real helpers, strict UTF-8 versus a locale fallback (run on all platforms):
@@ -153,7 +160,9 @@ The `asyncio.subprocess` calls (`pi.py`, `mcp.py`, `workdir.py:238`) use bytes a
 4. `[unit test]` Line endings and BOM, with mocked bytes:
    a. `b"line\r\ntoken\r\n"` gives `token`;
    b. `b"info\rtoken\r"` gives `token` (a lone CR is a line end, as with `text=True`);
-   c. `b"\xef\xbb\xbfstatus line\r\n<jwt>\r\nok\r\n"` gives the JWT (BOM + JWT + status line);
+   c. `b"\xef\xbb\xbfaaaa.bbbb.cccc\r\nok\r\n"` gives `aaaa.bbbb.cccc` (the BOM is directly before the JWT, then a
+      status line). With plain `"utf-8"` the first line keeps U+FEFF, is not a JWT, and the result is `ok`, so
+      this case fails if the BOM is not removed;
    d. a BOM before a plain token gives the token without U+FEFF.
 5. `[unit test]` Real helper, success with invalid stderr: stdout is a valid token, stderr is `0x81` + a marker
    string. The call returns the token, `thread_errors == []`, and the marker is not in the log (`caplog`) and not
@@ -163,14 +172,14 @@ The `asyncio.subprocess` calls (`pi.py`, `mcp.py`, `workdir.py:238`) use bytes a
 8. `[review]` macOS: a recorded local run of `uv run pytest tests/test_gateway.py tests/test_decisions_integration.py -v`
    (the output in the PR description). There is no macOS job in `ci.yml`.
 9. `[CI]` The `test-windows` job (`continue-on-error: true`, so a green check alone is not proof) shows these as
-   **passed, not skipped**: the tests of AC 2 to 6, by name (`-rA` or the `-v` output in the job log). The job
-   log or the test output also records the **parent** interpreter encoding, with a line such as
-   `locale.getpreferredencoding(False)` and `sys.stdout.encoding`/`sys.flags.utf8_mode` printed by the tests
-   (or a fixture, with `-s`). This shows that the Windows run is not in UTF-8 mode, so AC 3b is a real test.
+   **passed, not skipped**: the tests of AC 2 to 6, by name (the `PASSED <test id>` lines of `pytest -rfEsp` in
+   the job log). The job log also records the **parent** interpreter encoding: `locale.getpreferredencoding(False)`
+   and `sys.flags.utf8_mode` in the pytest report header (a `pytest_report_header` hook in `tests/conftest.py`,
+   shown with no `-s`). This shows that the Windows run is not in UTF-8 mode, so AC 3b is a real test.
 10. `[docs]` `README.md` says that helper output must be UTF-8 (one optional BOM is accepted) and that a
     non-UTF-8 helper fails with a decode error.
-11. `[review]` The diff has no `text=True`, no `errors="replace"`/`"ignore"` for `stdout`, no `str` fallback, no
-    new dependency, and no change to the three `git` calls above.
+11. `[review]` The diff has no `text=True` or `universal_newlines=True`, no `errors="replace"`/`"ignore"` for
+    `stdout`, no `str` fallback, no new dependency, and no change to the three `git` calls above.
 
 ## Review requirements
 
