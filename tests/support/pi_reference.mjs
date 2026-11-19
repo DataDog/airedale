@@ -47,8 +47,14 @@ if (request.action === "mcp") {
   console.log(JSON.stringify({ names: result.skills.map((skill) => skill.name) }));
 } else if (request.action === "names") {
   // The MCP tool names, with servers registered in the given order. Same
-  // collision rule as the registration loop of the MCP extension.
-  const { createMcpToolName } = await load("extensions/mcp/tools.js");
+  // collision rule as the registration loop of the MCP extension (the 3 "taken"
+  // conditions below are those of ``extensions/mcp/index.js`` in pi 1.4.0 to 1.5.1).
+  // Pi 1.4.0 and 1.5.0 export ``createMcpToolName`` from ``extensions/mcp/tools.js``.
+  // Pi 1.5.1 moved it to the package ``@earendil-works/pi-mcp``.
+  const tools = await load("extensions/mcp/tools.js");
+  const createMcpToolName =
+    tools.createMcpToolName ??
+    (await import(pathToFileURL(`${base}/../pi-mcp/dist/index.js`).href)).createMcpToolName;
   const owners = new Map();
   const result = [];
   for (const [server, tools] of request.servers) {

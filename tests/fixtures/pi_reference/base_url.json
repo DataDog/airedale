@@ -65,12 +65,45 @@
      "error": null,
      "model": "https://gw.test/v1/$"
     }
+   ],
+   "1.5.1": [
+    {
+     "auth": null,
+     "error": null,
+     "model": "https://gw.test/v1/$TENANT"
+    },
+    {
+     "auth": null,
+     "error": null,
+     "model": "https://gw.test/${TENANT}/x"
+    },
+    {
+     "auth": null,
+     "error": null,
+     "model": "https://gw.test/$$x"
+    },
+    {
+     "auth": null,
+     "error": null,
+     "model": "https://gw.test/$!y"
+    },
+    {
+     "auth": null,
+     "error": null,
+     "model": "https://gw.test/!cmd"
+    },
+    {
+     "auth": null,
+     "error": null,
+     "model": "https://gw.test/v1/$"
+    }
    ]
   }
  },
- "node": "v26.13.0",
+ "node": "v26.13.1",
  "pi_versions": [
   "1.4.0",
-  "1.5.0"
+  "1.5.0",
+  "1.5.1"
  ]
 }

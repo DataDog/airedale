@@ -493,6 +493,29 @@ class TestModelCalls:
         assert recorder.records[0].metadata["input_source"] == "transcript"
         assert recorder.invalid_extension_entries == 1
 
+    @pytest.mark.parametrize("status", [100, 200, 599])
+    def test_a_status_from_100_to_599_is_kept(self, status):
+        assert self._status_metadata(status) == {"http_status": status}
+
+    @pytest.mark.parametrize("status", [-1, 0, 99, 600, 10**12, True, 200.0, "200", None])
+    def test_another_status_is_left_out(self, status):
+        assert self._status_metadata(status) == {}
+
+    @staticmethod
+    def _status_metadata(status: Any) -> dict[str, Any]:
+        recorder = _feed(
+            _recorder(),
+            [
+                (0, {"type": "turn_start"}),
+                (1, {"type": "message_end", "message": USER}),
+                (2, _request(1, 2, 0, [USER])),
+                (3, _response(1, 3, status=status)),
+            ],
+        )
+        recorder.close(received_ns=_ns(T0_MS + 50))
+        [record] = recorder.records
+        return {key: value for key, value in record.metadata.items() if key == "http_status"}
+
     def test_sequence_must_increase_and_response_must_match(self):
         recorder = _feed(
             _recorder(),
@@ -1201,7 +1224,8 @@ class TestEmit:
 # --------------------------------------------------------------------------- #
 DRIVER = textwrap.dedent(
     """
-    const { default: register } = await import(process.argv[2]);
+    const { pathToFileURL } = await import("node:url");
+    const { default: register } = await import(pathToFileURL(process.argv[2]).href);
     const steps = JSON.parse(process.argv[3]);
     const handlers = {};
     const entries = [];

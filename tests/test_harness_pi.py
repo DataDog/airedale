@@ -1459,7 +1459,7 @@ class TestRunnerConfig:
         assert command[command.index("--model") + 1] == "claude-sonnet-4-6"
         assert command[command.index("--thinking") + 1] == "high"
         assert command[command.index("--skill") + 1] == "/s/a"
-        assert command[command.index("--append-system-prompt") + 1] == "/p.md"
+        assert command[command.index("--append-system-prompt") + 1] == str(Path("/p.md"))
         # `mcp__*` matches pi's real MCP tool names (hashed when long or
         # colliding); `toolExposure` in mcp.json enforces `tool_names`.
         # The MCP resource tools do not match `mcp__*`: they are named.
@@ -1705,6 +1705,7 @@ class TestRunnerConfig:
         assert not runner._models_config(MODEL)
         assert runner._env(tmp_path / "agent", model=MODEL)["ANTHROPIC_API_KEY"] == "provider-key"
 
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX owner and mode checks")
     def test_private_agent_dir_skips_parents_inside_workspace(self, tmp_path, monkeypatch):
         import airedale.harness.pi as pi_module
 
@@ -2407,6 +2408,7 @@ class TestSubprocess:
         seen = json.loads(record.read_text())
         assert seen["dd_env"] == {}
 
+    @pytest.mark.skipif(os.name == "nt", reason="no private report is written on Windows")
     def test_non_zero_exit(self, tmp_path, fake_pi):
         command, _ = fake_pi([], FAKE_PI_EXIT="3", FAKE_PI_STDERR="unknown model")
         result = _run(PiRunner(cwd=tmp_path, pi_command=command))
@@ -2727,6 +2729,41 @@ class TestPiToolNames:
         _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
         assert reported[-1] == ["apm"]
 
+    def test_project_servers_are_read_after_the_metadata_probe(self, tmp_path, fake_pi, monkeypatch, fake_span_llmobs):
+        """A probed server can change ``.pi/mcp.json``: pi starts with the new file, and the report shows it."""
+        import airedale.harness.base as base
+        import airedale.harness.pi as pi_module
+
+        mcp_file = tmp_path / ".pi" / "mcp.json"
+        mcp_file.parent.mkdir()
+        mcp_file.write_text(json.dumps({"mcpServers": {"early": {"command": "node"}}}))
+        monkeypatch.setattr(base, "LLMObs", fake_span_llmobs)
+        monkeypatch.setattr(base, "agent", lambda **kwargs: lambda func: func)
+
+        async def _probe(servers, headers, notes=None, cwd=None):
+            # The probe starts the servers of the scenario; one of them rewrites the file of the repo.
+            mcp_file.write_text(json.dumps({"mcpServers": {"early": {"command": "node"}, "late": {"command": "node"}}}))
+            return {}
+
+        monkeypatch.setattr(base, "_mcp_tool_metadata_catalog", _probe)
+        manifest: list[list[str]] = []
+        definitions: list[list[str]] = []
+        real_definitions = pi_module._llmobs_tool_definitions
+
+        def _definitions(servers, **kwargs):
+            definitions.append([server.name for server in servers])
+            return real_definitions(servers, **kwargs)
+
+        monkeypatch.setattr(pi_module, "_llmobs_tool_definitions", _definitions)
+        monkeypatch.setattr(
+            base, "_annotate_agent_loop_span", lambda **kwargs: manifest.append([s.name for s in kwargs["mcp_servers"]])
+        )
+        command, _ = fake_pi(_events_tool_run())
+        runner = PiRunner(cwd=tmp_path, pi_command=command, mcp_servers=[McpServerSpec(name="apm", command="y")])
+        _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
+        assert definitions == [["apm", "early", "late"]]
+        assert manifest == [["apm", "early", "late"]]
+
     def test_reported_mcp_servers_without_project_file(self, tmp_path):
         scenario = McpServerSpec(name="apm", url="http://localhost/mcp")
         assert PiRunner(cwd=tmp_path, mcp_servers=[scenario])._reported_mcp_servers() == [scenario]
@@ -2789,8 +2826,19 @@ class TestPiToolNames:
 
 
 def _pid_alive(pid: int) -> bool:
-    import os
+    if os.name == "nt":  # (``os.kill(pid, 0)`` ends the process on Windows: ask for its exit code instead.)
+        import ctypes
 
+        windll = ctypes.windll  # pyright: ignore[reportAttributeAccessIssue]
+        process_query_limited_information, still_active = 0x1000, 259
+        handle = windll.kernel32.OpenProcess(process_query_limited_information, False, pid)
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            return bool(windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == still_active
+        finally:
+            windll.kernel32.CloseHandle(handle)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -3391,6 +3439,7 @@ class TestResolvePiProgram:
         monkeypatch.setattr(pi_module.asyncio, "create_subprocess_exec", fake_exec)
         return pi_module, seen
 
+    @pytest.mark.skipif(os.name == "nt", reason="needs POSIX shell scripts")
     @pytest.mark.parametrize("through_env", [False, True], ids=["default-pi", "AIREDALE_PI_COMMAND"])
     def test_posix_relative_path_entry_is_searched_from_the_child_directory(
         self, tmp_path, fake_pi, monkeypatch, through_env
@@ -3419,6 +3468,7 @@ class TestResolvePiProgram:
             _run(PiRunner(cwd=tmp_path, pi_command=["pi"]))
         assert seen == ["pi"]
 
+    @pytest.mark.skipif(os.name == "nt", reason="needs POSIX shell scripts")
     def test_posix_path_wins_over_path_with_another_case(self, tmp_path, fake_pi, monkeypatch):
         command, _ = fake_pi(_events_tool_run())
         good = tmp_path / "good"
@@ -4094,6 +4144,15 @@ def _report_files(directory):
     return sorted(Path(directory).glob("pi-run-*.log"))
 
 
+def _the_report(directory) -> Path:
+    """Return the one private report of a failed run. Windows writes none (``open_private_report`` needs ``dir_fd``)."""
+    reports = _report_files(directory)
+    if os.name == "nt" and not reports:
+        pytest.skip("no private report is written on Windows")
+    [report] = reports
+    return report
+
+
 class TestNoRawValues:
     @pytest.mark.parametrize("secret", SECRETS.values(), ids=SECRETS.keys())
     def test_stderr_of_a_failed_run_is_only_in_the_private_file(
@@ -4106,7 +4165,7 @@ class TestNoRawValues:
             )
         assert "status 3" in str(result.error)
         assert secret not in _all_text(result, caplog)
-        [report] = _report_files(private_report_dir)
+        report = _the_report(private_report_dir)
         assert str(report) in str(result.error)
         assert secret.encode("utf-8", "surrogatepass") in report.read_bytes() or secret in report.read_text(
             errors="replace"
@@ -4129,7 +4188,7 @@ class TestNoRawValues:
         command, _ = fake_pi([], FAKE_PI_EXIT="3", FAKE_PI_STDERR="LATE-STDERR-0123456789\n")
         result = _run(PiRunner(cwd=tmp_path, pi_command=command))
         assert "status 3" in str(result.error)
-        [report] = _report_files(private_report_dir)
+        report = _the_report(private_report_dir)
         assert "LATE-STDERR-0123456789" in report.read_text()
 
     def test_no_file_when_the_run_did_not_fail(self, tmp_path, fake_pi, private_report_dir):
@@ -4157,7 +4216,7 @@ class TestNoRawValues:
             result = _run(PiRunner(cwd=tmp_path, pi_command=command))
         assert "provider error (stopReason=error)" in str(result.error)
         assert "URL-CRED" not in _all_text(result, caplog) and "URL-QUERY" not in _all_text(result, caplog)
-        [report] = _report_files(private_report_dir)
+        report = _the_report(private_report_dir)
         assert secret in report.read_text()
 
     def test_final_error_of_the_retries_is_only_in_the_private_file(
@@ -4172,7 +4231,7 @@ class TestNoRawValues:
             result = _run(PiRunner(cwd=tmp_path, pi_command=command))
         assert "pi retries failed" in str(result.error)
         assert secret not in _all_text(result, caplog)
-        [report] = _report_files(private_report_dir)
+        report = _the_report(private_report_dir)
         assert secret in report.read_text()
 
     def test_unknown_stop_reason_is_not_shown(self, tmp_path, fake_pi, caplog):
@@ -4188,7 +4247,7 @@ class TestNoRawValues:
         command, _ = fake_pi(_events_tool_run(model=other))
         result = _run(PiRunner(cwd=tmp_path, pi_command=command))
         assert "SECRET-MODEL" not in str(result.error)
-        [report] = _report_files(private_report_dir)
+        report = _the_report(private_report_dir)
         assert "SECRET-MODEL-0123456789" in report.read_text()
 
     def test_attempt_that_could_not_load_the_collector_goes_to_the_file_if_the_run_fails(
@@ -4222,7 +4281,7 @@ class TestNoRawValues:
             + json.dumps([(span.tags, span.annotations) for span in fake_span_llmobs.spans], default=str)
         )
         assert "unsupported" not in everything and "SECOND-ATTEMPT" not in everything
-        [report] = _report_files(private_report_dir)
+        report = _the_report(private_report_dir)
         text = report.read_text()
         assert "unsupported" in text and "SECOND-ATTEMPT-ERROR-0123" in text
 
@@ -4274,7 +4333,7 @@ class TestNoRawValues:
             everything += json.dumps([(span.error, span.tags) for span in fake_span_llmobs.spans], default=str)
         assert "pi ran 2 tool calls with the same id" in str(error)
         assert secret not in everything
-        [report] = _report_files(private_report_dir)
+        report = _the_report(private_report_dir)
         assert secret in report.read_text()
 
     @pytest.mark.parametrize("telemetry", [False, True], ids=["telemetry-off", "telemetry-on"])
@@ -4322,7 +4381,7 @@ class TestNoRawValues:
             shown += json.dumps([(span.error, span.tags) for span in fake_span_llmobs.spans], default=str)
             assert "Ignoring an end record whose tool name is not" in caplog.text  # The span recorder logged it.
         assert secret not in shown and "NAME-ONE-SECRET" not in shown and "NAME-TWO-SECRET" not in shown
-        [report] = _report_files(private_report_dir)
+        report = _the_report(private_report_dir)
         assert secret in report.read_text()
 
     @staticmethod
@@ -4366,7 +4425,7 @@ class TestNoRawValues:
             assert any("tool call failed" in json.dumps(s.tags, default=str) for s in tool_spans)
             shown += json.dumps([(span.error, span.tags) for span in fake_span_llmobs.spans], default=str)
         assert secret not in shown
-        [report] = _report_files(private_report_dir)
+        report = _the_report(private_report_dir)
         assert report.read_text().count(secret) == 1
 
     @pytest.mark.parametrize("char", ["a", "é", "😀"], ids=["ascii", "2-byte", "4-byte"])
@@ -4379,7 +4438,7 @@ class TestNoRawValues:
         output = char * count
         command, _ = fake_pi(self._failed_tool_events(output), FAKE_PI_EXIT="3")
         _run(PiRunner(cwd=tmp_path, pi_command=command))
-        [report] = _report_files(private_report_dir)
+        report = _the_report(private_report_dir)
         line = next(
             line for line in report.read_text(encoding="utf-8").splitlines() if "output of the failed tool call" in line
         )
@@ -4397,6 +4456,10 @@ class TestNoRawValues:
     def test_lone_surrogates_in_a_failed_tool_output_are_measured_as_written(
         self, tmp_path, fake_pi, monkeypatch, fake_span_llmobs, private_report_dir, telemetry, count
     ):
+        if os.name == "nt" and count == 8192:
+            pytest.skip(
+                "Windows limits an environment variable to 32,767 characters (the fake pi reads its events there)"
+            )
         if telemetry:
             import airedale.harness.base as base
 
@@ -4415,7 +4478,7 @@ class TestNoRawValues:
                 _bounded(runner.run(model=MODEL, system_prompt="S", user_prompt="Q", prompt_version="v", harness="h"))
         else:
             _run(runner)
-        [report] = _report_files(private_report_dir)
+        report = _the_report(private_report_dir)
         line = next(
             line for line in report.read_text(encoding="utf-8").splitlines() if "output of the failed tool call" in line
         )
@@ -4525,7 +4588,7 @@ class TestNoRawValues:
             assert "<other>" in metadata and '"estimated_tokens_after": 7' in metadata
             shown += json.dumps([(s.error, s.tags, s.annotations) for s in fake_span_llmobs.spans], default=str)
         assert reason_secret not in shown and count_secret not in shown
-        [report] = _report_files(private_report_dir)
+        report = _the_report(private_report_dir)
         text = report.read_text()
         assert reason_secret in text and count_secret in text
 
@@ -4553,6 +4616,8 @@ class TestNoRawValues:
             out, err = capfd.readouterr()
             assert "PROBE-STDERR-SECRET" not in out + err
             reports = _report_files(private_report_dir)
+            if os.name == "nt" and expect_report:
+                pytest.skip("no private report is written on Windows")
             assert bool(reports) is expect_report
             if expect_report:
                 assert "PROBE-STDERR-SECRET-0123456789" in reports[0].read_text()
@@ -4813,9 +4878,9 @@ class TestPrivateReportDirectory:
         assert result is not None and (parent / "saved").glob("pi-run-*.log")
 
     def test_system_without_dir_fd_writes_nothing_and_warns(self, tmp_path, monkeypatch, caplog):
-        import airedale.harness.pi as pi_module
+        from airedale import private_report
 
-        monkeypatch.setattr(pi_module, "_OPEN_TAKES_DIR_FD", False)
+        monkeypatch.setattr(private_report, "_OPEN_TAKES_DIR_FD", False)
         monkeypatch.setenv("AIREDALE_OUTPUT_DIR", str(tmp_path / "out"))
         with caplog.at_level("WARNING"):
             assert self._write(tmp_path) is None
@@ -4869,7 +4934,7 @@ class TestRawDiagnosticsAreKept:
             result = _run(PiRunner(cwd=tmp_path, pi_command=command))
         assert result.error is not None
         assert marker not in _all_text(result, caplog)
-        [report] = _report_files(private_report_dir)
+        report = _the_report(private_report_dir)
         assert marker in report.read_text()
 
     def test_message_of_an_earlier_failed_call_is_kept(self, tmp_path, fake_pi, private_report_dir):
@@ -4879,7 +4944,7 @@ class TestRawDiagnosticsAreKept:
         command, _ = fake_pi(events, FAKE_PI_EXIT="3")
         result = _run(PiRunner(cwd=tmp_path, pi_command=command))
         assert result.error is not None
-        [report] = _report_files(private_report_dir)
+        report = _the_report(private_report_dir)
         assert "DUMMY-EARLIER-CALL-0123456789" in report.read_text()
 
     def test_unknown_stop_reason_is_kept(self, tmp_path, fake_pi, private_report_dir):
@@ -4888,7 +4953,7 @@ class TestRawDiagnosticsAreKept:
         command, _ = fake_pi(events)
         result = _run(PiRunner(cwd=tmp_path, pi_command=command))
         assert "DUMMY-STOP-REASON" not in str(result.error)
-        [report] = _report_files(private_report_dir)
+        report = _the_report(private_report_dir)
         assert "DUMMY-STOP-REASON-0123456789" in report.read_text()
 
     def test_compaction_error_message_is_kept(self, tmp_path, fake_pi, private_report_dir):
@@ -4900,7 +4965,7 @@ class TestRawDiagnosticsAreKept:
         command, _ = fake_pi(events)
         result = _run(PiRunner(cwd=tmp_path, pi_command=command))
         assert result.error is not None
-        [report] = _report_files(private_report_dir)
+        report = _the_report(private_report_dir)
         assert "DUMMY-COMPACT-0123456789" in report.read_text()
 
     def test_a_long_raw_value_is_cut(self):
@@ -4953,5 +5018,5 @@ class TestRawDiagnosticsAreKept:
             )
         )
         assert marker not in everything
-        [report] = _report_files(private_report_dir)
+        report = _the_report(private_report_dir)
         assert marker in report.read_text()
