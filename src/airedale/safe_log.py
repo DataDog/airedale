@@ -205,7 +205,11 @@ class _McpOrigins:
         self._answers: dict[str, bool] = {}  # Normalized file name -> is the SDK. Valid for ``self._last``.
 
     def classify(self, logger_name: str, filename: str) -> str:
-        """Return ``_SDK`` or ``_APP`` for the file name, or ``_UNKNOWN`` when it is not known (yet) who owns it."""
+        """Return ``_SDK`` or ``_APP`` for the file name, or ``_UNKNOWN`` when it is not known (yet) who owns it.
+
+        Every ambiguous file name (``<string>``, ``<stdin>``, empty, ...) is ``_UNKNOWN``, whatever the ``mcp`` modules
+        define: only the frame of the code can tell (see :func:`_frame_origin`).
+        """
         if _is_mcp_name(logger_name):
             return _SDK
         key = os.path.normcase(filename)
@@ -244,6 +248,11 @@ class _McpOrigins:
         return any(modules.get(name) is not module for name, (module, _initializing) in last.items())
 
     def _decide(self, key: str, ambiguous: bool) -> str:
+        if ambiguous:
+            # ``<string>``, ``<stdin>`` and the like name code of any origin, also code that the SDK runs with ``exec``
+            # at run time under a name that no ``mcp`` module has used yet: the file name never decides. The caller
+            # decides with the frame of the code (the record factory), or hides the record (the filter, with no evidence).
+            return _UNKNOWN
         me = threading.get_ident()
         if self._owner == me or not self._lock.acquire(blocking=False):
             return _UNKNOWN  # (A log record inside the collection, or another thread is collecting: do not wait.)
@@ -254,8 +263,6 @@ class _McpOrigins:
                     self._refresh()
                 except Exception:  # noqa: BLE001 - a failed collection must not break logging, nor be trusted
                     return _UNKNOWN
-            if ambiguous:
-                return _UNKNOWN if key in self._filenames or not self._complete else _APP
             if key in self._filenames or key.startswith(self._prefixes):
                 self._answers[key] = True
                 return _SDK

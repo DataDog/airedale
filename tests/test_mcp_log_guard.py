@@ -1268,3 +1268,36 @@ def test_a_free_threaded_build_checks_a_cached_answer_under_the_lock_and_hides_w
         origins._lock.release()
         logging.setLogRecordFactory(previous)
     assert MARKER not in handled[-1].getMessage() and handled[-1].getMessage().endswith("(details hidden)")
+
+
+def test_sdk_code_that_runs_exec_under_an_ambiguous_name_that_no_module_uses_is_hidden(app_logger, monkeypatch):
+    """Copilot, finding 2: ``<stdin>`` is not a name of any ``mcp`` module, but the file name never decides.
+
+    The record factory is replaced by ``logging.LogRecord`` (layer 1 is gone), so only the filter protects: a record
+    with an ambiguous name and no evidence is hidden, whatever the ``mcp`` modules define.
+    """
+    logger, handled = app_logger
+    module = _fake_sdk_module(monkeypatch, f"mcp._airedale_test_stdin{next(_counter)}")  # (No function: no file name.)
+    assert "<stdin>" not in safe_log._origins._filenames
+    previous = logging.getLogRecordFactory()
+    logging.setLogRecordFactory(logging.LogRecord)
+    try:
+        exec(
+            compile("logger.warning('data of the SDK %s', marker)", "<stdin>", "exec"),
+            {**module.__dict__, "logger": logger, "marker": RACE_MARKER},
+        )
+    finally:
+        logging.setLogRecordFactory(previous)
+    assert RACE_MARKER not in _messages(handled)
+    assert handled[-1].getMessage().endswith("(details hidden)")
+    assert safe_log._origins.classify("app", "<stdin>") == "unknown"
+
+
+def test_app_code_that_runs_exec_under_an_ambiguous_name_keeps_its_text_through_the_guard_factory(app_logger):
+    """The same name in app code: the frame of the caller is app code, so the guard factory keeps the record."""
+    logger, handled = app_logger
+    exec(
+        compile("logger.warning('app data %s', marker)", "<stdin>", "exec"),
+        {"__name__": "__main__", "logger": logger, "marker": MARKER},
+    )
+    assert handled[-1].getMessage() == "app data " + MARKER
