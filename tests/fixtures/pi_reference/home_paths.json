@@ -49,12 +49,37 @@
     "~~",
     " ~/extra",
     "~ /extra"
+   ],
+   "1.5.1": [
+    "/home/review",
+    "/home/review",
+    "/home/review/",
+    "/home/review/extra",
+    "/home/review/extra",
+    "/home/review/a/b",
+    "/home/review/extra",
+    "/home/review/extra",
+    "/home/extra",
+    "/home/review/a/b/",
+    "/home/review/a/",
+    "~x",
+    "~x/skills",
+    "~user/skills",
+    "/abs/path",
+    "rel/path",
+    "./rel",
+    "../up",
+    "~.",
+    "~~",
+    " ~/extra",
+    "~ /extra"
    ]
   }
  },
- "node": "v26.13.0",
+ "node": "v26.13.1",
  "pi_versions": [
   "1.4.0",
-  "1.5.0"
+  "1.5.0",
+  "1.5.1"
  ]
 }

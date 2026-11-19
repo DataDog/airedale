@@ -9,14 +9,20 @@ from __future__ import annotations
 import asyncio
 import itertools
 import logging
+import random
+import time
 
 import pytest
 
+from airedale import mcp as airedale_mcp
 from airedale.harness.base import McpToolMetadata, _mcp_tool_definitions
 from airedale.harness.pi import PiRunner
 from airedale.mcp import (
     McpServerSpec,
     PiToolNameOrderError,
+    _pi_hashed_tool_name,
+    _pi_possible_names,
+    _pi_server_groups,
     pi_mcp_tool_name,
     pi_mcp_tool_names,
     pi_possible_tool_name_collisions,
@@ -38,12 +44,19 @@ CATALOGS = [
     pytest.param([("a", ["é", "_"]), ("b", ["é"])], id="non-ascii"),
     pytest.param([("a", ["b__c", "b--c"]), ("a__b", ["c_01b8a75b"])], id="forced-hash-names-collide"),
     pytest.param([("a", ["x-y", "x_y"]), ("a__b", ["c"]), ("a_", ["b__c"])], id="three-servers-with-hashes"),
+    # The plain name of each tool of ``a`` is the hash name of the tool before it (3 steps), and ``a__b`` takes the plain
+    # name of the first one when it connects first.
+    pytest.param(
+        [("a", ["b__c", "b__c_01b8a75b", "b__c_01b8a75b_57106e1e"]), ("a__b", ["c"])],
+        id="hash-chain-with-a-second-server",
+    ),
+    pytest.param([("a", ["b__c", "b__c_01b8a75b", "b__c_01b8a75b_57106e1e"])], id="hash-chain-alone"),
 ]
 
 
 @pytest.mark.parametrize("catalog", CATALOGS)
 def test_names_match_pi(pi_reference, catalog):
-    """One server: the names are the ones of pi 1.4.0 and 1.5.0."""
+    """One server: the names are the ones of pi 1.4.0, 1.5.0 and 1.5.1."""
     for server, tools in catalog:
         answers = pi_reference({"action": "names", "servers": [[server, tools]]})
         ours = pi_mcp_tool_names(server, tools)
@@ -105,6 +118,82 @@ def test_a_hash_suffix_of_a_first_collision_can_collide_with_a_third_server():
     collisions = pi_possible_tool_name_collisions({**fillers, **catalog})
     assert hashed in collisions
     assert {("a", "b__c"), ("a_-b", third_tool)} <= set(collisions[hashed])
+
+
+def test_a_hash_name_is_not_possible_when_pi_never_needs_it():
+    # Seven servers whose tools have the hash name of a tool of ``a`` as their plain name. Pi never gives a tool of ``a`` a
+    # hash name here: the plain names of the tools of ``a`` are all free (no other tool has one of them).
+    tools = [f"b{index}__c" for index in range(1, 7)]
+    catalog = {"a": tools}
+    for index, tool in enumerate(tools, start=1):
+        hashed = _pi_hashed_tool_name("a", tool)
+        catalog[f"a__b{index}"] = [hashed.removeprefix(f"mcp__a__b{index}__")]
+        assert f"mcp__a__b{index}__{catalog[f'a__b{index}'][0]}" == hashed
+    assert pi_possible_tool_name_collisions(catalog) == {}  # (``main``: PiToolNameOrderError, 7 servers in a group)
+    assert all(len(names) == 1 for names in _pi_possible_names(catalog).values())
+    assert [len(group) for group in _pi_server_groups(catalog)] == [1] * 7
+
+
+def test_servers_that_have_the_plain_name_of_a_forced_hash_tool_do_not_share_a_group():
+    # ``a`` has 6 pairs of tools that get the same name after sanitizing: pi always hashes both tools of each pair. The
+    # 6 servers ``a__b<i>`` have the tool ``c``, whose plain name is the shortened name of the pair, never given by pi.
+    tools = [name for index in range(1, 7) for name in (f"b{index}__c", f"b{index}--c")]
+    catalog = {"a": tools, **{f"a__b{index}": ["c"] for index in range(1, 7)}}
+    assert pi_possible_tool_name_collisions(catalog) == {}  # (``main``: PiToolNameOrderError, 7 servers in a group)
+    assert [len(group) for group in _pi_server_groups(catalog)] == [1] * 7
+    names = pi_registered_tool_names(list(catalog.items()))
+    assert names[("a", "b1__c")] == _pi_hashed_tool_name("a", "b1__c")
+    assert names[("a__b1", "c")] == "mcp__a__b1__c"
+
+
+def test_a_hash_chain_of_three_steps_is_possible_only_with_the_second_server():
+    chain = ["b__c", "b__c_01b8a75b", "b__c_01b8a75b_57106e1e"]
+    assert [_pi_hashed_tool_name("a", tool) for tool in chain[:2]] == [f"mcp__a__{tool}" for tool in chain[1:]]
+    with_server = _pi_possible_names({"a": chain, "a__b": ["c"]})
+    for tool in chain:
+        assert _pi_hashed_tool_name("a", tool) in with_server[("a", tool)]
+    first = pi_registered_tool_names([("a__b", ["c"]), ("a", chain)])
+    assert [first[("a", tool)] for tool in chain] == [_pi_hashed_tool_name("a", tool) for tool in chain]
+    assert pi_possible_tool_name_collisions({"a": chain, "a__b": ["c"]})
+    alone = _pi_possible_names({"a": chain})
+    assert all(len(names) == 1 for names in alone.values())
+    assert pi_possible_tool_name_collisions({"a": chain}) == {}
+
+
+_SEEDED_SERVERS = ["a", "a__b", "a_b", "a-b", "a__b__c", "x", "y" * 30]
+_SEEDED_TOOLS = ["c", "b__c", "b--c", "b_c", "d", "b__c__d", "t" * 40, "t" * 60, "c_01b8a75b", "é", "😀"]
+
+
+def _seeded_catalog(rng: random.Random) -> dict[str, list[str]]:
+    servers = rng.sample(_SEEDED_SERVERS, rng.randint(2, 5))
+    catalog = {server: rng.sample(_SEEDED_TOOLS, rng.randint(1, 4)) for server in servers}
+    # Tools whose plain name is the hash name of another tool: the sets then have to follow the chains.
+    for _ in range(rng.randint(0, 3)):
+        server, tool = rng.choice([(s, t) for s, tools in catalog.items() for t in tools])
+        hashed = _pi_hashed_tool_name(server, tool)
+        for other in servers:
+            prefix = f"mcp__{other}__".replace("-", "_")
+            if hashed.startswith(prefix) and hashed != prefix:
+                catalog[other] = [*catalog[other], hashed.removeprefix(prefix)]
+    return {server: list(dict.fromkeys(tools)) for server, tools in catalog.items()}
+
+
+def test_seeded_catalogs_every_order_stays_inside_the_possible_names(monkeypatch):
+    """A check of the invariant (the proof is in the docstring of ``_pi_possible_names``), and of the groups."""
+    rng = random.Random(0)
+    started = time.monotonic()
+    for _ in range(300):
+        catalog = _seeded_catalog(rng)
+        possible = _pi_possible_names(catalog)
+        for order in itertools.permutations(catalog):
+            names = pi_registered_tool_names([(server, catalog[server]) for server in order])
+            for pair, name in names.items():
+                assert name in possible[pair], (catalog, order, pair)
+        with_groups = pi_possible_tool_name_collisions(catalog)
+        with monkeypatch.context() as patch:  # One group with every server: all the orders of all the servers.
+            patch.setattr(airedale_mcp, "_pi_server_groups", lambda catalog: [list(catalog)])
+            assert pi_possible_tool_name_collisions(catalog) == with_groups, catalog
+    assert time.monotonic() - started < 5
 
 
 def _seven_servers_that_share_a_name():
