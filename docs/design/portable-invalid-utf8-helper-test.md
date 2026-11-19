@@ -44,11 +44,7 @@ decode error). The acceptance criteria below check it again.
 Replace the `printf` command with a command that runs the current interpreter:
 
 ```python
-command = (
-    f'"{sys.executable}" -c '
-    '"import sys; sys.stdout.buffer.write(bytes([0x81]) + sys.argv[1].encode())" '
-    f"{secret}"
-)
+command = f'"{sys.executable}" -c "import sys; sys.stdout.buffer.write(bytes([0x81]) + sys.argv[1].encode())" {secret}'
 ```
 
 - `sys.executable` is the same on all platforms. No dependency on `printf`.

@@ -166,17 +166,39 @@ class TestResolveCredentialsHelper:
         assert "Running credentials helper (attempt 1/" in caplog.text
 
     def test_invalid_utf8_output_of_a_real_helper_does_not_leak_through_the_context(
-        self, clear_credential_cache, caplog
+        self, clear_credential_cache, caplog, monkeypatch
     ):
+        import locale
         import logging
+        import subprocess
+        import sys
+        import threading
+        import traceback
 
         secret = "sk-REAL-HELPER-SECRET-0123456789"
-        command = f"printf '\\377{secret}'"
+        # 0x81 is not valid in UTF-8 and is not defined in cp1252 (the code page of the Windows runners).
+        bad_byte = 0x81
+        code = f"import sys; sys.stdout.buffer.write(bytes([{bad_byte}]) + sys.argv[1].encode())"
+        command = f'"{sys.executable}" -c "{code}" {secret}'
+        # Precondition: the helper writes these bytes, and they do not decode with the encoding of `text=True`.
+        raw = subprocess.run(command, shell=True, capture_output=True, check=True).stdout
+        assert raw == bytes([bad_byte]) + secret.encode()
+        for encoding in ("utf-8", locale.getpreferredencoding(False)):
+            try:
+                raw.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+            pytest.fail(f"precondition: the helper output decodes with {encoding}, so this test proves nothing here")
+        # On Windows, the decode runs in a reader thread of `subprocess`, and its error goes to `threading.excepthook`.
+        thread_errors: list[threading.ExceptHookArgs] = []
+        monkeypatch.setattr(threading, "excepthook", thread_errors.append)
         with caplog.at_level(logging.DEBUG), pytest.raises(RuntimeError) as raised:
             _run_credentials_helper(command)
         error = raised.value
         assert error.__cause__ is None and error.__context__ is None
         assert secret not in repr(error) and secret not in caplog.text
+        for args in thread_errors:
+            assert secret not in "".join(traceback.format_exception(args.exc_type, args.exc_value, args.exc_traceback))
 
     def test_other_errors_of_the_helper_are_summarized_not_quoted(self, mocker, clear_credential_cache):
         secret = "sk-OSERROR-SECRET-0123456789"
