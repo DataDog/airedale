@@ -58,8 +58,10 @@ def _run_credentials_helper(command: str) -> str:
         try:
             # (The command is never logged or put in an error: it can hold an inline secret.)
             logger.debug("Running credentials helper (attempt %d/%d)", attempt, _CREDENTIALS_HELPER_MAX_ATTEMPTS)
-            result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=30, check=True)
-            output = result.stdout.strip()
+            # Bytes, not text: on Windows, text mode decodes in a reader thread, with the locale code page.
+            result = subprocess.run(command, shell=True, capture_output=True, timeout=30, check=True)
+            # The replaces give the line ends of text mode.
+            output = result.stdout.decode("utf-8-sig").replace("\r\n", "\n").replace("\r", "\n").strip()
 
             if not output:
                 raise _HelperOutputError("Credentials helper returned empty output")
@@ -87,6 +89,10 @@ def _run_credentials_helper(command: str) -> str:
 
         except subprocess.TimeoutExpired:
             failure = "Credentials helper timed out"
+            break
+        except UnicodeDecodeError:
+            # (Not the error itself: its ``object`` holds the raw output.)
+            failure = "Credentials helper output is not valid UTF-8 (UnicodeDecodeError). Make the helper write UTF-8."
             break
         except subprocess.CalledProcessError as e:
             # Non-zero exit: retry a bounded number of times before giving up.
