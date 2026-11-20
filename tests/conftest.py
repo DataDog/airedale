@@ -7,12 +7,23 @@
 from __future__ import annotations
 
 import json
+import locale
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+
+
+def pytest_report_header(config: pytest.Config) -> str:
+    """Show the text encoding of this interpreter in the test log.
+
+    The credentials-helper tests must show that the Windows runner is not in UTF-8 mode: else they cannot tell strict
+    UTF-8 from a fallback to the locale code page.
+    """
+    return f"encoding: locale.getpreferredencoding(False)={locale.getpreferredencoding(False)}, sys.flags.utf8_mode={sys.flags.utf8_mode}"
 
 
 @pytest.fixture(autouse=True)

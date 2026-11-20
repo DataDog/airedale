@@ -111,4 +111,6 @@ jobs:
         run: uv sync --locked --prerelease=allow
 
       - name: Run tests
-        run: uv run pytest
+        # The job is green even when tests fail (`continue-on-error`), so `-rfEsp` lists each passed, failed and
+        # skipped test by name: this list is the proof.
+        run: uv run pytest -rfEsp
