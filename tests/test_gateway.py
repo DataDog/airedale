@@ -176,12 +176,18 @@ class TestResolveCredentialsHelper:
         import traceback
 
         secret = "sk-REAL-HELPER-SECRET-0123456789"
+
+        def helper_command(prefix: list[int]) -> str:
+            code = f"import sys; sys.stdout.buffer.write(bytes({prefix}) + sys.argv[1].encode())"
+            return f'"{sys.executable}" -c "{code}" {secret}'
+
+        # Positive control: the same helper with ASCII output only works, and gives the secret.
+        assert _run_credentials_helper(helper_command([])) == secret
         # 0x81 is not valid in UTF-8 and is not defined in cp1252 (the code page of the Windows runners).
         bad_byte = 0x81
-        code = f"import sys; sys.stdout.buffer.write(bytes([{bad_byte}]) + sys.argv[1].encode())"
-        command = f'"{sys.executable}" -c "{code}" {secret}'
+        command = helper_command([bad_byte])
         # Precondition: the helper writes these bytes, and they do not decode with the encoding of `text=True`.
-        raw = subprocess.run(command, shell=True, capture_output=True, check=True).stdout
+        raw = subprocess.run(command, shell=True, capture_output=True, check=True, timeout=30).stdout
         assert raw == bytes([bad_byte]) + secret.encode()
         for encoding in ("utf-8", locale.getpreferredencoding(False)):
             try:
@@ -195,6 +201,11 @@ class TestResolveCredentialsHelper:
         with caplog.at_level(logging.DEBUG), pytest.raises(RuntimeError) as raised:
             _run_credentials_helper(command)
         error = raised.value
+        # The error comes from the decode, not from a timeout, a shell failure or empty output. On POSIX, the summary
+        # in the message names the type. On Windows, the decode fails in the reader thread, and the message does not.
+        assert "UnicodeDecodeError" in str(error) or any(
+            issubclass(args.exc_type, UnicodeDecodeError) for args in thread_errors
+        )
         assert error.__cause__ is None and error.__context__ is None
         assert secret not in repr(error) and secret not in caplog.text
         for args in thread_errors:
