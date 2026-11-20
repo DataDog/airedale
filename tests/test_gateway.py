@@ -16,8 +16,8 @@ import pytest
 from airedale.config.gateway import GatewayConfig, ProviderGatewayConfig
 from airedale.gateway import ResolvedGatewayConfig, _run_credentials_helper, resolve_provider_config
 
-# The fixed text of the error for output that is not valid UTF-8 (a regular expression for `pytest.raises`).
-_NOT_UTF8 = "Credentials helper output is not valid UTF-8 .UnicodeDecodeError."
+# The full fixed text of the error for output that is not valid UTF-8 (compared with `==`, so nothing can be added).
+_NOT_UTF8 = "Credentials helper output is not valid UTF-8 (UnicodeDecodeError). Make the helper write UTF-8."
 
 
 def _make_gateway(provider: str, **kwargs) -> GatewayConfig:
@@ -199,9 +199,10 @@ class TestResolveCredentialsHelper:
             pytest.fail("precondition: the helper output decodes with utf-8, so this test proves nothing here")
         # Airedale decodes in the calling thread, so no thread error goes to `threading.excepthook` (before the fix,
         # on Windows, the decode ran in a reader thread of `subprocess`).
-        with caplog.at_level(logging.DEBUG), pytest.raises(RuntimeError, match=_NOT_UTF8) as raised:
+        with caplog.at_level(logging.DEBUG), pytest.raises(RuntimeError) as raised:
             _run_credentials_helper(command)
         error = raised.value
+        assert str(error) == _NOT_UTF8
         assert error.__cause__ is None and error.__context__ is None
         assert secret not in repr(error) and secret not in caplog.text
         assert secret not in "".join(traceback.format_exception(error))
@@ -298,8 +299,9 @@ class TestCredentialsHelperDecode:
         command = _python_helper("import sys; sys.stdout.buffer.write(bytes([0xE9]))")
         spy = mocker.spy(subprocess, "run")
         sleep = mocker.patch("airedale.gateway.time.sleep")
-        with caplog.at_level(logging.DEBUG), pytest.raises(RuntimeError, match=_NOT_UTF8) as raised:
+        with caplog.at_level(logging.DEBUG), pytest.raises(RuntimeError) as raised:
             _run_credentials_helper(command)
+        assert str(raised.value) == _NOT_UTF8
         assert spy.call_count == 1  # A decode error does not change: no retry.
         sleep.assert_not_called()
         assert raised.value.__cause__ is None and raised.value.__context__ is None

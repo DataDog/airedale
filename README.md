@@ -463,8 +463,10 @@ Credential resolution priority (per provider):
 
 1. `credentials_helper` → runs the command once, caches for 30 minutes, prefers JWT-shaped output.
    The output of the command must be UTF-8 on all platforms (on Windows too: the code page of the system is not
-   used). One leading UTF-8 byte order mark is accepted. Other output fails with a fixed `UnicodeDecodeError` error,
-   and Airedale does not retry. Airedale never reads the error output (`stderr`) of the helper.
+   used). One leading UTF-8 byte order mark is accepted. If the helper exits with 0 and its output is not valid UTF-8,
+   Airedale raises a `RuntimeError` with a fixed decode-error message, and does not retry. A helper that exits with a
+   non-zero code is retried as before, and the error names its exit code. Airedale never reads the error output
+   (`stderr`) of the helper.
 2. `api_key_env` → reads the named environment variable.
 3. Falls back to the provider SDK default (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`).
 
