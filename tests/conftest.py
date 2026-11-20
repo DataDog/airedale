@@ -98,7 +98,7 @@ def fake_span_llmobs() -> FakeSpanLLMObs:
 
 PI_REFERENCE_SCRIPT = Path(__file__).parent / "support" / "pi_reference.mjs"
 PI_REFERENCE_FIXTURES = Path(__file__).parent / "fixtures" / "pi_reference"
-PI_REFERENCE_VERSIONS = ("1.4.0", "1.5.0")
+PI_REFERENCE_VERSIONS = ("1.4.0", "1.5.0", "1.5.1")
 
 
 def _canonical(request: dict) -> str:
@@ -119,7 +119,7 @@ def _live_pi_packages() -> dict[str, Path] | None:
 
 @pytest.fixture(scope="session")
 def pi_reference():
-    """Return ``run(request)``: what pi 1.4.0 and 1.5.0 answer to ``request``, by version.
+    """Return ``run(request)``: what pi 1.4.0, 1.5.0 and 1.5.1 answer to ``request``, by version.
 
     The tests that use it compare airedale with the code of pi. The answers are
     recorded in ``tests/fixtures/pi_reference/<action>.json``, so that the tests
@@ -135,7 +135,7 @@ def pi_reference():
     packages = _live_pi_packages()
     record = os.environ.get("AIREDALE_RECORD_PI_REFERENCE") == "1"
     if record and packages is None:
-        pytest.fail("AIREDALE_RECORD_PI_REFERENCE=1 needs node and the pi releases 1.4.0 and 1.5.0")
+        pytest.fail("AIREDALE_RECORD_PI_REFERENCE=1 needs node and the pi releases 1.4.0, 1.5.0 and 1.5.1")
     loaded: dict[str, dict] = {}
 
     def fixtures_of(action: str) -> dict:
@@ -167,7 +167,7 @@ def pi_reference():
         if key not in cases:
             pytest.fail(
                 "no recorded answer of pi for this request; record it with "
-                "AIREDALE_RECORD_PI_REFERENCE=1 (needs node and pi 1.4.0 and 1.5.0): " + key[:200]
+                "AIREDALE_RECORD_PI_REFERENCE=1 (needs node and pi 1.4.0, 1.5.0 and 1.5.1): " + key[:200]
             )
         if packages is not None:
             assert live(request) == cases[key], "the recorded answer of pi is out of date; record it again"

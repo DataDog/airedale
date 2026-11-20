@@ -11,13 +11,19 @@ from __future__ import annotations
 
 import asyncio
 import io
+import itertools
 import logging
+import os
 import sys
 import textwrap
+import threading
+import types
 
 import pytest
 
+from airedale import safe_log
 from airedale.mcp import McpServerSpec, _mcp_tool_metadata_catalog
+from airedale.safe_log import ensure_mcp_log_guard
 
 MARKER = "sk-SDK-LOG-MARKER-0123456789"
 
@@ -463,3 +469,835 @@ def test_an_sdk_module_that_is_only_imported_on_use_has_the_filter_too(route, le
     logged = result.stdout.split("LOGGED-BEGIN", 1)[1].split("LOGGED-END", 1)[0]
     assert "MCP SDK WARNING" in logged, logged  # The record was handled (not lost) and was hidden.
     assert MARKER not in logged + result.stderr
+
+
+# --------------------------------------------------------------------------- #
+# An ambiguous file name (``<string>``) is decided by the code that made the record, not by the name
+# --------------------------------------------------------------------------- #
+_counter = itertools.count()
+
+
+@pytest.fixture
+def restored_factory():
+    """Give back the record factory that the test found."""
+    factory = logging.getLogRecordFactory()
+    try:
+        yield
+    finally:
+        logging.setLogRecordFactory(factory)
+
+
+@pytest.fixture
+def app_logger(restored_factory):
+    """``(logger, handled)``: a logger of the application and the messages of the records that it handled."""
+    logger = logging.getLogger(f"airedale.test.app{next(_counter)}")
+    logger.setLevel(logging.DEBUG)
+    logger.propagate = False
+    handled: list[logging.LogRecord] = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record):
+            handled.append(record)
+
+    logger.addHandler(_Collect())
+    ensure_mcp_log_guard()  # (After the logger exists: the filter goes on every logger that exists.)
+    return logger, handled
+
+
+def _messages(handled) -> str:
+    return "\n".join(record.getMessage() for record in handled)
+
+
+def _run_string_code(code: str, **names):
+    """Run ``code`` as code of the application: ``compile(..., "<string>")`` and ``exec``."""
+    exec(compile(code, "<string>", "exec"), {"__name__": "__main__", **names})
+
+
+@pytest.fixture
+def sdk_string_module(monkeypatch):
+    """An ``mcp`` module that defines code made by ``compile(..., "<string>")``: like the methods that dataclasses write.
+
+    ``module.run(source, **names)`` runs ``source`` as code of that module (its globals are the ones of the module).
+    """
+    module = types.ModuleType(f"mcp._airedale_test{next(_counter)}")
+    exec(
+        compile("def marker_function():\n    return 1\n", "<string>", "exec"),
+        module.__dict__,
+    )
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+
+    def run(source: str, **names):
+        module.__dict__.update(names)
+        exec(compile(source, "<string>", "exec"), module.__dict__)
+
+    module.run = run  # pyright: ignore[reportAttributeAccessIssue]
+    return module
+
+
+def test_app_code_made_by_exec_keeps_its_log_text(app_logger, sdk_string_module):
+    logger, handled = app_logger
+    _run_string_code("logger.warning('app data %s', marker)", logger=logger, marker=MARKER)
+    assert "app data " + MARKER in _messages(handled)
+
+
+def test_app_code_of_python_dash_c_keeps_its_log_text():
+    import subprocess
+
+    script = textwrap.dedent(
+        """
+        import io, logging, sys
+        import airedale.mcp  # loads the SDK and installs the guard
+        from airedale.safe_log import ensure_mcp_log_guard
+        stream = io.StringIO()
+        logger = logging.getLogger("app")
+        logger.addHandler(logging.StreamHandler(stream))
+        logger.propagate = False
+        ensure_mcp_log_guard()
+        logger.warning("app data %s", sys.argv[1])
+        print(stream.getvalue())
+        """
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script, MARKER], capture_output=True, text=True, timeout=120, check=False
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
+    assert "app data " + MARKER in result.stdout
+
+
+def test_a_definition_that_the_sdk_imports_is_not_sdk_code(app_logger):
+    import mcp.server.sse  # noqa: F401  (Imports ``sse_starlette``: the module then holds definitions that it does not own.)
+    import sse_starlette.sse as sse
+
+    logger, handled = app_logger
+    code = "logger.warning('app data %s', marker)"
+    exec(compile(code, sse.__file__, "exec"), {"__name__": "__main__", "logger": logger, "marker": MARKER})
+    assert "app data " + MARKER in _messages(handled)
+
+
+def test_sdk_code_made_by_exec_is_hidden(app_logger, sdk_string_module):
+    logger, handled = app_logger
+    sdk_string_module.run("logger.warning('sdk data %s', marker)", logger=logger, marker=MARKER)
+    assert MARKER not in _messages(handled)
+    assert "MCP SDK WARNING" in _messages(handled)
+
+
+def test_two_nested_functions_with_one_file_line_and_name_are_hidden(app_logger, sdk_string_module, restored_factory):
+    """``findCaller`` picks the SDK ``emit`` (``stacklevel=2``), and the app ``emit`` has the same file, line and name."""
+    logger, handled = app_logger
+    namespace = {"__name__": "__main__"}
+    exec(
+        compile("def emit(logger, marker):\n    logger.warning(marker, stacklevel=2)\n", "<string>", "exec"), namespace
+    )
+    sdk_string_module.run("def emit(logger, marker, app_emit):\n    app_emit(logger, marker)\n")
+    results: list[str] = []
+    guard = logging.getLogRecordFactory()
+
+    def probe(name, level, fn, lno, msg, args, exc_info, func=None, sinfo=None, **kwargs):
+        results.append(safe_log._frame_origin(fn, lno, func))
+        return guard(name, level, fn, lno, msg, args, exc_info, func, sinfo, **kwargs)
+
+    logging.setLogRecordFactory(probe)
+    sdk_string_module.emit(logger, "data " + MARKER, namespace["emit"])
+    assert results == ["unknown"]  # Two frames with the same triple and different origins.
+    assert MARKER not in _messages(handled) and len(handled) == 1
+
+
+def test_a_record_that_another_thread_handles_inside_app_code_with_the_same_triple_is_hidden(
+    app_logger, sdk_string_module
+):
+    """The thread that handles a record can run app code with the same file, line and function: that is no proof."""
+    logger, handled = app_logger
+    record = logging.LogRecord(
+        "airedale.test.sdk", logging.WARNING, "<string>", 2, "data %s", (MARKER,), None, func="<module>"
+    )
+    errors: list[BaseException] = []
+
+    def handle_in_app_code():
+        try:
+            _run_string_code("x = 1\nlogger.handle(record)", logger=logger, record=record)
+        except BaseException as error:  # noqa: BLE001
+            errors.append(error)
+
+    thread = threading.Thread(target=handle_in_app_code)
+    thread.start()
+    thread.join(timeout=10)
+    assert not errors
+    assert MARKER not in _messages(handled) and len(handled) == 1
+    logger.handle(record)  # The same record, handled later by the thread that made it.
+    assert MARKER not in _messages(handled)
+
+
+def test_an_unhashable_record_class_is_kept_for_app_code_and_hidden_for_sdk_code(app_logger, sdk_string_module):
+    class Unhashable(logging.LogRecord):
+        __hash__ = None  # pyright: ignore[reportAssignmentType]
+
+    logger, handled = app_logger
+    base = logging.getLogRecordFactory()
+    logging.setLogRecordFactory(lambda *args, **kwargs: Unhashable(*args, **kwargs) if args else base(*args, **kwargs))
+    ensure_mcp_log_guard()
+    _run_string_code("logger.warning('app data %s', marker)", logger=logger, marker=MARKER)
+    sdk_string_module.run("logger.warning('sdk data %s', marker)", logger=logger, marker=MARKER)
+    texts = [record.getMessage() for record in handled]
+    assert texts[0] == "app data " + MARKER
+    assert MARKER not in texts[1] and texts[1].endswith("(details hidden)")
+    assert all(isinstance(record, Unhashable) for record in handled)
+
+
+def test_an_equal_record_that_the_guard_did_not_make_does_not_get_the_evidence_of_another(
+    app_logger, sdk_string_module
+):
+    class EqualByPlace(logging.LogRecord):
+        def _key(self):
+            return (self.pathname, self.lineno, self.funcName)
+
+        def __eq__(self, other):
+            return isinstance(other, EqualByPlace) and self._key() == other._key()
+
+        def __hash__(self):
+            return hash(self._key())
+
+    logger, handled = app_logger
+    base = logging.getLogRecordFactory()
+    logging.setLogRecordFactory(lambda *args, **kwargs: EqualByPlace(*args, **kwargs))
+    ensure_mcp_log_guard()
+    _run_string_code("x = 1\nlogger.warning('app data %s', marker)", logger=logger, marker=MARKER)
+    first = handled[0]  # (Kept alive: its evidence is in the store.)
+    assert first.getMessage() == "app data " + MARKER and first.lineno == 2 and first.funcName == "<module>"
+    logging.setLogRecordFactory(base)
+    second = EqualByPlace(
+        "airedale.test.sdk", logging.WARNING, "<string>", 2, "sdk data %s", (MARKER,), None, func="<module>"
+    )
+    assert second == first and hash(second) == hash(first)
+    logger.handle(second)
+    assert MARKER not in handled[1].getMessage()
+    assert first is not second
+
+
+def test_a_record_without_weak_reference_has_no_evidence_and_is_hidden(app_logger, sdk_string_module, monkeypatch):
+    logger, handled = app_logger
+
+    def no_reference(*args, **kwargs):
+        raise TypeError("cannot create weak reference")
+
+    monkeypatch.setattr(safe_log.weakref, "ref", no_reference)
+    _run_string_code("logger.warning('app data %s', marker)", logger=logger, marker=MARKER)  # Does not raise.
+    monkeypatch.undo()
+    assert len(handled) == 1
+    assert MARKER not in handled[0].getMessage() and handled[0].getMessage().endswith("(details hidden)")
+
+
+def test_the_origins_of_the_real_sdk_are_its_own_files():
+    import gc
+
+    ensure_mcp_log_guard()
+    origins = safe_log._origins
+    with origins._lock:
+        origins._last = None  # Collect again.
+        origins._refresh()
+    prefixes = origins._prefixes
+    assert prefixes
+    not_in_the_sdk = sorted(name for name in origins._filenames if not name.startswith(prefixes) and name != "<string>")
+    assert not_in_the_sdk == []  # (No file of ``contextlib``, ``dataclasses``, ``sse_starlette``, ``pydantic`` ...)
+    namespaces = {id(vars(module)) for name, module in list(sys.modules.items()) if safe_log._is_mcp_name(name)}
+    missing = set()
+    for item in gc.get_objects():
+        if isinstance(item, types.FunctionType) and id(item.__globals__) in namespaces:
+            if "<locals>" in item.__qualname__:
+                continue
+            name = item.__code__.co_filename
+            if not safe_log._is_ambiguous(name) and not (
+                os.path.normcase(name) in origins._filenames or os.path.normcase(name).startswith(prefixes)
+            ):
+                missing.add(name)
+    assert missing == set()
+
+
+# --------------------------------------------------------------------------- #
+# The origins are collected again when ``mcp`` modules change or finish their import
+# --------------------------------------------------------------------------- #
+def _fake_sdk_module(monkeypatch, name: str, filename: str | None = None, *, initializing: bool = False):
+    """An ``mcp`` module in ``sys.modules``. With ``filename``, ``sdk_function(logger, marker)`` is code of that file."""
+    import importlib.machinery
+
+    module = types.ModuleType(name)
+    module.__spec__ = importlib.machinery.ModuleSpec(name, None)
+    assert module.__spec__ is not None
+    module.__spec__._initializing = initializing  # pyright: ignore[reportAttributeAccessIssue]
+    if filename is not None:
+        exec(
+            compile("def sdk_function(logger, marker):\n    logger.warning('sdk data %s', marker)\n", filename, "exec"),
+            module.__dict__,
+        )
+    monkeypatch.setitem(sys.modules, name, module)
+    return module
+
+
+def _unique_file(label: str) -> str:
+    return f"/nonexistent-build-dir/{label}{next(_counter)}/module.py"
+
+
+def _app_log(logger, filename: str, text: str = "app data") -> None:
+    exec(compile(f"logger.warning('{text} %s', marker)", filename, "exec"), {"logger": logger, "marker": MARKER})
+
+
+def test_a_module_that_is_still_importing_is_not_a_negative_answer(app_logger, monkeypatch):
+    logger, handled = app_logger
+    path = _unique_file("partial")
+    module = _fake_sdk_module(monkeypatch, f"mcp._airedale_test_partial{next(_counter)}", initializing=True)
+    origins = safe_log._origins
+    assert origins.classify("some.logger", path) == "unknown"  # The module has no function yet: not "not the SDK".
+    assert os.path.normcase(path) not in origins._answers
+    _app_log(logger, path)  # The factory found that this code is not the SDK: kept, and nothing is cached.
+    assert "app data " + MARKER in _messages(handled)
+    assert os.path.normcase(path) not in origins._answers
+    # The import goes on: the module defines a function of this file, then it is complete.
+    exec(
+        compile("def late(logger, marker):\n    logger.warning('sdk data %s', marker)\n", path, "exec"), module.__dict__
+    )
+    assert module.__spec__ is not None
+    module.__spec__._initializing = False  # pyright: ignore[reportAttributeAccessIssue]
+    module.late(logger, MARKER)  # pyright: ignore[reportAttributeAccessIssue]
+    assert MARKER not in handled[-1].getMessage() and handled[-1].getMessage().endswith("(details hidden)")
+    assert origins.classify("some.logger", path) == "sdk"
+
+
+def test_a_module_that_replaces_another_one_with_the_same_count_is_collected(app_logger, monkeypatch):
+    """``len(sys.modules)`` does not change, but a module of the last collection is another object (or gone)."""
+    logger, handled = app_logger
+    name = f"mcp._airedale_test_replaced{next(_counter)}"
+    first_file, second_file, third_file, fourth_file = (_unique_file(label) for label in "abcd")
+    _fake_sdk_module(monkeypatch, name, first_file)
+    _app_log(logger, second_file)  # The answer "not the SDK" for the second file is cached.
+    _app_log(logger, third_file)
+    count = len(sys.modules)
+    # (a) Another module object under the same name.
+    second = _fake_sdk_module(monkeypatch, name, second_file)
+    assert len(sys.modules) == count
+    second.sdk_function(logger, MARKER)  # pyright: ignore[reportAttributeAccessIssue]
+    assert MARKER not in handled[-1].getMessage() and handled[-1].getMessage().endswith("(details hidden)")
+    # (b) One module is removed and another one comes, in one step.
+    other = f"mcp._airedale_test_other{next(_counter)}"
+    monkeypatch.delitem(sys.modules, name)
+    third = _fake_sdk_module(monkeypatch, other, third_file)
+    assert len(sys.modules) == count
+    third.sdk_function(logger, MARKER)  # pyright: ignore[reportAttributeAccessIssue]
+    assert MARKER not in handled[-1].getMessage() and handled[-1].getMessage().endswith("(details hidden)")
+    _app_log(logger, fourth_file)
+    assert handled[-1].getMessage() == "app data " + MARKER
+
+
+LATE_MODULE_BODY = textwrap.dedent(
+    """
+    import sys
+    sys.modules.pop("airedale_test_leaving_module", None)  # (A module that is not an MCP module leaves.)
+
+    def log_it(logger, marker):
+        logger.warning("sdk data %s", marker)
+    """
+)
+
+
+def test_an_mcp_module_that_comes_in_while_another_module_leaves_is_collected(
+    app_logger, tmp_path, monkeypatch, request
+):
+    """The import watcher runs before the module is in ``sys.modules``: its signal is kept until the import is over.
+
+    A guard that took the signal at the first record (nothing new in ``sys.modules`` yet) would trust its cached "not
+    the SDK" for this file after the import, because the module count is the same.
+    """
+    import importlib
+    import importlib.machinery
+    import py_compile
+
+    import mcp
+
+    logger, handled = app_logger
+    name = "mcp._airedale_test_late"
+    build_path = "/nonexistent-build-dir/late/_airedale_test_late.py"
+    source = tmp_path / "_airedale_test_late.py"
+    source.write_text(LATE_MODULE_BODY)
+    py_compile.compile(str(source), cfile=str(tmp_path / "_airedale_test_late.pyc"), dfile=build_path, doraise=True)
+    source.unlink()  # Only the bytecode: its code objects keep the build path.
+    monkeypatch.setattr(mcp, "__path__", [*mcp.__path__, str(tmp_path)])
+    monkeypatch.setitem(sys.modules, "airedale_test_leaving_module", types.ModuleType("airedale_test_leaving_module"))
+    request.addfinalizer(lambda: (sys.modules.pop(name, None), mcp.__dict__.pop("_airedale_test_late", None)))
+    paused, release = threading.Event(), threading.Event()
+
+    class PauseBeforeInsertion:
+        """A finder after the watcher: it waits before the module goes in ``sys.modules``, then finds it."""
+
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname != name:
+                return None
+            paused.set()
+            assert release.wait(30)
+            return importlib.machinery.PathFinder.find_spec(fullname, path)
+
+    pause = PauseBeforeInsertion()
+    request.addfinalizer(lambda: sys.meta_path.remove(pause) if pause in sys.meta_path else None)
+    sys.meta_path.insert(1, pause)
+    origins = safe_log._origins
+    _app_log(logger, build_path)  # 1. The answer "not the SDK" for this file is cached.
+    assert handled[-1].getMessage() == "app data " + MARKER
+    assert origins._answers.get(os.path.normcase(build_path)) is False
+    count = len(sys.modules)
+    errors: list[BaseException] = []
+
+    def import_module():
+        try:
+            importlib.import_module(name)
+        except BaseException as error:  # noqa: BLE001
+            errors.append(error)
+
+    importer = threading.Thread(target=import_module)
+    importer.start()
+    try:
+        assert paused.wait(30)  # 2. The watcher has seen the import. The module is not in ``sys.modules`` yet.
+        assert name not in sys.modules
+        _app_log(logger, build_path)  # 3. A record from the cached path: the snapshot is the same as the last one.
+        assert handled[-1].getMessage() == "app data " + MARKER
+        assert name in origins._unresolved  # The signal is not taken: the import is not over.
+    finally:
+        release.set()
+        importer.join(30)
+    assert not errors and not importer.is_alive()
+    assert "airedale_test_leaving_module" not in sys.modules and len(sys.modules) == count  # 4. Same count.
+    sys.modules[name].log_it(logger, MARKER)  # pyright: ignore[reportAttributeAccessIssue]
+    assert MARKER not in handled[-1].getMessage() and handled[-1].getMessage().endswith("(details hidden)")
+    assert name not in origins._unresolved
+
+
+def test_cached_app_records_make_no_snapshot(app_logger, monkeypatch):
+    logger, handled = app_logger
+    for _ in range(3):  # (The first record can collect, and a new thread or import can change the counts.)
+        logger.warning("settle")
+    calls: list[int] = []
+    real = safe_log._mcp_snapshot
+
+    def spy():
+        calls.append(1)
+        return real()
+
+    monkeypatch.setattr(safe_log, "_mcp_snapshot", spy)
+    for _ in range(1000):
+        logger.warning("app data %s", MARKER)
+    assert calls == []
+    assert len(handled) == 1003 and all(record.getMessage() != "" for record in handled)
+
+
+IMPORT_IN_A_THREAD = textwrap.dedent(
+    """
+    import importlib, io, logging, os, py_compile, sys, threading, types
+    import airedale.mcp  # loads the SDK and installs the guard
+    import mcp
+    from airedale.safe_log import ensure_mcp_log_guard
+
+    directory, marker = sys.argv[1], sys.argv[2]
+    name = "mcp._airedale_test_import"
+    build_path = "/nonexistent-build-dir/import/_airedale_test_import.py"
+    body = '''
+    import logging, sys
+    import airedale_test_shared as shared
+    assert __spec__._initializing is True
+    logger = logging.getLogger("airedale.test.sdk")
+    logger.warning("sdk data during the import %s", shared.marker)
+    shared.kept.append(logger.makeRecord(
+        logger.name, logging.WARNING, sys._getframe().f_code.co_filename, 3, "sdk data kept %s", (shared.marker,), None))
+    shared.entered.set()
+    assert shared.release.wait(30)
+
+    def log_it(logger, marker):
+        logger.warning("sdk data after the import %s", marker)
+    '''
+    with open(os.path.join(directory, "_airedale_test_import.py"), "w") as handle:
+        handle.write(body)
+    py_compile.compile(
+        os.path.join(directory, "_airedale_test_import.py"),
+        cfile=os.path.join(directory, "_airedale_test_import.pyc"), dfile=build_path, doraise=True)
+    os.unlink(os.path.join(directory, "_airedale_test_import.py"))  # Only the bytecode.
+    mcp.__path__.append(directory)
+    shared = types.ModuleType("airedale_test_shared")
+    shared.marker, shared.kept = marker, []
+    shared.entered, shared.release = threading.Event(), threading.Event()
+    sys.modules["airedale_test_shared"] = shared
+
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    loggers = [logging.getLogger("airedale.test.app"), logging.getLogger("airedale.test.sdk")]
+    for logger in loggers:
+        logger.addHandler(handler)
+        logger.setLevel(logging.DEBUG)
+        logger.propagate = False
+    ensure_mcp_log_guard()
+
+    errors = []
+    def import_it():
+        try:
+            importlib.import_module(name)
+        except BaseException as error:
+            errors.append(error)
+    importer = threading.Thread(target=import_it)
+    importer.start()
+    assert shared.entered.wait(30), errors
+    loggers[0].warning("app data while the import waits %s", marker)  # (From this file, which the SDK does not know.)
+    shared.release.set()
+    importer.join(30)
+    assert not errors and not importer.is_alive(), errors
+    sys.modules[name].log_it(loggers[1], marker)
+    loggers[1].handle(shared.kept[0])  # The record that was made during the import.
+    print("LOGGED-BEGIN")
+    print(stream.getvalue())
+    print("LOGGED-END")
+    """
+)
+
+
+def test_an_sdk_module_that_is_importing_in_another_thread_is_not_cached_as_not_the_sdk(tmp_path):
+    import subprocess
+
+    script = tmp_path / "import_in_a_thread.py"
+    script.write_text(IMPORT_IN_A_THREAD)
+    modules = tmp_path / "modules"  # (Not the directory of the script: the SDK would own the script.)
+    modules.mkdir()
+    result = subprocess.run(
+        [sys.executable, str(script), str(modules), MARKER], capture_output=True, text=True, timeout=60, check=False
+    )
+    assert result.returncode == 0, result.stderr[-3000:]
+    logged = result.stdout.split("LOGGED-BEGIN", 1)[1].split("LOGGED-END", 1)[0]
+    assert logged.count("(details hidden)") == 3, logged  # During the import, the kept record, after the import.
+    assert logged.count("app data while the import waits " + MARKER) == 1, logged
+    assert logged.count(MARKER) == 1, logged  # Only the app record has the marker.
+
+
+# --------------------------------------------------------------------------- #
+# A cached "not the SDK" answer never crosses a collection (two races of review round 1)
+# --------------------------------------------------------------------------- #
+RACE_MARKER = "sk-SDK-RACE-MARKER-0123456789"
+
+
+def test_a_cached_app_answer_read_before_a_collection_is_not_used_after_it(app_logger, monkeypatch):
+    """R1: thread A reads the cached answer, thread B collects, then A checks staleness against the new snapshot.
+
+    The record factory is replaced by ``logging.LogRecord`` (layer 1 is gone), so only the filter protects.
+    """
+    logger, handled = app_logger
+    path = _unique_file("cache_race")
+    name = f"mcp._airedale_test_cache_race{next(_counter)}"
+    origins = safe_log._origins
+    _app_log(logger, path)  # 1. The answer "not the SDK" for this file is cached.
+    assert origins._answers[os.path.normcase(path)] is False
+    module = _fake_sdk_module(monkeypatch, name, path)  # 2. Code of the SDK with this file (it is now in the snapshot).
+    previous = logging.getLogRecordFactory()
+    logging.setLogRecordFactory(logging.LogRecord)
+    paused, release = threading.Event(), threading.Event()
+    real_stale = origins._stale
+    worker: list[int] = []
+    first = [True]
+
+    def stale_after_a_pause():
+        if worker and threading.get_ident() == worker[0] and first[0]:
+            first[0] = False
+            paused.set()  # 3. The worker has read the old answer.
+            assert release.wait(30)  # 5. ... and goes on only after the collection.
+        return real_stale()
+
+    monkeypatch.setattr(origins, "_stale", stale_after_a_pause)
+    errors: list[BaseException] = []
+
+    def log_from_the_sdk():
+        worker.append(threading.get_ident())
+        try:
+            module.sdk_function(logger, RACE_MARKER)  # pyright: ignore[reportAttributeAccessIssue]
+        except BaseException as error:  # noqa: BLE001
+            errors.append(error)
+
+    thread = threading.Thread(target=log_from_the_sdk)
+    try:
+        thread.start()
+        assert paused.wait(30)
+        competing = origins.classify("app", "/nonexistent-build-dir/another-path-that-makes-a-collection.py")  # 4.
+        if safe_log._gil_disabled():
+            # Without a GIL the worker checks its answer under the lock (it holds it at the pause): the competing
+            # classification does not wait, does not collect, and answers ``unknown``.
+            assert competing == "unknown"
+        else:
+            # With a GIL the worker has no lock: the competing classification collects, and the new snapshot has the
+            # SDK file before the worker goes on.
+            assert os.path.normcase(path) in origins._filenames
+    finally:
+        release.set()
+        thread.join(30)
+        logging.setLogRecordFactory(previous)
+    assert not thread.is_alive() and not errors
+    if safe_log._gil_disabled():  # (The worker released the lock: the refresh is made by the next classification.)
+        origins.classify("app", "/nonexistent-build-dir/another-path-that-makes-a-collection.py")
+        assert os.path.normcase(path) in origins._filenames
+    assert RACE_MARKER not in _messages(handled)
+    assert len(handled) == 2  # (The app seed, and the hidden SDK record.)
+
+
+def test_a_cached_app_answer_is_not_used_while_a_collection_holds_the_watcher_names(
+    app_logger, tmp_path, monkeypatch, request
+):
+    """R2: a collection has read the watcher names and has not yet put them in ``_unresolved``.
+
+    Meanwhile the import goes on (one non-MCP module leaves, so ``len(sys.modules)`` is the same), and the new module
+    logs from the build path that has a cached "not the SDK" answer.
+    """
+    import importlib
+    import importlib.machinery
+    import py_compile
+
+    import mcp
+
+    logger, handled = app_logger
+    name = "mcp._airedale_test_drain_race"
+    build_path = "/nonexistent-build-dir/drain_race/_airedale_test_drain_race.py"
+    body = (
+        "import logging, sys\n"
+        "sys.modules.pop('airedale_test_drain_spare', None)\n"
+        "def emit():\n"
+        f"    logging.getLogger({logger.name!r}).warning('data of the SDK {RACE_MARKER}')\n"
+        "emit()\n"
+    )
+    source = tmp_path / "_airedale_test_drain_race.py"
+    source.write_text(body)
+    py_compile.compile(
+        str(source), cfile=str(tmp_path / "_airedale_test_drain_race.pyc"), dfile=build_path, doraise=True
+    )
+    source.unlink()
+    monkeypatch.setattr(mcp, "__path__", [*mcp.__path__, str(tmp_path)])
+    monkeypatch.setitem(sys.modules, "airedale_test_drain_spare", types.ModuleType("airedale_test_drain_spare"))
+    request.addfinalizer(lambda: (sys.modules.pop(name, None), mcp.__dict__.pop("_airedale_test_drain_race", None)))
+    paused, release_import = threading.Event(), threading.Event()
+    drained, release_drain = threading.Event(), threading.Event()
+
+    class PauseBeforeInsertion:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname != name:
+                return None
+            paused.set()
+            assert release_import.wait(30)
+            return importlib.machinery.PathFinder.find_spec(fullname, path)
+
+    pause = PauseBeforeInsertion()
+    request.addfinalizer(lambda: sys.meta_path.remove(pause) if pause in sys.meta_path else None)
+    sys.meta_path.insert(1, pause)
+    origins = safe_log._origins
+    errors: list[BaseException] = []
+    _app_log(logger, build_path)  # 1. The answer "not the SDK" for this file is cached.
+    assert origins._answers[os.path.normcase(build_path)] is False
+    count = len(sys.modules)
+
+    def import_it():
+        try:
+            importlib.import_module(name)
+        except BaseException as error:  # noqa: BLE001
+            errors.append(error)
+
+    importer = threading.Thread(target=import_it)
+    collector = threading.Thread(
+        target=lambda: origins.classify("app", "/nonexistent-build-dir/another-path-that-makes-a-collection.py")
+    )
+    real_pending = safe_log._import_watcher.pending
+
+    def read_then_hold():
+        names = real_pending()
+        if threading.current_thread() is collector and name in names:
+            drained.set()  # 4. The collection has read the names, and has not yet put them in ``_unresolved``.
+            assert release_drain.wait(30)
+        return names
+
+    monkeypatch.setattr(safe_log._import_watcher, "pending", read_then_hold)
+    try:
+        importer.start()
+        assert paused.wait(30)  # 2. The watcher has seen the import.
+        collector.start()  # 3. A collection starts.
+        assert drained.wait(30)
+        assert origins._lock.locked()
+        release_import.set()  # 5. The import goes on: the module logs from the build path, and a module leaves.
+        importer.join(30)
+        assert not importer.is_alive() and not errors
+        assert "airedale_test_drain_spare" not in sys.modules and len(sys.modules) == count
+    finally:
+        release_import.set()
+        release_drain.set()
+        importer.join(30)
+        if collector.ident is not None:
+            collector.join(30)
+    assert RACE_MARKER not in _messages(handled)
+    assert any(record.getMessage().endswith("(details hidden)") for record in handled)
+
+
+class _FailsOnceOnUpdate(set):
+    """A set whose ``update`` raises once, when it gets the name that the test looks for (a fault injection)."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__()
+        self.name = name
+        self.failed = False
+
+    def update(self, *others):
+        if not self.failed and any(self.name in other for other in others):
+            self.failed = True
+            raise RuntimeError("injected fault between the read of the watcher names and their record")
+        super().update(*others)
+
+
+def test_an_interrupted_collection_does_not_lose_the_notice_of_an_import_that_is_running(
+    app_logger, tmp_path, monkeypatch, request
+):
+    """The collection fails after it read the watcher names and before it recorded them (import lock still there).
+
+    Then the import ends with one non-MCP module less, so ``len(sys.modules)`` is the same, and its module logs from a
+    build path that has a cached "not the SDK" answer. The even sequence number alone does not tell that a name was lost.
+    """
+    import importlib
+    import importlib.machinery
+    import py_compile
+
+    import mcp
+
+    logger, handled = app_logger
+    name = "mcp._airedale_test_interrupted"
+    build_path = "/nonexistent-build-dir/interrupted/_airedale_test_interrupted.py"
+    body = (
+        "import logging, sys\n"
+        "sys.modules.pop('airedale_test_interrupted_spare', None)\n"
+        "def emit():\n"
+        f"    logging.getLogger({logger.name!r}).warning('data of the SDK {RACE_MARKER}')\n"
+        "emit()\n"
+    )
+    source = tmp_path / "_airedale_test_interrupted.py"
+    source.write_text(body)
+    py_compile.compile(
+        str(source), cfile=str(tmp_path / "_airedale_test_interrupted.pyc"), dfile=build_path, doraise=True
+    )
+    source.unlink()
+    monkeypatch.setattr(mcp, "__path__", [*mcp.__path__, str(tmp_path)])
+    spare = "airedale_test_interrupted_spare"
+    monkeypatch.setitem(sys.modules, spare, types.ModuleType(spare))
+    request.addfinalizer(lambda: (sys.modules.pop(name, None), mcp.__dict__.pop("_airedale_test_interrupted", None)))
+    paused, release_import = threading.Event(), threading.Event()
+
+    class PauseBeforeInsertion:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname != name:
+                return None
+            paused.set()
+            assert release_import.wait(30)
+            return importlib.machinery.PathFinder.find_spec(fullname, path)
+
+    pause = PauseBeforeInsertion()
+    request.addfinalizer(lambda: sys.meta_path.remove(pause) if pause in sys.meta_path else None)
+    sys.meta_path.insert(1, pause)
+    origins = safe_log._origins
+    _app_log(logger, build_path)  # 1. The answer "not the SDK" for this file is cached.
+    assert origins._answers[os.path.normcase(build_path)] is False
+    count = len(sys.modules)
+    errors: list[BaseException] = []
+    collector_errors: list[BaseException] = []
+    failing = _FailsOnceOnUpdate(name)
+    monkeypatch.setattr(origins, "_unresolved", failing)
+
+    def import_it():
+        try:
+            importlib.import_module(name)
+        except BaseException as error:  # noqa: BLE001
+            errors.append(error)
+
+    def collect():
+        try:
+            origins.classify("app", "/nonexistent-build-dir/another-path-that-makes-a-collection.py")
+        except BaseException as error:  # noqa: BLE001 - the build before the fix lets the fault out
+            collector_errors.append(error)
+
+    importer, collector = threading.Thread(target=import_it), threading.Thread(target=collect)
+    try:
+        importer.start()
+        assert paused.wait(30)  # 2. The watcher has seen the import; its lock is held.
+        collector.start()  # 3. A collection starts and fails after it read the names.
+        collector.join(30)
+        assert failing.failed and not collector.is_alive()
+        # The notice is not lost, and no cached "not the SDK" answer is trusted until the import is accounted for.
+        assert origins._stale()
+        release_import.set()  # 4. The import goes on: a module leaves, and the new module logs from the build path.
+        importer.join(30)
+        assert not importer.is_alive() and not errors
+        assert spare not in sys.modules and len(sys.modules) == count
+    finally:
+        release_import.set()
+        importer.join(30)
+        if collector.ident is not None:
+            collector.join(30)
+    assert RACE_MARKER not in _messages(handled)
+    assert any(record.getMessage().endswith("(details hidden)") for record in handled)
+    # 5. Recovery: the next collection settles the import, and a path of the application is "not the SDK" again.
+    monkeypatch.undo()
+    assert origins.classify("app", "/nonexistent-build-dir/after-the-recovery.py") == "app"
+    assert not origins._unresolved and origins._complete and not safe_log._import_watcher.names
+
+
+def test_a_free_threaded_build_checks_a_cached_answer_under_the_lock_and_hides_when_it_is_busy(app_logger, monkeypatch):
+    """The lock-free read is only for builds with a GIL. Without one, the answer is checked under the lock (no wait)."""
+    logger, handled = app_logger
+    path = _unique_file("no_gil")
+    origins = safe_log._origins
+    _app_log(logger, path)  # The answer "not the SDK" is cached.
+    assert origins._answers[os.path.normcase(path)] is False
+    monkeypatch.setattr(safe_log, "_gil_disabled", lambda: True)
+    # The lock is free: the cached answer is used, after a check under the lock, and no snapshot is made.
+    snapshots: list[int] = []
+    real_snapshot = safe_log._mcp_snapshot
+    monkeypatch.setattr(safe_log, "_mcp_snapshot", lambda: (snapshots.append(1), real_snapshot())[1])
+    assert origins.classify("app", path) == "app"
+    _app_log(logger, path)
+    assert handled[-1].getMessage() == "app data " + MARKER and snapshots == []
+    # The lock is busy: the answer is ``UNKNOWN``, nothing waits, and (layer 1 is gone) the record is hidden.
+    previous = logging.getLogRecordFactory()
+    logging.setLogRecordFactory(logging.LogRecord)
+    results: list[str] = []
+    origins._lock.acquire()
+    try:
+        thread = threading.Thread(target=lambda: results.append(origins.classify("app", path)))
+        thread.start()
+        thread.join(30)
+        assert not thread.is_alive() and results == ["unknown"]
+        _app_log(logger, path, "data of the SDK")
+    finally:
+        origins._lock.release()
+        logging.setLogRecordFactory(previous)
+    assert MARKER not in handled[-1].getMessage() and handled[-1].getMessage().endswith("(details hidden)")
+
+
+def test_sdk_code_that_runs_exec_under_an_ambiguous_name_that_no_module_uses_is_hidden(app_logger, monkeypatch):
+    """Copilot, finding 2: ``<stdin>`` is not a name of any ``mcp`` module, but the file name never decides.
+
+    The record factory is replaced by ``logging.LogRecord`` (layer 1 is gone), so only the filter protects: a record
+    with an ambiguous name and no evidence is hidden, whatever the ``mcp`` modules define.
+    """
+    logger, handled = app_logger
+    module = _fake_sdk_module(monkeypatch, f"mcp._airedale_test_stdin{next(_counter)}")  # (No function: no file name.)
+    assert "<stdin>" not in safe_log._origins._filenames
+    previous = logging.getLogRecordFactory()
+    logging.setLogRecordFactory(logging.LogRecord)
+    try:
+        exec(
+            compile("logger.warning('data of the SDK %s', marker)", "<stdin>", "exec"),
+            {**module.__dict__, "logger": logger, "marker": RACE_MARKER},
+        )
+    finally:
+        logging.setLogRecordFactory(previous)
+    assert RACE_MARKER not in _messages(handled)
+    assert handled[-1].getMessage().endswith("(details hidden)")
+    assert safe_log._origins.classify("app", "<stdin>") == "unknown"
+
+
+def test_app_code_that_runs_exec_under_an_ambiguous_name_keeps_its_text_through_the_guard_factory(app_logger):
+    """The same name in app code: the frame of the caller is app code, so the guard factory keeps the record."""
+    logger, handled = app_logger
+    exec(
+        compile("logger.warning('app data %s', marker)", "<stdin>", "exec"),
+        {"__name__": "__main__", "logger": logger, "marker": MARKER},
+    )
+    assert handled[-1].getMessage() == "app data " + MARKER

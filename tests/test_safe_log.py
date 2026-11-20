@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 
@@ -209,3 +210,183 @@ def test_a_noisy_server_does_not_use_memory_or_disk_in_proportion_to_its_stderr(
     assert len(notes[0].encode()) < MCP_PROBE_STDERR_TAIL_BYTES + 200
     assert peak < 4 * 1024 * 1024, peak  # (64 MiB of output; the buffer is 16 KiB, a read is 64 KiB.)
     assert threading.active_count() <= threads_before  # The reader thread ended with the output.
+
+
+# --------------------------------------------------------------------------- #
+# The reader of the stderr of a probed server stops, also when a child keeps the pipe open
+# --------------------------------------------------------------------------- #
+def _probe_threads() -> list:
+    import threading
+
+    return [thread for thread in threading.enumerate() if thread.name == "mcp-probe-stderr" and thread.is_alive()]
+
+
+def _is_closed(fd: int) -> bool:
+    try:
+        os.fstat(fd)
+    except OSError:
+        return True
+    return False
+
+
+def test_a_write_handle_that_stays_open_does_not_keep_the_reader_or_the_descriptor():
+    import time
+
+    from airedale.mcp import _StderrTail
+
+    async def scenario():
+        tail = _StderrTail(1024)
+        held = os.dup(tail.errlog.fileno())  # (A grandchild that keeps the write end open.)
+        try:
+            os.write(held, b"first words\n")
+            started = time.monotonic()
+            text = await tail.finish()
+            elapsed = time.monotonic() - started
+            return tail, text, elapsed
+        finally:
+            os.close(held)
+
+    tail, text, elapsed = asyncio.run(scenario())
+    assert text == "first words"
+    assert elapsed < 1.5
+    tail._thread.join(timeout=1.5)
+    assert not tail._thread.is_alive()
+    assert _is_closed(tail._read_fd)
+
+
+def test_a_writer_that_never_stops_is_cut_off_at_the_deadline():
+    import threading
+    import time
+
+    from airedale.mcp import _StderrTail
+
+    async def scenario():
+        tail = _StderrTail(1024)
+        held = os.dup(tail.errlog.fileno())
+        failure: list[BaseException] = []
+        stop = threading.Event()
+
+        def write_without_end():
+            try:
+                while not stop.is_set():
+                    os.write(held, b"x" * 4096)
+            except (
+                OSError
+            ) as error:  # The read end is closed: ``EPIPE`` (a ``BrokenPipeError``), or another error code.
+                failure.append(error)
+            finally:
+                os.close(held)
+
+        writer = threading.Thread(target=write_without_end, daemon=True)
+        writer.start()
+        try:
+            started = time.monotonic()
+            await tail.finish()
+            elapsed = time.monotonic() - started
+            writer.join(timeout=5)
+            return tail, elapsed, failure, writer.is_alive()
+        finally:
+            stop.set()
+
+    tail, elapsed, failure, writer_alive = asyncio.run(scenario())
+    assert elapsed < 1.0 + 0.5
+    assert not tail._thread.is_alive() and _is_closed(tail._read_fd)
+    assert not writer_alive and len(failure) == 1  # The writer saw the closed pipe.
+
+
+def test_a_cancelled_finish_still_ends_the_reader_and_closes_the_descriptor():
+    from airedale.mcp import _StderrTail
+
+    async def scenario():
+        tail = _StderrTail(1024)
+        held = os.dup(tail.errlog.fileno())
+        try:
+            task = asyncio.create_task(tail.finish())
+            await asyncio.sleep(0.1)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            await asyncio.sleep(2.0)  # The deadline (1 s) passes with nobody waiting for the reader.
+            return tail
+        finally:
+            os.close(held)
+
+    tail = asyncio.run(scenario())
+    assert not tail._thread.is_alive()
+    assert _is_closed(tail._read_fd)
+
+
+def test_finish_does_not_block_the_event_loop():
+    import time
+
+    from airedale.mcp import _StderrTail
+
+    async def scenario():
+        tail = _StderrTail(1024)
+        held = os.dup(tail.errlog.fileno())
+        gaps: list[float] = []
+        running = True
+
+        async def ticks():
+            last = time.monotonic()
+            while running:
+                await asyncio.sleep(0.01)
+                now = time.monotonic()
+                gaps.append(now - last)
+                last = now
+
+        ticker = asyncio.create_task(ticks())
+        try:
+            await tail.finish()  # (About 1 s: the write end is held.)
+        finally:
+            running = False
+            await ticker
+            os.close(held)
+        return gaps
+
+    gaps = asyncio.run(scenario())
+    assert len(gaps) > 20 and max(gaps) < 0.2, max(gaps)
+
+
+GRANDCHILD_SERVER = """
+import subprocess, sys
+child = subprocess.Popen(
+    [sys.executable, "-c", "import time; time.sleep(60)"],
+    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=sys.stderr,
+)
+with open(sys.argv[1], "w") as handle:
+    handle.write(str(child.pid))
+sys.exit(0)
+"""
+
+
+def test_a_child_of_a_server_that_keeps_stderr_open_does_not_keep_the_reader_alive(tmp_path, monkeypatch):
+    """The server exits; its child holds the stderr pipe for 60 s. After the probe, no reader thread is left."""
+    import signal
+    import sys
+    import time
+
+    if os.name == "nt":  # No Job Object: Windows lets the child of the server live on.
+        import mcp.os.win32.utilities as win32_utilities
+
+        monkeypatch.setattr(win32_utilities, "_create_job_object", lambda: None)
+    pid_file = tmp_path / "child.pid"
+    server = McpServerSpec(name="leaky", command=sys.executable, args=("-c", GRANDCHILD_SERVER, str(pid_file)))
+    notes: list[str] = []
+    child_pid = None
+    try:
+        started = time.monotonic()
+        assert asyncio.run(_mcp_tool_metadata_catalog([server], {}, notes)) == {}
+        elapsed = time.monotonic() - started
+        child_pid = int(pid_file.read_text())
+        assert elapsed < 10  # (Not the 60 s of the child.)
+        deadline = time.monotonic() + 3
+        while _probe_threads() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert _probe_threads() == []
+    finally:
+        if child_pid is None and pid_file.exists():
+            child_pid = int(pid_file.read_text())
+        if child_pid is not None:
+            with contextlib.suppress(OSError):
+                os.kill(child_pid, signal.SIGTERM)

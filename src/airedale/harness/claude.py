@@ -30,7 +30,10 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import time
+import traceback
+import uuid
 from collections import deque
 from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, Any
@@ -48,7 +51,10 @@ from airedale.harness.base import (
     json_dumps_compact,
     json_safe,
 )
+from airedale.harness.pi_spans import OTHER_VALUE
 from airedale.mcp import McpServerSpec, configured_tool_names
+from airedale.private_report import open_private_report
+from airedale.safe_log import ensure_mcp_log_guard, exception_summary
 from airedale.skills import (
     discover_claude_skill_names,
     exclude_staged_skills_from_git,
@@ -193,6 +199,9 @@ class ClaudeRunner(AgentRunner):
         trace_headers: Mapping[str, str],
         progress: ProgressCallback | None,
     ) -> AgentRunResult:
+        # The SDK logs raw text of the Claude CLI (stdout lines, the error that stops its reader): its records get a
+        # fixed text. (Before the first record: the filters go on the loggers that exist.)
+        ensure_mcp_log_guard()
         diagnostics = _ClaudeEvalDiagnostics()
         options = self._build_options(model=model, system_prompt=system_prompt, trace_headers=trace_headers)
         options.stderr = diagnostics.record_stderr
@@ -200,12 +209,16 @@ class ClaudeRunner(AgentRunner):
             if self._uses_custom_claude_query:
                 agent_stream = self._claude_query(prompt=user_prompt, options=options)
                 try:
-                    return await _collect_claude_stream(
-                        agent_stream,
-                        model=model,
-                        max_turns=self.max_turns,
-                        progress=progress,
-                        diagnostics=diagnostics,
+                    return _reported_if_failed(
+                        await _collect_claude_stream(
+                            agent_stream,
+                            model=model,
+                            max_turns=self.max_turns,
+                            progress=progress,
+                            diagnostics=diagnostics,
+                        ),
+                        model,
+                        diagnostics,
                     )
                 finally:
                     close = getattr(agent_stream, "aclose", None)
@@ -218,21 +231,22 @@ class ClaudeRunner(AgentRunner):
                 await client.connect()
                 await _wait_for_claude_mcp_servers(client, self.mcp_servers, diagnostics)
                 await client.query(user_prompt)
-                return await _collect_claude_stream(
-                    client.receive_response(),
-                    model=model,
-                    max_turns=self.max_turns,
-                    progress=progress,
-                    diagnostics=diagnostics,
+                return _reported_if_failed(
+                    await _collect_claude_stream(
+                        client.receive_response(),
+                        model=model,
+                        max_turns=self.max_turns,
+                        progress=progress,
+                        diagnostics=diagnostics,
+                    ),
+                    model,
+                    diagnostics,
                 )
             finally:
                 with contextlib.suppress(Exception):
                     await client.disconnect()
-        except Exception:  # pragma: no cover - defensive runtime path
-            if diagnostic_summary := diagnostics.summary():
-                logger.exception("Claude Agent SDK eval run failed\n%s", diagnostic_summary)
-            else:
-                logger.exception("Claude Agent SDK eval run failed")
+        except Exception as error:  # pragma: no cover - defensive runtime path
+            _report_claude_failure(model, diagnostics, error)
             raise
 
     def _build_options(
@@ -359,6 +373,58 @@ class _ClaudeEvalDiagnostics:
         if self._system_tail:
             parts.append("claude system diagnostic tail:\n" + "\n".join(self._system_tail))
         return "\n".join(parts)
+
+
+def _reported_if_failed(
+    result: AgentRunResult, model: ModelSpec, diagnostics: _ClaudeEvalDiagnostics
+) -> AgentRunResult:
+    """Report an error result of the provider (no exception: ``run`` raises ``result.error`` later), and return it."""
+    if result.error is not None:
+        _report_claude_failure(model, diagnostics, result.error)
+    return result
+
+
+def _report_claude_failure(model: ModelSpec, diagnostics: _ClaudeEvalDiagnostics, error: BaseException) -> None:
+    """Log one fixed line about a failed Claude run; the raw diagnostics go to the private file that it names.
+
+    The diagnostics hold raw text of the Claude CLI and of the provider (its stderr, the retry and error texts of the
+    stream), which can hold credentials, so they are never in a log line. The line has the type name and the place of the
+    error (:func:`~airedale.safe_log.exception_summary`): no ``str(error)``, no traceback with values, no ``exc_info``.
+    """
+    path = _write_claude_private_report(model, diagnostics, error)
+    where = f"raw diagnostics in the private file {path}" if path is not None else "no private file was written"
+    logger.error("Claude Agent SDK eval run failed (%s); %s", exception_summary(error), where)
+
+
+def _write_claude_private_report(
+    model: ModelSpec, diagnostics: _ClaudeEvalDiagnostics, error: BaseException
+) -> Path | None:
+    """Write the raw diagnostics and the error of a failed run to one private file (mode 0600); return its path.
+
+    The file has the diagnostics (when there are some) and the error with its type, its message, its traceback and its
+    cause chain: a connection or reader failure can come before any stderr or result, and the log line has only the
+    type and the place of the error. Same rules as the pi report (:func:`airedale.private_report.open_private_report`).
+    ``None``: the file cannot be written (a fixed warning is logged; the error of the run is never hidden).
+    """
+    summary = diagnostics.summary()
+    try:
+        name = f"claude-run-{time.strftime('%Y%m%dT%H%M%S', time.gmtime())}-{uuid.uuid4().hex[:8]}.log"
+        lines = [
+            "Raw diagnostics of a failed Claude run. They can hold credentials: keep this file private.",
+            f"model: {model.label}",
+            "",
+            summary or "(no diagnostic from the Claude CLI before the failure)",
+            "",
+            "== error (type, message, traceback and cause chain) ==",
+            "".join(traceback.format_exception(error)),
+        ]
+        fd, path = open_private_report(name)
+        with os.fdopen(fd, "w", encoding="utf-8", errors="backslashreplace") as handle:
+            handle.write("\n".join(lines))
+        return path
+    except Exception:  # noqa: BLE001 - the report must never hide the error of the run (not BaseException)
+        logger.warning("Unable to write the private report of the failed Claude run", exc_info=False)
+        return None
 
 
 def _bounded_claude_diagnostic_value(value: Any) -> str:
@@ -707,18 +773,143 @@ def _claude_result_error_summary(message: Any, *, max_turns: int | None) -> str:
 # --------------------------------------------------------------------------- #
 # Progress rendering
 # --------------------------------------------------------------------------- #
-def _claude_progress_message(message: Any, model: ModelSpec) -> str | None:
-    if diagnostic := _claude_system_diagnostic(message):
-        return f"{model.label}: {diagnostic}"
+# Values that the Claude Code CLI 2.1.319 (bundled in claude-agent-sdk 0.2.179) writes. When the SDK changes, check
+# them again. A value that is not in a list shows as OTHER_VALUE: the progress texts of an error result and of an
+# ``api_retry`` message never show raw text. Other progress texts (nested agent, tool inputs) are not covered.
+_CLAUDE_RESULT_SUBTYPES = frozenset(
+    {
+        "success",
+        "error_during_execution",
+        "error_max_turns",
+        "error_max_budget_usd",
+        "error_max_structured_output_retries",
+    }
+)
+_CLAUDE_STOP_REASONS = frozenset(
+    {
+        "end_turn",
+        "max_tokens",
+        "stop_sequence",
+        "tool_use",
+        "pause_turn",
+        "compaction",
+        "refusal",
+        "model_context_window_exceeded",
+        "tool_deferred",
+        "tool_deferred_unavailable",
+    }
+)
+_CLAUDE_API_RETRY_ERRORS = frozenset(
+    {
+        "authentication_failed",
+        "oauth_org_not_allowed",
+        "account_on_hold",
+        "verification_required",
+        "billing_error",
+        "rate_limit",
+        "overloaded",
+        "invalid_request",
+        "model_not_found",
+        "server_error",
+        "unknown",
+        "max_output_tokens",
+        "cloud_credential_error",
+    }
+)
+_PROGRESS_MAX_NUMBER = 1_000_000_000
 
+
+def _progress_known(value: Any, allowed: frozenset[str]) -> str:
+    """Return ``value`` when it is exactly one of ``allowed``, else ``OTHER_VALUE``. Check the type before ``in``."""
+    return value if type(value) is str and value in allowed else OTHER_VALUE
+
+
+def _progress_http_status(value: Any) -> str:
+    """Return an HTTP status (100 to 599) as text, else ``OTHER_VALUE``. ``bool`` and ``int`` subclasses are refused."""
+    return str(value) if type(value) is int and 100 <= value <= 599 else OTHER_VALUE
+
+
+def _progress_number(value: Any) -> str:
+    """Return a small non-negative integer as text, else ``OTHER_VALUE``. ``bool`` and ``int`` subclasses are refused."""
+    return str(value) if type(value) is int and 0 <= value <= _PROGRESS_MAX_NUMBER else OTHER_VALUE
+
+
+def _progress_count(value: Any) -> int:
+    """Return how many items ``value`` has, never the items: a list or tuple counts its true entries."""
+    if isinstance(value, list | tuple):
+        return sum(1 for entry in value if entry)
+    return 1 if value else 0
+
+
+def _claude_result_error_progress(message: Any) -> str:
+    """Return the safe progress text of an error ``ResultMessage``, without the model label.
+
+    It has only values from fixed lists, small integers and counts. It never has the text of ``errors``, or the
+    content of ``permission_denials`` and ``deferred_tool_use``.
+    """
+    parts: list[str] = []
+    subtype = getattr(message, "subtype", None)
+    if subtype is not None and subtype != "":
+        parts.append(f"subtype={_progress_known(subtype, _CLAUDE_RESULT_SUBTYPES)}")
+    api_error_status = getattr(message, "api_error_status", None)
+    if api_error_status is not None and api_error_status != "":
+        parts.append(f"api_error_status={_progress_http_status(api_error_status)}")
+    stop_reason = getattr(message, "stop_reason", None)
+    if stop_reason is not None and stop_reason != "":
+        parts.append(f"stop_reason={_progress_known(stop_reason, _CLAUDE_STOP_REASONS)}")
+    num_turns = getattr(message, "num_turns", None)
+    if num_turns is not None:
+        parts.append(f"turns={_progress_number(num_turns)}")
+    if errors := _progress_count(getattr(message, "errors", None)):
+        parts.append(f"errors={errors}")
+    if denials := _progress_count(getattr(message, "permission_denials", None)):
+        parts.append(f"permission_denials={denials}")
+    if getattr(message, "deferred_tool_use", None):
+        parts.append("deferred_tool_use=yes")
+    return "; ".join(parts)
+
+
+def _claude_api_retry_progress(message: Any) -> str:
+    """Return the safe progress text of an ``api_retry`` ``SystemMessage``, without the model label.
+
+    It has only values from fixed lists and small integers. It never has the text of ``error``.
+    """
+    data = getattr(message, "data", None)
+    if not isinstance(data, Mapping):
+        return "api_retry"
+
+    parts = ["api_retry"]
+    status = data.get("error_status")
+    if status is not None:
+        parts.append(f"status={_progress_http_status(status)}")
+    error = data.get("error")
+    if error is not None:
+        parts.append(f"error={_progress_known(error, _CLAUDE_API_RETRY_ERRORS)}")
+    attempt = data.get("attempt")
+    max_retries = data.get("max_retries")
+    if attempt is not None:
+        attempt_text = _progress_number(attempt)
+        if max_retries is not None:
+            attempt_text = f"{attempt_text}/{_progress_number(max_retries)}"
+        parts.append(f"attempt={attempt_text}")
+    retry_delay_ms = data.get("retry_delay_ms")
+    if retry_delay_ms is not None:
+        parts.append(f"retry_delay_ms={_progress_number(retry_delay_ms)}")
+    return " ".join(parts)
+
+
+def _claude_progress_message(message: Any, model: ModelSpec) -> str | None:
     message_type = type(message).__name__
     if message_type == "ResultMessage":
-        if diagnostic := _claude_result_error_diagnostic(message):
-            return f"{model.label}: Claude error result - {diagnostic.removeprefix('result_error ')}"
+        if _is_claude_error_result(message):
+            text = _claude_result_error_progress(message)
+            return f"{model.label}: Claude error result" + (f" - {text}" if text else "")
         usage = UsageMetrics.from_claude_sdk(
             getattr(message, "usage", None) or _claude_usage_from_model_usage(getattr(message, "model_usage", None))
         )
         return f"{model.label}: final answer ready{_usage_suffix(usage.total_tokens)}"
+    if message_type == "SystemMessage" and getattr(message, "subtype", None) == "api_retry":
+        return f"{model.label}: {_claude_api_retry_progress(message)}"
     if message_type == "TaskStartedMessage":
         description = str(getattr(message, "description", "") or getattr(message, "task_id", "nested agent"))
         return f"{model.label}: nested agent started - {_truncate_progress_detail(description)}"

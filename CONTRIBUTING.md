@@ -241,8 +241,8 @@ uv run pytest -k rubric            # by keyword
 ```
 
 Some tests compare airedale with the code of pi (the MCP config merge, the skill
-frontmatter, tool names, URLs, the events of the agent loop). The answers of pi 1.4.0 and
-1.5.0 are recorded in `tests/fixtures/pi_reference/`, so the tests run without `node`
+frontmatter, tool names, URLs, the events of the agent loop). The answers of pi 1.4.0, 1.5.0
+and 1.5.1 are recorded in `tests/fixtures/pi_reference/`, so the tests run without `node`
 or pi. When `node` and the pi releases are installed (`~/.pi/agent/install/releases`, or
 `$PI_RELEASES`), each answer is also computed live and must be the recorded one
 (`AIREDALE_PI_REFERENCE=fixtures` skips that check). After a change of the requests or a new pi
