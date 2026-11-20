@@ -86,14 +86,14 @@ of that file.
 - **When:** only for a run that failed and has raw text to keep. Airedale does not
   delete the file. Remove it yourself when you no longer need it.
 - **Windows:** no file is written, and Airedale logs a fixed warning.
-- **Claude runs:** two kinds of output still have raw text: the error that the
-  run raises (it also goes to the `ddtrace` experiment span and status, and to
-  the native `ddtrace` Claude spans), and the retry summary of `ddtrace` (only
-  when retries are on; Airedale does not use retries). Romain accepted this;
-  DD-65 (`ddtrace` retry summary) follows it. Other progress lines can also show raw text: the description and
-  summary of a nested agent, and tool inputs. The progress text of an error
-  result and of an `api_retry` message shows only fixed values, numbers and
-  counts (DD-64).
+- **Claude runs:** the error that the run raises in the process still has raw
+  text, and so do the native `ddtrace` Claude spans (child spans). Romain
+  accepted this. The `ddtrace` experiment records (the experiment span, the row,
+  the status, the retry summary, and the `--fail-fast` error) get only the type
+  and the place of the error, for example `ValueError at claude.py:512`. Other
+  progress lines can also show raw text: the description and summary of a nested
+  agent, and tool inputs. The progress text of an error result and of an
+  `api_retry` message shows only fixed values, numbers and counts (DD-64).
 
 ### Windows support
 
