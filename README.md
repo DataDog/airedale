@@ -452,7 +452,7 @@ env-var keys (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`).
 | Key | Type | Description |
 |-----|------|-------------|
 | `providers.<name>.base_url` | string | Gateway base URL for this provider |
-| `providers.<name>.credentials_helper` | string | Shell command yielding a bearer token |
+| `providers.<name>.credentials_helper` | string | Shell command yielding a bearer token (UTF-8 output) |
 | `providers.<name>.api_key_env` | string | Env var holding a static API key (alternative to helper) |
 | `providers.<name>.headers` | table | Static extra headers for every request to this provider |
 | `providers.<name>.pi_models` | array of tables | Pi harness only: extra pi model definitions (pi `models.json` `models` entries, passed as-is) |
@@ -462,6 +462,9 @@ env-var keys (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`).
 Credential resolution priority (per provider):
 
 1. `credentials_helper` → runs the command once, caches for 30 minutes, prefers JWT-shaped output.
+   The output of the command must be UTF-8 on all platforms (on Windows too: the code page of the system is not
+   used). One leading UTF-8 byte order mark is accepted. Other output fails with a fixed `UnicodeDecodeError` error,
+   and Airedale does not retry. Airedale never reads the error output (`stderr`) of the helper.
 2. `api_key_env` → reads the named environment variable.
 3. Falls back to the provider SDK default (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`).
 
