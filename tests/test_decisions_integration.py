@@ -293,9 +293,13 @@ async def test_failing_helper_with_inline_secret_is_not_logged_or_raised(monkeyp
         "exit": subprocess.CalledProcessError(7, command, stderr=f"denied for {secret}"),
         "timeout": subprocess.TimeoutExpired(command, 30),
         "oserror": OSError(f"cannot run {command}"),
-        "decode": UnicodeDecodeError("utf-8", b"\xff" + secret.encode(), 0, 1, "invalid start byte"),
     }
-    mocker.patch("airedale.gateway.subprocess.run", side_effect=errors[failure])
+    if failure == "decode":
+        # `subprocess.run` gives bytes now: the decode runs in Airedale, not in `subprocess`.
+        bad_output = MagicMock(stdout=b"\xff" + secret.encode(), returncode=0)
+        mocker.patch("airedale.gateway.subprocess.run", return_value=bad_output)
+    else:
+        mocker.patch("airedale.gateway.subprocess.run", side_effect=errors[failure])
     gateway = GatewayConfig(
         providers={
             "openai": ProviderGatewayConfig(

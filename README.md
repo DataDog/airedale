@@ -72,8 +72,9 @@ run writes it to one private file, and the error (or the log line) gives the nam
 of that file.
 
 - **Pi:** the raw text never goes to an error message, a log line or a span.
-- **Claude:** only the Airedale log line of the failed run and the logs of the
-  Claude Agent SDK are protected. The raw text of the other outputs stays: see
+- **Claude:** the Airedale log line of the failed run, the logs of the Claude
+  Agent SDK, and the progress text of an error result and of an `api_retry`
+  message are protected. The raw text of the other outputs stays: see
   "Claude runs" below.
 
 - **File name:** `pi-run-<time>-<id>.log` for a pi run, `claude-run-<time>-<id>.log`
@@ -85,11 +86,14 @@ of that file.
 - **When:** only for a run that failed and has raw text to keep. Airedale does not
   delete the file. Remove it yourself when you no longer need it.
 - **Windows:** no file is written, and Airedale logs a fixed warning.
-- **Claude runs:** three outputs still have raw text: the error that the run
-  raises, the progress and console output of an error result, and the
-  retry summary of `ddtrace` (only when retries are on; Airedale does not use
-  retries). Romain accepted this; DD-64 (progress and console output) and DD-65
-  (`ddtrace` retry summary) follow it.
+- **Claude runs:** two kinds of output still have raw text: the error that the
+  run raises (it also goes to the `ddtrace` experiment span and status, and to
+  the native `ddtrace` Claude spans), and the retry summary of `ddtrace` (only
+  when retries are on; Airedale does not use retries). Romain accepted this;
+  DD-65 (`ddtrace` retry summary) follows it. Other progress lines can also show raw text: the description and
+  summary of a nested agent, and tool inputs. The progress text of an error
+  result and of an `api_retry` message shows only fixed values, numbers and
+  counts (DD-64).
 
 ### Windows support
 
