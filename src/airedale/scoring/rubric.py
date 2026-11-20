@@ -17,6 +17,7 @@ import openai
 from ddtrace.llmobs import BaseAsyncEvaluator, EvaluatorContext, EvaluatorResult
 
 from airedale.gateway import resolve_provider_config
+from airedale.safe_log import exception_summary
 from airedale.types import ModelSpec
 
 if TYPE_CHECKING:
@@ -25,6 +26,10 @@ if TYPE_CHECKING:
 DEFAULT_JUDGE_MODEL = "anthropic/claude-sonnet-4-6"
 
 _JUDGE_SYSTEM_PROMPT = "You are a strict technical-answer evaluator. Return only JSON."
+
+
+class RubricJudgeError(RuntimeError):
+    """A judge error with a safe message: the type names and the place, never the raw text."""
 
 
 @dataclass(frozen=True)
@@ -123,7 +128,20 @@ class RubricEvaluator(BaseAsyncEvaluator):
         return resolved.base_url, api_key, headers
 
     async def evaluate(self, context: EvaluatorContext) -> EvaluatorResult:
-        """Score the output against all criteria from ``expected_output``."""
+        """Score the output against all criteria from ``expected_output``.
+
+        A judge failure is raised as :class:`RubricJudgeError`: ``ddtrace`` copies the message of an evaluator error to
+        LLM Obs and to the retry summary log line, and the raw message of a provider error can hold a copy of the
+        prompt (the model answer).
+        """
+        try:
+            return await self._evaluate(context)
+        except Exception as error:  # Not ``BaseException``: a cancellation must pass unchanged.
+            summary, frames = exception_summary(error), error.__traceback__
+        # Raise outside the handler, so the raw error is not in ``__context__``. The frames stay for ``error.stack``.
+        raise RubricJudgeError(summary).with_traceback(frames)
+
+    async def _evaluate(self, context: EvaluatorContext) -> EvaluatorResult:
         criteria = _extract_criteria(context.expected_output)
         answer = _extract_answer(context.output_data)
         question = _extract_question(context.input_data)
