@@ -103,8 +103,9 @@ the whole process tree of a run. The required CI checks run on Linux only, so
 the tests of these three parts use a fake Windows API: they only simulate the
 real behavior.
 
-A separate CI job, `test-windows (py3.13, non-blocking)`, runs the test suite on
-`windows-latest`. It cannot block a merge, and it shows what fails there. The
+A separate CI job, `test-windows (py3.13)`, runs the test suite on
+`windows-latest`. It is not a required check and does not run in the merge
+queue, but a failed run is a regression. The
 tests that need POSIX (shell scripts, file modes, process groups) are skipped on
 Windows, and so are the tests of the private report, which Windows does not
 write. The stderr reader of the MCP probe (it stops when a child process keeps

@@ -45,10 +45,7 @@ class _HelperOutputError(ValueError):
 
 
 def _run_credentials_helper(command: str) -> str:
-    """Run a credentials helper command and return the token from its output.
-
-    The output must be UTF-8 (one optional BOM is accepted), on all platforms.
-    """
+    """Run a credentials helper command and return the output."""
     with _credential_cache_lock:
         now = time.time()
         if command in _credential_cache:
@@ -61,12 +58,9 @@ def _run_credentials_helper(command: str) -> str:
         try:
             # (The command is never logged or put in an error: it can hold an inline secret.)
             logger.debug("Running credentials helper (attempt %d/%d)", attempt, _CREDENTIALS_HELPER_MAX_ATTEMPTS)
-            # (Bytes, not text: in text mode, Windows decodes in a reader thread of ``subprocess`` with the locale
-            # code page. Here the decode is strict UTF-8, in this thread, on all platforms. Airedale never reads or
-            # decodes the stderr of the helper.)
+            # Bytes, not text: on Windows, text mode decodes in a reader thread, with the locale code page.
             result = subprocess.run(command, shell=True, capture_output=True, timeout=30, check=True)
-            # One optional BOM is accepted (``utf-8-sig``). Then CRLF and a lone CR become LF, as the text mode of
-            # ``subprocess`` did.
+            # The replaces give the line ends of text mode.
             output = result.stdout.decode("utf-8-sig").replace("\r\n", "\n").replace("\r", "\n").strip()
 
             if not output:
@@ -97,13 +91,12 @@ def _run_credentials_helper(command: str) -> str:
             failure = "Credentials helper timed out"
             break
         except UnicodeDecodeError:
-            # (Not the error itself: its ``object`` holds the raw output.) A decode error does not change, so no retry.
+            # (Not the error itself: its ``object`` holds the raw output.)
             failure = "Credentials helper output is not valid UTF-8 (UnicodeDecodeError). Make the helper write UTF-8."
             break
         except subprocess.CalledProcessError as e:
             # Non-zero exit: retry a bounded number of times before giving up.
-            # (The stderr of the helper stays as bytes: it is never read, logged or put in an error, as it can hold a
-            # credential.)
+            # (The stderr of the helper is never logged or put in an error: it can hold a credential.)
             if attempt < _CREDENTIALS_HELPER_MAX_ATTEMPTS:
                 logger.warning(
                     "Credentials helper failed (exit %s, attempt %d/%d). Retrying...",

@@ -16,7 +16,6 @@ import pytest
 from airedale.config.gateway import GatewayConfig, ProviderGatewayConfig
 from airedale.gateway import ResolvedGatewayConfig, _run_credentials_helper, resolve_provider_config
 
-# The full fixed text of the error for output that is not valid UTF-8 (compared with `==`, so nothing can be added).
 _NOT_UTF8 = "Credentials helper output is not valid UTF-8 (UnicodeDecodeError). Make the helper write UTF-8."
 
 
@@ -150,7 +149,6 @@ class TestResolveCredentialsHelper:
         }
         mocker.patch("airedale.gateway.time.sleep")
         if failure == "decode":
-            # `subprocess.run` gives bytes now: the decode runs in Airedale, not in `subprocess`.
             bad_output = MagicMock(stdout=b"\xff" + secret.encode(), returncode=0)
             mocker.patch("airedale.gateway.subprocess.run", return_value=bad_output)
         else:
@@ -188,7 +186,6 @@ class TestResolveCredentialsHelper:
         # 0x81 is not valid in UTF-8 and is not defined in cp1252 (the code page of the Windows runners).
         bad_byte = 0x81
         command = helper_command([bad_byte])
-        # Precondition: the helper writes these bytes, and they are not valid UTF-8.
         raw = subprocess.run(command, shell=True, capture_output=True, check=True, timeout=30).stdout
         assert raw == bytes([bad_byte]) + secret.encode()
         try:
@@ -197,8 +194,6 @@ class TestResolveCredentialsHelper:
             pass
         else:
             pytest.fail("precondition: the helper output decodes with utf-8, so this test proves nothing here")
-        # Airedale decodes in the calling thread, so no thread error goes to `threading.excepthook` (before the fix,
-        # on Windows, the decode ran in a reader thread of `subprocess`).
         with caplog.at_level(logging.DEBUG), pytest.raises(RuntimeError) as raised:
             _run_credentials_helper(command)
         error = raised.value
@@ -252,21 +247,15 @@ class TestResolveCredentialsHelper:
         mock_sleep.assert_not_called()
 
 
-# ---------------------------------------------------------------------------
-# _run_credentials_helper — decode of the output (strict UTF-8, in the calling thread)
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture
 def thread_errors(monkeypatch) -> list[threading.ExceptHookArgs]:
-    """Collect the errors of threads. On Windows, `subprocess` decodes in a reader thread, and its error goes here."""
+    """Collect thread errors: on Windows, a decode error in a `subprocess` reader thread goes to `threading.excepthook`."""
     errors: list[threading.ExceptHookArgs] = []
     monkeypatch.setattr(threading, "excepthook", errors.append)
     return errors
 
 
 def _python_helper(code: str, *args: str) -> str:
-    """Return a shell command that runs ``code`` with the current interpreter (the same rules in sh and cmd.exe)."""
     assert '"' not in code and "%" not in code, "the code must be safe inside double quotes in cmd.exe"
     return " ".join([f'"{sys.executable}" -c "{code}"', *args])
 
@@ -278,7 +267,7 @@ class TestCredentialsHelperDecode:
         )
         assert _run_credentials_helper("any-command") == "tok"
         kwargs = mock_run.call_args.kwargs
-        # Any of these makes `subprocess` decode, and on Windows the decode would run in a reader thread.
+        # Each of these makes `subprocess` decode (on Windows, in a reader thread).
         assert not {"text", "universal_newlines", "encoding", "errors"} & kwargs.keys()
         assert kwargs["capture_output"] is True
 
@@ -295,14 +284,14 @@ class TestCredentialsHelperDecode:
     def test_real_helper_cp1252_byte_fails_once(self, mocker, clear_credential_cache, thread_errors, caplog):
         import logging
 
-        # 0xE9 is "é" in cp1252, but it is not valid UTF-8: there must be no fallback to the locale code page.
+        # 0xE9 is "é" in cp1252 but is not valid UTF-8: a fallback to the locale code page would accept it.
         command = _python_helper("import sys; sys.stdout.buffer.write(bytes([0xE9]))")
         spy = mocker.spy(subprocess, "run")
         sleep = mocker.patch("airedale.gateway.time.sleep")
         with caplog.at_level(logging.DEBUG), pytest.raises(RuntimeError) as raised:
             _run_credentials_helper(command)
         assert str(raised.value) == _NOT_UTF8
-        assert spy.call_count == 1  # A decode error does not change: no retry.
+        assert spy.call_count == 1
         sleep.assert_not_called()
         assert raised.value.__cause__ is None and raised.value.__context__ is None
         assert thread_errors == []

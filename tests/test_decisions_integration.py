@@ -295,7 +295,6 @@ async def test_failing_helper_with_inline_secret_is_not_logged_or_raised(monkeyp
         "oserror": OSError(f"cannot run {command}"),
     }
     if failure == "decode":
-        # `subprocess.run` gives bytes now: the decode runs in Airedale, not in `subprocess`.
         bad_output = MagicMock(stdout=b"\xff" + secret.encode(), returncode=0)
         mocker.patch("airedale.gateway.subprocess.run", return_value=bad_output)
     else:

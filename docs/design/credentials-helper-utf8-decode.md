@@ -171,11 +171,11 @@ The `asyncio.subprocess` calls (`pi.py`, `mcp.py`, `workdir.py:238`) use bytes a
 7. `[CI]` The Linux jobs pass.
 8. `[review]` macOS: a recorded local run of `uv run pytest tests/test_gateway.py tests/test_decisions_integration.py -v`
    (the output in the PR description). There is no macOS job in `ci.yml`.
-9. `[CI]` The `test-windows` job (`continue-on-error: true`, so a green check alone is not proof) shows these as
-   **passed, not skipped**: the tests of AC 2 to 6, by name (the `PASSED <test id>` lines of `pytest -rfEsp` in
-   the job log). The job log also records the **parent** interpreter encoding: `locale.getpreferredencoding(False)`
-   and `sys.flags.utf8_mode` in the pytest report header (a `pytest_report_header` hook in `tests/conftest.py`,
-   shown with no `-s`). This shows that the Windows run is not in UTF-8 mode, so AC 3b is a real test.
+9. `[CI]` The `test-windows` job passes. It is blocking (no `continue-on-error`), so a failed test makes it red.
+   Checked once, with `pytest -rfEsp` on the first implementation head, in the job log: the tests of AC 2 to 6 are
+   `PASSED` by name and not skipped. The pytest report header (a `pytest_report_header` hook in `tests/conftest.py`)
+   records the **parent** interpreter encoding: `locale.getpreferredencoding(False)=cp1252` and
+   `sys.flags.utf8_mode=0`. So the Windows run is not in UTF-8 mode, and AC 3b is a real test.
 10. `[docs]` `README.md` says that helper output must be UTF-8 (one optional BOM is accepted) and that a
     non-UTF-8 helper fails with a decode error.
 11. `[review]` The diff has no `text=True` or `universal_newlines=True`, no `errors="replace"`/`"ignore"` for
