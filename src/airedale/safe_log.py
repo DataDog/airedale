@@ -12,6 +12,7 @@ code, never ``exc_info`` and never ``str(exception)``.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import importlib
 import inspect
@@ -46,6 +47,52 @@ def _leaves(error: BaseException) -> list[BaseException]:
     if isinstance(group, tuple | list) and group and all(isinstance(item, BaseException) for item in group):
         return [leaf for item in group for leaf in _leaves(item)]
     return [error]
+
+
+def safe_error(error: BaseException, wrapper: type[Exception]) -> BaseException:
+    """Return an error that has the control-flow shape of ``error`` and none of its raw text.
+
+    A library (``ddtrace``) copies ``str(error)``, the notes and the whole chain of a failed task to a span, to a row and to
+    the console, so the code that calls the library raises this error instead of ``error``. The rules:
+
+    - An ``Exception`` (also an ``ExceptionGroup``) becomes ``wrapper(exception_summary(error))``, with the frames of
+      ``error``. It is an ``Exception`` like ``error``, so a retry or a ``--fail-fast`` still sees a failure.
+    - A ``BaseExceptionGroup`` that is not an ``Exception`` (it has a ``BaseException`` leaf, a cancellation for example)
+      is built again: a new group with the ``exception_summary`` text and the frames of ``error``. Each leaf is made safe
+      by these rules. The cancellation stays in the group, so the group is still not an ``Exception``.
+    - Any other ``BaseException`` (``CancelledError``, ``KeyboardInterrupt``, ``SystemExit``) is **the same object**, with
+      the same type, message and arguments. Only the raw chain is cut: ``__cause__``, ``__notes__``, and a ``__context__``
+      that is not a ``CancelledError``. A ``CancelledError`` context stays (made safe in the same way), because anyio
+      finds its own cancellations by the message of the error and of its context. The message text of such an error
+      is not changed: only code writes it (anyio, asyncio, the SIGINT handler), never a runner, a provider or a model.
+
+    The function never swallows a cancellation: the caller must raise the result.
+    """
+    if isinstance(error, Exception):
+        return wrapper(exception_summary(error)).with_traceback(error.__traceback__)
+    if isinstance(error, BaseExceptionGroup):  # (Here it is not an ``Exception``: it has a ``BaseException`` leaf.)
+        group = BaseExceptionGroup(exception_summary(error), [safe_error(leaf, wrapper) for leaf in error.exceptions])
+        return group.with_traceback(error.__traceback__)
+    return _without_raw_chain(error, set())
+
+
+def _without_raw_chain(error: BaseException, seen: set[int]) -> BaseException:
+    """Cut the raw chain of a ``BaseException`` that is not an ``Exception`` (it is the same object)."""
+    if id(error) in seen:
+        return error
+    seen.add(id(error))
+    if error.__cause__ is not None:  # (Do not set it for nothing: this also sets ``__suppress_context__``.)
+        error.__cause__ = None
+    with contextlib.suppress(AttributeError):
+        del error.__notes__
+    context = error.__context__
+    if context is None:
+        return error
+    if isinstance(context, asyncio.CancelledError):
+        _without_raw_chain(context, seen)
+    else:
+        error.__context__ = None
+    return error
 
 
 # --------------------------------------------------------------------------- #

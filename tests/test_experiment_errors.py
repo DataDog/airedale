@@ -15,6 +15,7 @@ checks that a marker is absent.
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import traceback
 from typing import Any
@@ -46,6 +47,13 @@ class PassingRunner:
         return HarnessResult(answer="the answer", usage=UsageMetrics(input_tokens=1, output_tokens=1, total_tokens=2))
 
 
+def _text(error: BaseException) -> str:
+    """Everything that a library can copy from ``error``."""
+    return "\n".join(
+        [str(error), repr(error), repr(getattr(error, "__notes__", None)), "".join(traceback.format_exception(error))]
+    )
+
+
 def summary_record(caplog) -> str:
     """Return the retry summary of ddtrace. It fails if the record is not there (a marker check would pass for no reason)."""
     [message] = [
@@ -56,12 +64,31 @@ def summary_record(caplog) -> str:
     return message
 
 
+def experiment_summary_record(caplog, *, level: int | None = None) -> str:
+    """Return the summary record of ddtrace (with or without retries). It fails if the record is not there."""
+    [message] = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "ddtrace.llmobs._experiment"
+        and "Experiment '" in record.getMessage()
+        and (level is None or record.levelno == level)
+    ]
+    return message
+
+
 def everything_that_ddtrace_has(service, caplog, summary) -> str:
     """The text of the 6 sinks and of the rest: log records, span tags, annotations, backend calls, and rows."""
     records = "\n".join(f"{r.name}: {r.getMessage()}|{r.exc_text}" for r in caplog.records)
     spans = "\n".join(f"{span.get_tags()!r}" for span in service.spans)
     return "\n".join(
-        [records, caplog.text, spans, repr(service.annotations), repr(service.backend_calls), repr(summary.rows)]
+        [
+            records,
+            caplog.text,
+            spans,
+            repr(service.annotations),
+            repr(service.backend_calls),
+            repr(summary.rows if summary else []),
+        ]
     )
 
 
@@ -191,8 +218,19 @@ async def test_the_guards_do_not_chain_or_wrap_cancellation(run_cell, ddtrace_ex
     if guard == "task":
         # Call the ``experiment_task`` that ``_run_cell`` gives to ddtrace, with no ddtrace in between.
         class CancelledRunner:
+            """A runner that is cancelled while it handles a raw error (the raw error is the ``__context__``)."""
+
+            def __init__(self) -> None:
+                self.raised: asyncio.CancelledError | None = None
+
             async def run(self, **kwargs: Any) -> None:
-                raise asyncio.CancelledError
+                marker = TASK_MARKER
+                try:
+                    raise ValueError(marker)
+                except ValueError:
+                    self.raised = asyncio.CancelledError("Cancelled via cancel scope 0x1")
+                    self.raised.add_note(marker)
+                    raise self.raised  # noqa: B904 (The context is what the test is about.)
 
         async def call_task(runner: Any) -> BaseException:
             outcome: list[BaseException] = []
@@ -219,7 +257,9 @@ async def test_the_guards_do_not_chain_or_wrap_cancellation(run_cell, ddtrace_ex
 
         error = await call_task(FailingRunner())
         assert type(error) is ExperimentTaskError
-        cancel = await call_task(CancelledRunner())
+        runner = CancelledRunner()
+        cancel = await call_task(runner)
+        assert cancel is runner.raised  # The same object, so asyncio and anyio still see their cancellation.
     else:
         evaluator = RubricEvaluator(judge_model="openai/gpt-4.1", openai_client=judge_client([]))
         context = EvaluatorContext(
@@ -229,13 +269,157 @@ async def test_the_guards_do_not_chain_or_wrap_cancellation(run_cell, ddtrace_ex
             await evaluator.evaluate(context)
         error = raised.value
 
+        raised_cancellation: list[asyncio.CancelledError] = []
+
         async def cancelled(_context: EvaluatorContext) -> None:
-            raise asyncio.CancelledError
+            marker = JUDGE_MARKER
+            try:
+                raise ValueError(marker)
+            except ValueError:
+                raised_cancellation.append(asyncio.CancelledError("Cancelled via cancel scope 0x1"))
+                raised_cancellation[0].add_note(marker)
+                raise raised_cancellation[0]  # noqa: B904 (The context is what the test is about.)
 
         monkeypatch.setattr(evaluator, "_evaluate", cancelled)
         with pytest.raises(asyncio.CancelledError) as cancel_raised:
             await evaluator.evaluate(context)
         cancel = cancel_raised.value
+        assert cancel is raised_cancellation[0]
     assert error.__cause__ is None
     assert error.__context__ is None
     assert type(cancel) is asyncio.CancelledError  # Not wrapped.
+    assert cancel.args == ("Cancelled via cancel scope 0x1",)  # The message is not changed.
+    assert cancel.__cause__ is None
+    assert cancel.__context__ is None  # The raw error is cut.
+    assert getattr(cancel, "__notes__", None) is None
+    assert TASK_MARKER not in "".join(traceback.format_exception(cancel))
+    assert JUDGE_MARKER not in "".join(traceback.format_exception(cancel))
+
+
+# --------------------------------------------------------------------------- #
+# A mixed exception group, and a real cancellation (plan amendment v2)
+# --------------------------------------------------------------------------- #
+def mixed_group(marker: str) -> BaseExceptionGroup:
+    """A group of an ordinary error and a cancellation. The marker is in the message, in a leaf and in a note."""
+    group = BaseExceptionGroup(marker, [ValueError(marker), asyncio.CancelledError()])
+    group.add_note(marker)
+    return group
+
+
+class MixedGroupRunner:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def run(self, **kwargs: Any) -> HarnessResult:
+        self.calls += 1
+        group = mixed_group(TASK_MARKER)
+        raise group
+
+
+@pytest.mark.parametrize("fail_fast", [False, True], ids=["keep-going", "fail-fast"])
+async def test_a_mixed_group_task_error_reaches_ddtrace_as_safe_text(ddtrace_experiment, run_cell, caplog, fail_fast):
+    ddtrace_experiment.max_retries = 1
+    runner = MixedGroupRunner()
+    summary = None
+    escaped: BaseExceptionGroup | None = None
+    if fail_fast:
+        with pytest.raises(BaseExceptionGroup) as raised:
+            await run_cell(lambda cwd: runner, fail_fast=True)
+        escaped = raised.value
+    else:
+        summary = await run_cell(lambda cwd: runner)
+
+    assert runner.calls == 1  # No retry: ddtrace retries only an ``Exception``.
+    experiment_summary_record(caplog, level=logging.WARNING if fail_fast else logging.INFO)  # The record exists.
+    assert TASK_MARKER not in everything_that_ddtrace_has(ddtrace_experiment, caplog, summary)
+    [span] = ddtrace_experiment.spans
+    assert re.match(r"^CancelledError, ValueError at \S+:\d+ \(2 sub-exceptions\)$", span.get_tag("error.message"))
+    assert span.get_tag("error.type") == "builtins.BaseExceptionGroup"
+    assert "raise group" in span.get_tag("error.stack")  # The frames stay.
+    if escaped is not None:
+        assert TASK_MARKER not in _text(escaped)
+        assert escaped.subgroup(asyncio.CancelledError) is not None  # The cancellation is still in the group.
+        assert escaped.subgroup(ExperimentTaskError) is not None  # The failure too.
+
+
+@pytest.mark.parametrize("raise_errors", [False, True], ids=["keep-going", "fail-fast"])
+async def test_a_mixed_group_judge_error_reaches_ddtrace_as_safe_text(
+    ddtrace_experiment, run_cell, caplog, monkeypatch, raise_errors
+):
+    ddtrace_experiment.max_retries = 1
+    evaluator = RubricEvaluator(judge_model="openai/gpt-4.1", openai_client=judge_client([]))
+    calls: list[int] = []
+
+    async def mixed(_context: EvaluatorContext) -> None:
+        calls.append(1)
+        group = mixed_group(JUDGE_MARKER)
+        raise group
+
+    monkeypatch.setattr(evaluator, "_evaluate", mixed)
+    ddtrace_experiment.evaluators = (evaluator,)
+    summary = None
+    escaped: BaseExceptionGroup | None = None
+    if raise_errors:
+        with pytest.raises(BaseExceptionGroup) as raised:
+            await run_cell(lambda cwd: PassingRunner(), fail_fast=True)
+        escaped = raised.value
+    else:
+        summary = await run_cell(lambda cwd: PassingRunner())
+
+    assert calls == [1]  # No retry.
+    experiment_summary_record(caplog, level=logging.WARNING if raise_errors else logging.INFO)  # The record exists.
+    assert JUDGE_MARKER not in everything_that_ddtrace_has(ddtrace_experiment, caplog, summary)
+    if escaped is not None:
+        assert JUDGE_MARKER not in _text(escaped)
+        assert escaped.subgroup(asyncio.CancelledError) is not None
+        assert escaped.subgroup(RubricJudgeError) is not None
+
+
+@pytest.mark.parametrize("where", ["task", "judge"])
+async def test_a_cancellation_keeps_propagating_without_its_raw_chain(
+    ddtrace_experiment, run_cell, caplog, monkeypatch, where
+):
+    """A real ``task.cancel()`` during the cleanup of a failed run: the cancellation has the raw error as ``__context__``."""
+    ddtrace_experiment.max_retries = 1
+    marker = TASK_MARKER if where == "task" else JUDGE_MARKER
+    in_cleanup, release = asyncio.Event(), asyncio.Event()
+
+    async def fail_then_wait_in_cleanup() -> None:
+        text = marker
+        try:
+            raise ValueError(text)
+        finally:
+            in_cleanup.set()
+            await release.wait()  # The cancellation arrives here, while ``ValueError`` is being handled.
+
+    class CleanupRunner:
+        async def run(self, **kwargs: Any) -> None:
+            await fail_then_wait_in_cleanup()
+
+    if where == "judge":
+        evaluator = RubricEvaluator(judge_model="openai/gpt-4.1", openai_client=judge_client([]))
+
+        async def failing_evaluate(_context: EvaluatorContext) -> None:
+            await fail_then_wait_in_cleanup()
+
+        monkeypatch.setattr(evaluator, "_evaluate", failing_evaluate)
+        ddtrace_experiment.evaluators = (evaluator,)
+        make_runner: Any = lambda cwd: PassingRunner()  # noqa: E731
+    else:
+        make_runner = lambda cwd: CleanupRunner()  # noqa: E731
+
+    cell = asyncio.ensure_future(run_cell(make_runner))
+    await asyncio.wait_for(in_cleanup.wait(), timeout=30)
+    cell.cancel()
+    with pytest.raises(asyncio.CancelledError) as raised:
+        await asyncio.wait_for(cell, timeout=30)
+
+    # ddtrace saw an interruption (the status and the WARNING summary), and the raw error is nowhere.
+    experiment_summary_record(caplog, level=logging.WARNING)  # The record exists.
+    assert any("interrupted" in str(call) for call in ddtrace_experiment.backend_calls)
+    assert marker not in everything_that_ddtrace_has(ddtrace_experiment, caplog, None)
+    assert marker not in _text(raised.value)
+    if where == "task":
+        [span] = ddtrace_experiment.spans
+        assert span.get_tag("error.stack")  # The span has the error (the check above is not empty).
+        assert span.get_tag("error.type") == "asyncio.exceptions.CancelledError"

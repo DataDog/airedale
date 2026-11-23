@@ -32,7 +32,7 @@ from airedale.harness import check_scenario_for_pi, create_runner, mcp_system_pr
 from airedale.mcp import McpServerSpec, managed_servers
 from airedale.observability import enable_llmobs
 from airedale.progress import ProgressReporter
-from airedale.safe_log import exception_summary
+from airedale.safe_log import safe_error
 from airedale.scoring import RubricEvaluator
 from airedale.scoring.decisions import DECISIONS_MODEL, DecisionsRubricEvaluator
 from airedale.summary import ExperimentSummary, print_summary
@@ -49,7 +49,8 @@ class ExperimentTaskError(RuntimeError):
 
     ``ddtrace`` copies ``str(error)`` of a failed task to the experiment span, to the row, to the status text, to the
     retry summary log line, and to the ``--fail-fast`` error. The raw text of a runner error can hold model output,
-    tool output, or stderr, so ``experiment_task`` raises this error instead of the original one.
+    tool output, or stderr, so ``experiment_task`` raises this error instead of the original one. A cancellation is not
+    wrapped (see :func:`airedale.safe_log.safe_error`).
     """
 
 
@@ -236,10 +237,10 @@ async def _run_cell(
         # ``ddtrace`` reads the parameters of this function, so the signature stays the same.
         try:
             return await _task_body(input_data)
-        except Exception as error:  # Not ``BaseException``: a cancellation must pass unchanged.
-            summary, frames = exception_summary(error), error.__traceback__
+        except BaseException as error:  # A cancellation stays a cancellation: ``safe_error`` never swallows it.
+            safe = safe_error(error, ExperimentTaskError)
         # Raise outside the handler, so the raw error is not in ``__context__``. The frames stay for ``error.stack``.
-        raise ExperimentTaskError(summary).with_traceback(frames)
+        raise safe
 
     experiment_task.__name__ = "dd_ai_devx_eval_task"
 

@@ -17,7 +17,7 @@ import openai
 from ddtrace.llmobs import BaseAsyncEvaluator, EvaluatorContext, EvaluatorResult
 
 from airedale.gateway import resolve_provider_config
-from airedale.safe_log import exception_summary
+from airedale.safe_log import safe_error
 from airedale.types import ModelSpec
 
 if TYPE_CHECKING:
@@ -132,14 +132,14 @@ class RubricEvaluator(BaseAsyncEvaluator):
 
         A judge failure is raised as :class:`RubricJudgeError`: ``ddtrace`` copies the message of an evaluator error to
         LLM Obs and to the retry summary log line, and the raw message of a provider error can hold a copy of the
-        prompt (the model answer).
+        prompt (the model answer). A cancellation is not wrapped (see :func:`airedale.safe_log.safe_error`).
         """
         try:
             return await self._evaluate(context)
-        except Exception as error:  # Not ``BaseException``: a cancellation must pass unchanged.
-            summary, frames = exception_summary(error), error.__traceback__
+        except BaseException as error:  # A cancellation stays a cancellation: ``safe_error`` never swallows it.
+            safe = safe_error(error, RubricJudgeError)
         # Raise outside the handler, so the raw error is not in ``__context__``. The frames stay for ``error.stack``.
-        raise RubricJudgeError(summary).with_traceback(frames)
+        raise safe
 
     async def _evaluate(self, context: EvaluatorContext) -> EvaluatorResult:
         criteria = _extract_criteria(context.expected_output)

@@ -10,13 +10,14 @@ import asyncio
 import contextlib
 import logging
 import os
+import traceback
 
 import pytest
 
 import airedale.mcp as mcp_module
 from airedale.harness.pi_spans import PiSpanRecorder
 from airedale.mcp import McpServerSpec, _mcp_tool_metadata_catalog
-from airedale.safe_log import exception_summary
+from airedale.safe_log import exception_summary, safe_error
 from airedale.skills import _pi_settings_skill_paths
 
 SECRET = "sk-ADVERTISED-SECRET-0123456789"
@@ -390,3 +391,124 @@ def test_a_child_of_a_server_that_keeps_stderr_open_does_not_keep_the_reader_ali
         if child_pid is not None:
             with contextlib.suppress(OSError):
                 os.kill(child_pid, signal.SIGTERM)
+
+
+# --------------------------------------------------------------------------- #
+# safe_error: the error that a guard raises in place of a raw one (ROMAIN-65, O7)
+# --------------------------------------------------------------------------- #
+class _WrapperError(RuntimeError):
+    pass
+
+
+def _raised(error: BaseException) -> BaseException:
+    """Give ``error`` a traceback (a frame, and a source line without the marker)."""
+    try:
+        _raise_in_helper(error)
+    except BaseException as raised:  # noqa: BLE001
+        return raised
+    raise AssertionError  # pragma: no cover
+
+
+def _text(error: BaseException) -> str:
+    """Everything that a library can copy from ``error``: ``str``, ``repr``, ``args``, notes, and the whole chain."""
+    return "\n".join(
+        [
+            str(error),
+            repr(error),
+            repr(error.args),
+            repr(getattr(error, "__notes__", None)),
+            "".join(traceback.format_exception(error)),
+        ]
+    )
+
+
+def test_safe_error_wraps_an_exception_with_its_notes_and_chain():
+    secret = SECRET
+    cause = ValueError(secret)
+    error = _raised(KeyError(secret))
+    error.__cause__ = cause
+    error.add_note(secret)
+    safe = safe_error(error, _WrapperError)
+    assert type(safe) is _WrapperError
+    assert str(safe) == "KeyError at test_safe_log.py:" + str(safe).rsplit(":", 1)[1]
+    assert (safe.__cause__, safe.__context__, getattr(safe, "__notes__", None)) == (None, None, None)
+    assert SECRET not in _text(safe)
+    assert "raise error" in _text(safe)  # The frames stay.
+
+
+def test_safe_error_wraps_an_exception_group_of_exceptions():
+    secret = SECRET
+    group = _raised(ExceptionGroup(secret, [ValueError(secret), ExceptionGroup("h", [KeyError(secret)])]))
+    safe = safe_error(group, _WrapperError)
+    assert type(safe) is _WrapperError
+    assert str(safe).startswith("KeyError, ValueError at ")
+    assert SECRET not in _text(safe)
+
+
+def test_safe_error_keeps_the_shape_of_a_mixed_group():
+    secret = SECRET
+    leaf = ValueError(secret)
+    leaf.add_note(secret)
+    cancelled = asyncio.CancelledError()
+    inner = BaseExceptionGroup(secret, [KeyError(secret), KeyboardInterrupt()])
+    inner.add_note(secret)
+    group = _raised(BaseExceptionGroup(secret, [leaf, cancelled, inner]))
+    group.add_note(secret)
+    group.__cause__ = ValueError(secret)
+
+    safe = safe_error(group, _WrapperError)
+
+    assert type(safe) is BaseExceptionGroup
+    assert not isinstance(safe, Exception)  # (Still not retried, still not caught by ``except Exception``.)
+    assert str(safe) == "CancelledError, KeyError, KeyboardInterrupt, ValueError at " + str(safe).split(" at ")[1]
+    wrapped, kept, safe_inner = safe.exceptions
+    assert type(wrapped) is _WrapperError
+    assert kept is cancelled  # The same object.
+    assert type(safe_inner) is BaseExceptionGroup
+    assert [type(item) for item in safe_inner.exceptions] == [_WrapperError, KeyboardInterrupt]
+    assert safe.__cause__ is None and safe.__context__ is None and getattr(safe, "__notes__", None) is None
+    assert SECRET not in _text(safe)
+    assert SECRET not in _text(safe_inner)
+
+
+def test_safe_error_keeps_a_cancellation_and_cuts_its_raw_chain():
+    secret = SECRET
+    error = _raised(asyncio.CancelledError("Cancelled via cancel scope 0x1"))
+    error.__cause__ = ValueError(secret)
+    error.__context__ = ValueError(secret)
+    error.add_note(secret)
+    safe = safe_error(error, _WrapperError)
+    assert safe is error  # The same object: asyncio, anyio and ddtrace see a cancellation.
+    assert safe.args == ("Cancelled via cancel scope 0x1",)  # The message is not changed.
+    assert safe.__cause__ is None and safe.__context__ is None and getattr(safe, "__notes__", None) is None
+    assert SECRET not in _text(safe)
+
+
+def test_safe_error_keeps_a_cancellation_context_for_anyio_and_cuts_its_raw_context():
+    secret = SECRET
+    inner = asyncio.CancelledError("Cancelled via cancel scope 0x2")
+    inner.__context__ = ValueError(secret)
+    inner.add_note(secret)
+    error = asyncio.CancelledError("Cancelled via cancel scope 0x1")
+    error.__context__ = inner
+    safe = safe_error(error, _WrapperError)
+    assert safe is error and safe.__context__ is inner
+    assert inner.args == ("Cancelled via cancel scope 0x2",)
+    assert inner.__context__ is None and getattr(inner, "__notes__", None) is None
+    assert SECRET not in _text(safe)
+
+
+def test_safe_error_does_not_loop_on_a_cycle_of_cancellation_contexts():
+    first, second = asyncio.CancelledError("a"), asyncio.CancelledError("b")
+    first.__context__, second.__context__ = second, first
+    assert safe_error(first, _WrapperError) is first
+
+
+@pytest.mark.parametrize("error", [SystemExit(3), KeyboardInterrupt()], ids=["system-exit", "keyboard-interrupt"])
+def test_safe_error_keeps_the_other_base_exceptions(error):
+    error.__context__ = ValueError(SECRET)
+    safe = safe_error(error, _WrapperError)
+    assert safe is error
+    assert safe.__context__ is None
+    if isinstance(safe, SystemExit):
+        assert safe.code == 3
