@@ -113,6 +113,17 @@ Guard points: blue = B and C, green = C only, orange = A.
   (DD-35 O5, accepted for the raised error).
 - **Judge:** `RubricEvaluator.evaluate` (`scoring/rubric.py:125`) does not catch provider
   errors. An Anthropic or OpenAI SDK error holds the HTTP response body.
+- **A cancellation with a raw chain (plan amendment v2):** a plain `CancelledError` is not an
+  `Exception`, so the first guard version let it pass. It can hold the raw error in
+  `__context__` when 1 Ctrl+C arrives during an `await` in a `finally` or `__aexit__` while a raw
+  run error is in flight (for example the `git worktree remove` of `WorkspaceManager.workspace`,
+  `workdir.py:132-136`). ddtrace prints that chain in the span `error.stack`. It is reachable
+  with 1 Ctrl+C.
+- **A mixed `BaseExceptionGroup`:** a group of an ordinary error and a cancellation (or a
+  `KeyboardInterrupt`) is not an `Exception` either. No airedale code, Claude SDK or judge SDK
+  path makes one today. The mcp SDK (anyio task groups) in the metadata probe of
+  `DecoratorSpanAgentRunner` could, after a second Ctrl+C. It is theoretical, but the guard must
+  not leak its message, leaves and notes.
 - **Judge, safe today:** `DecisionsRubricEvaluator._request` raises a fixed text outside the
   handler (`scoring/decisions.py:100-113`). C does not change it.
 
@@ -146,15 +157,28 @@ class ExperimentTaskError(RuntimeError):
 async def experiment_task(input_data, config=None):
     try:
         return await _run_task_body(input_data)  # The current body, not changed.
-    except Exception as error:  # Not BaseException: cancellation passes unchanged.
-        summary, frames = exception_summary(error), error.__traceback__
+    except BaseException as error:  # Never swallowed: safe_error keeps the shape of a cancellation.
+        safe = safe_error(error, ExperimentTaskError)
     # Raise outside the handler, so __context__ and __cause__ are None.
-    raise ExperimentTaskError(summary).with_traceback(frames)
+    raise safe
 ```
 
-Rules:
+Rules (`safe_error` in `src/airedale/safe_log.py`, plan amendment v2: G1 = A, G2 = in):
 
-1. Catch `Exception` only. `asyncio.CancelledError` and `KeyboardInterrupt` pass unchanged.
+1. An `Exception` (also an `ExceptionGroup`) becomes `ExperimentTaskError(exception_summary(error))`,
+   with the frames of the original error. It stays an `Exception`, so the retry and
+   `--fail-fast` do not change.
+   A `BaseExceptionGroup` that is not an `Exception` (it has a `CancelledError`,
+   `KeyboardInterrupt` or `SystemExit` leaf) is rebuilt with the same shape: a new group with the
+   `exception_summary` text and the original frames. Each leaf follows these rules. The
+   cancellation leaf stays, so the group is still not an `Exception` and ddtrace still does not
+   retry it.
+   Any other `BaseException` (`CancelledError`, `KeyboardInterrupt`, `SystemExit`) is **the same
+   object**, with the same type and message. Only its raw chain is cut: `__cause__`, `__notes__`
+   and a `__context__` that is not a `CancelledError`. A `CancelledError` context stays (and is
+   made safe in the same way), because anyio finds its own cancellations by the message of the
+   error and of its context. The message text of a cancellation error is out of scope: only code
+   writes it (anyio, asyncio, the SIGINT handler), never a runner, a provider or the model.
 2. Raise outside the `except` block (see "Rejected" above).
 3. Keep the frames (`with_traceback`). `error.stack` then keeps the file, line, function and
    source line of each frame. It has no message and no local value. A source line is the code
@@ -260,8 +284,8 @@ in that line makes the test fail for the wrong reason.
    contains `Retries (1)` and no marker. The eval `error.message` and `error.stack` have no
    marker.
 6. `[unit test]` **Wrapper rules.** For the task guard and the judge guard: the raised error
-   has `__cause__ is None` and `__context__ is None`. An `asyncio.CancelledError` passes
-   unchanged (not wrapped).
+   has `__cause__ is None` and `__context__ is None`. An `asyncio.CancelledError` passes as the
+   same object, with the same message, and with its raw `__context__`, `__cause__` and notes cut.
 7. `[review]` `src/airedale/experiment.py:272` does not pass `max_retries` (the default 0
    stays). There is no new config key and no new CLI flag.
 8. `[review]` `AGENTS.md` §8 has one new bullet: task and judge errors reach ddtrace as
@@ -271,6 +295,22 @@ in that line makes the test fail for the wrong reason.
    the status, the retry summary and the `cli.py` line.
 9. `[CI]` `uv run ruff format --check .`, `uv run ruff check --no-fix .`, `uv run pyright` and
    `uv run pytest` pass.
+
+10. `[manual check]` The mutation check fails as expected: with the 2 guards replaced by a
+    bare pass-through, the task and judge tests fail on a marker assert.
+11. `[integration test]` A mixed `BaseExceptionGroup` gives safe text for the task and the judge,
+    and the cancellation leaf stays (no retry, `--fail-fast` still raises a group). Check:
+    `test_a_mixed_group_task_error_reaches_ddtrace_as_safe_text`,
+    `test_a_mixed_group_judge_error_reaches_ddtrace_as_safe_text`.
+12. `[integration test]` A real cancellation (`task.cancel()` during the cleanup of a failed
+    run) keeps propagating (the "interrupted" status and the WARNING summary), as the same
+    object with the same message, without its raw chain. Check:
+    `test_a_cancellation_keeps_propagating_without_its_raw_chain`, and the extended
+    `test_the_guards_do_not_chain_or_wrap_cancellation`.
+13. `[unit test]` The `safe_error` rules (nested groups, notes, the anyio context, cycles,
+    `SystemExit`, `KeyboardInterrupt`). Check: `tests/test_safe_log.py::test_safe_error_*`.
+    The mutation check of item 10 extends to the guard of `BaseException`: with its body replaced
+    by a bare `raise`, the tests of items 11 and 12 fail on a marker assert.
 
 ## 6. Review requirements
 
@@ -295,7 +335,8 @@ selected (C, with the debug loss and without the child spans).
 |---|---|
 | The wrapper is not an `Exception` subclass, so no retry occurs | `RuntimeError` subclass. Item 3. |
 | An empty message, so `--fail-fast` does not stop the run | `exception_summary` is never empty. Item 4. |
-| The guard wraps `CancelledError`, so the interrupt fails | Catch `Exception` only. Item 6. |
+| The guard swallows or wraps a cancellation, so the interrupt fails | `safe_error` keeps the same object for a cancellation and the cancellation leaf of a group, and the guard raises it again. Items 6 and 12. |
+| The new cancellation object has no message, so anyio does not find its own cancellation | The same object is kept, with its message, and a `CancelledError` context stays. Item 13. |
 | A new ddtrace version adds a sink (for example `exc_info` on the summary) | The tests run the real ddtrace code and check each record and the row error. Items 1 to 5. |
 | The rate limit drops the record, so a test passes for the wrong reason | DEBUG level and a "record exists" assert in each test. |
 | LLM Obs has less debug text | The frames stay. The private reports of pi and Claude stay. Romain accepted the loss (C). |
@@ -307,6 +348,8 @@ selected (C, with the debug loss and without the child spans).
   `DecoratorSpanAgentRunner` and the native ddtrace Claude spans (see
   [Child spans](#child-spans-are-outside-the-guard)). A possible follow-up issue.
 - DD-35 O5: the error that the Claude runner raises.
+- The message text of a cancellation error (`CancelledError`, `KeyboardInterrupt`): code writes
+  it (anyio, asyncio, the SIGINT handler), not a runner, a provider or the model.
 - A `max_retries` option in airedale.
 - Keep safe fixed texts (pi errors, report paths) in LLM Obs. A possible follow-up: an
   allow-list of airedale error classes that have fixed messages.
