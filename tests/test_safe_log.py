@@ -545,3 +545,35 @@ def test_safe_error_does_not_recurse_on_a_very_deep_chain_or_group():
         exceptions = ExceptionGroup(secret, [exceptions])
     assert type(safe_error(exceptions, _WrapperError)) is _WrapperError
     assert exception_summary(exceptions) == "ValueError"
+
+
+class _CustomGroup(BaseExceptionGroup):
+    """A legal group that is not an ``Exception``, though all its leaves are."""
+
+
+def test_safe_error_keeps_a_custom_group_of_exceptions_out_of_exception():
+    secret = SECRET
+    custom = _CustomGroup(secret, [ValueError(secret), KeyError(secret)])
+    assert not isinstance(custom, Exception)  # (``BaseExceptionGroup(...)`` alone would make an ``ExceptionGroup``.)
+    custom.add_note(secret)
+    custom.extra = secret  # type: ignore[attr-defined]
+    nested = _CustomGroup(secret, [_CustomGroup(secret, [OSError(secret)])])
+    outer = _raised(BaseExceptionGroup(secret, [custom, ValueError(secret), nested]))
+
+    for original in (_raised(custom), nested, outer):
+        safe = safe_error(original, _WrapperError)
+        assert isinstance(safe, BaseExceptionGroup) and not isinstance(safe, Exception)
+        assert SECRET not in _text(safe)
+        assert not hasattr(safe, "extra") and getattr(safe, "__notes__", None) is None
+    safe = safe_error(custom, _WrapperError)
+    assert [type(leaf) for leaf in safe.exceptions] == [_WrapperError, _WrapperError]  # type: ignore[attr-defined]
+    assert str(safe).startswith("KeyError, ValueError") and str(safe).endswith("(2 sub-exceptions)")
+    # ``subgroup`` and ``split`` make groups that are not an ``Exception`` either.
+    part = safe.subgroup(_WrapperError)  # type: ignore[attr-defined]
+    assert isinstance(part, BaseExceptionGroup) and not isinstance(part, Exception)
+    matching, rest = safe.split(_WrapperError)  # type: ignore[attr-defined]
+    assert not isinstance(matching, Exception) and rest is None
+    # The outer group keeps the shape of its leaves: a safe group, a wrapper, and a safe group.
+    safe_outer = safe_error(outer, _WrapperError)
+    kinds = [isinstance(leaf, Exception) for leaf in safe_outer.exceptions]  # type: ignore[attr-defined]
+    assert kinds == [False, True, False]

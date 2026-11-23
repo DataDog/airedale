@@ -173,6 +173,9 @@ Rules (`safe_error` in `src/airedale/safe_log.py`, plan amendment v2: G1 = A, G2
    `exception_summary` text and the original frames. Each leaf follows these rules. The
    cancellation leaf stays, so the group is still not an `Exception` and ddtrace still does not
    retry it.
+   A group that is not an `Exception` stays one that is not: if all its safe leaves are `Exception`
+   (a custom `BaseExceptionGroup` subclass), the new group is an internal `_SafeGroup`, because
+   `BaseExceptionGroup(...)` would make an `ExceptionGroup`, which ddtrace retries.
    Any other `BaseException` (`CancelledError`, `KeyboardInterrupt`, `SystemExit`) is **the same
    object**, with the same type and message. Only its raw chain is cut: `__cause__`, `__notes__`
    and a `__context__` that is not a `CancelledError`. A `CancelledError` context stays (and is

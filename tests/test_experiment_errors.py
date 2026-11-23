@@ -570,3 +570,61 @@ async def test_a_failing_helper_does_not_attach_the_raw_error(run_cell, ddtrace_
     assert error.__cause__ is None
     assert TASK_MARKER not in _text(error)
     assert JUDGE_MARKER not in _text(error)
+
+
+class CustomGroup(BaseExceptionGroup):
+    """A legal group that is not an ``Exception``, though all its leaves are (ddtrace does not retry it)."""
+
+
+@pytest.mark.parametrize("fail_fast", [False, True], ids=["keep-going", "fail-fast"])
+@pytest.mark.parametrize("where", ["task", "judge"])
+async def test_a_custom_group_of_exceptions_is_still_not_an_exception_and_not_retried(
+    ddtrace_experiment, run_cell, caplog, monkeypatch, where, fail_fast
+):
+    ddtrace_experiment.max_retries = 1
+    marker = TASK_MARKER if where == "task" else JUDGE_MARKER
+    calls: list[int] = []
+
+    def make_error() -> BaseException:
+        calls.append(1)
+        group = CustomGroup(marker, [ValueError(marker), KeyError(marker)])
+        group.add_note(marker)
+        return group
+
+    class CustomGroupRunner:
+        async def run(self, **kwargs: Any) -> None:
+            error = make_error()
+            raise error
+
+    make_runner: Any = lambda cwd: CustomGroupRunner()  # noqa: E731
+    if where == "judge":
+        evaluator = RubricEvaluator(judge_model="openai/gpt-4.1", openai_client=judge_client([]))
+
+        async def custom_evaluate(_context: EvaluatorContext) -> None:
+            error = make_error()
+            raise error
+
+        monkeypatch.setattr(evaluator, "_evaluate", custom_evaluate)
+        ddtrace_experiment.evaluators = (evaluator,)
+        make_runner = lambda cwd: PassingRunner()  # noqa: E731
+
+    summary = None
+    escaped: BaseException | None = None
+    if fail_fast:
+        with pytest.raises(BaseExceptionGroup) as raised:
+            await run_cell(make_runner, fail_fast=True)
+        escaped = raised.value
+    else:
+        summary = await run_cell(make_runner)
+
+    assert len(calls) == 1  # No retry, as for the original group.
+    experiment_summary_record(caplog, level=logging.WARNING if fail_fast else logging.INFO)  # The record exists.
+    assert marker not in everything_that_ddtrace_has(ddtrace_experiment, caplog, summary)
+    if escaped is not None:
+        assert not isinstance(escaped, Exception)  # The same propagation as the original group.
+        assert marker not in _text(escaped)
+        assert escaped.subgroup(ExperimentTaskError if where == "task" else RubricJudgeError) is not None  # type: ignore[attr-defined]
+    if where == "task":
+        [span] = ddtrace_experiment.spans
+        assert re.match(r"^KeyError, ValueError at \S+:\d+ \(2 sub-exceptions\)$", span.get_tag("error.message"))
+        assert span.get_tag("error.stack")  # The span has the error (the checks above are not empty).

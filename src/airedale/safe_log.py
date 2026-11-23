@@ -91,6 +91,18 @@ def _safe_leaf(error: BaseException, wrapper: type[Exception]) -> BaseException:
     return _without_raw_chain(error)
 
 
+class _SafeGroup(BaseExceptionGroup):
+    """A group that is **not** an ``Exception``, whatever its leaves are (``BaseExceptionGroup`` converts some groups).
+
+    ``safe_error`` uses it for a custom ``BaseExceptionGroup`` subclass that has only ``Exception`` leaves. It has the
+    message and the safe leaves of the new group, and no other attribute of the original. ``subgroup`` and ``split``
+    make groups of the same class, so they stay not an ``Exception`` too.
+    """
+
+    def derive(self, excs: Any) -> _SafeGroup:  # type: ignore[override]
+        return _SafeGroup(self.message, excs)
+
+
 def _safe_group(error: BaseExceptionGroup, wrapper: type[Exception]) -> BaseException:
     """Build the safe group again, from the leaves up. It does not recurse: a group can be very deep."""
     safe: dict[int, BaseException] = {}
@@ -102,8 +114,11 @@ def _safe_group(error: BaseExceptionGroup, wrapper: type[Exception]) -> BaseExce
         if not isinstance(node, BaseExceptionGroup) or isinstance(node, Exception):
             safe[id(node)] = _safe_leaf(node, wrapper)
         elif children_done:
-            group = BaseExceptionGroup(exception_summary(node), [safe[id(child)] for child in node.exceptions])
-            safe[id(node)] = group.with_traceback(node.__traceback__)
+            leaves = [safe[id(child)] for child in node.exceptions]
+            # ``BaseExceptionGroup(...)`` makes an ``ExceptionGroup`` (an ``Exception``, so a retry) when all leaves are
+            # ``Exception``. The original group is not an ``Exception`` (a custom subclass), so keep it that way.
+            kind = BaseExceptionGroup if any(not isinstance(leaf, Exception) for leaf in leaves) else _SafeGroup
+            safe[id(node)] = kind(exception_summary(node), leaves).with_traceback(node.__traceback__)
         else:
             pending.append((node, True))
             pending.extend((child, False) for child in node.exceptions)
