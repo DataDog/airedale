@@ -1011,8 +1011,11 @@ class PiSpanRecorder:
         if request is None or request.seq != data["seq"]:
             return
         request.first_byte_ns = _epoch_ms_to_ns(data.get("t"))
-        if _is_int(data.get("status")):
-            request.http_status = data["status"]
+        status = data.get("status")
+        # An HTTP status has 3 digits (100 to 599). Another number is not a status: it is left out, not cut to the range
+        # (a cut value would be a status that the server never sent).
+        if _is_int(status) and 100 <= status <= 599:
+            request.http_status = status
         if isinstance(data.get("requestId"), str) and data["requestId"]:
             # Not in the spans: a gateway can put a credential in the header that carries it. The private report has it.
             self.private_notes.append(f"requestId of model request {data['seq']}: {data['requestId'][:256]!s}")

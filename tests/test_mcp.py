@@ -381,6 +381,7 @@ class TestBoundedByteBuffer:
         assert buf.text() == "abcd"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="needs POSIX process groups (os.setsid, killpg)")
 class TestManagedMcpServerTermination:
     """Regression tests for the teardown deadlock.
 

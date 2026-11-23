@@ -204,7 +204,7 @@ def test_scenario_servers_that_the_project_file_changes(tmp_path, label, scenari
 
 @pytest.mark.parametrize(("label", "scenario", "name", "entry", "bom", "changed"), CASES, ids=[c[0] for c in CASES])
 def test_merge_matches_pi(pi_reference, tmp_path, label, scenario, name, entry, bom, changed):
-    """The servers (and their config) after the merge are the ones that pi 1.4.0 and 1.5.0 load."""
+    """The servers (and their config) after the merge are the ones that pi 1.4.0, 1.5.0 and 1.5.1 load."""
     _write_project(tmp_path, name, entry, bom)
     project_file = tmp_path / ".pi" / "mcp.json"
     merge = merge_project_mcp_config(project_file, scenario)
@@ -427,7 +427,7 @@ def test_server_names_are_ordered_like_object_entries():
     ]
 
 
-#: URLs of a server and of its OAuth settings: pi 1.4.0 and 1.5.0 refuse the entry when one of them is not a valid URL.
+#: URLs of a server and of its OAuth settings: pi 1.4.0, 1.5.0 and 1.5.1 refuse the entry when one of them is not a valid URL.
 URL_ENTRIES = [
     ("http://[::1]/mcp", True),
     ("http://[::1%lo0]/mcp", False),
