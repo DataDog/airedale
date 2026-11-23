@@ -90,7 +90,10 @@ of that file.
   text, and so do the native `ddtrace` Claude spans (child spans). Romain
   accepted this. The `ddtrace` experiment records (the experiment span, the row,
   the status, the retry summary, and the `--fail-fast` error) get only the type
-  and the place of the error, for example `ValueError at claude.py:512`. Other
+  and the place of the error, for example `ValueError at claude.py:512`. The one
+  exception is the message text of a cancellation error (`CancelledError`,
+  `KeyboardInterrupt`): only code writes it (anyio, asyncio, the Ctrl+C handler),
+  never a runner, a provider or a model, so it is not changed. Other
   progress lines can also show raw text: the description and summary of a nested
   agent, and tool inputs. The progress text of an error result and of an
   `api_retry` message shows only fixed values, numbers and counts (DD-64).

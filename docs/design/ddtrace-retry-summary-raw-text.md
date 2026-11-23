@@ -158,8 +158,11 @@ async def experiment_task(input_data, config=None):
     try:
         return await _run_task_body(input_data)  # The current body, not changed.
     except BaseException as error:  # Never swallowed: safe_error keeps the shape of a cancellation.
-        safe = safe_error(error, ExperimentTaskError)
-    # Raise outside the handler, so __context__ and __cause__ are None.
+        caught = error  # Only keep it here. Do not call safe_error inside the handler.
+    # Outside the handler, so __context__ and __cause__ are None, and a failure of the helper
+    # cannot attach the raw error as __context__.
+    safe = safe_error(caught, ExperimentTaskError)
+    del caught
     raise safe
 ```
 
@@ -326,6 +329,13 @@ The change is on a security boundary (raw data to logs, spans and the backend) a
 external integration (ddtrace internals). Use the `code-review` process: 4 read-only reviewers in
 parallel, each on a tier 4 or 5 model from a different foundry than the implementer, with high
 thinking.
+
+**Method used (Romain, R1 = C):** no squad runtime has a sub-agent tool, so the 4 parallel reviewers
+were not possible. Romain approved 4 sequential runs of the Reviewer agent, 1 lens each (security,
+correctness, API and compatibility, tests), and then the Adversarial Reviewer. The lenses are not
+independent of each other (the same agent runs all 4). The lens runs found and closed 3 blocking
+findings (a mixed exception group, a recursion failure inside the handler, and the classification
+of a custom group).
 
 | Reviewer | Why | Questions |
 |---|---|---|
