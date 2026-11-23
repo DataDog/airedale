@@ -43,10 +43,22 @@ def exception_summary(error: BaseException) -> str:
 
 
 def _leaves(error: BaseException) -> list[BaseException]:
-    group = getattr(error, "exceptions", None)
-    if isinstance(group, tuple | list) and group and all(isinstance(item, BaseException) for item in group):
-        return [leaf for item in group for leaf in _leaves(item)]
-    return [error]
+    """Return the leaves of an exception group, in order (``[error]`` for another error).
+
+    It does not recurse: a group can be very deep.
+    """
+    leaves: list[BaseException] = []
+    pending = [iter([error])]
+    while pending:
+        for item in pending[-1]:
+            group = getattr(item, "exceptions", None)
+            if isinstance(group, tuple | list) and group and all(isinstance(child, BaseException) for child in group):
+                pending.append(iter(group))
+                break
+            leaves.append(item)
+        else:
+            pending.pop()
+    return leaves
 
 
 def safe_error(error: BaseException, wrapper: type[Exception]) -> BaseException:
@@ -68,30 +80,54 @@ def safe_error(error: BaseException, wrapper: type[Exception]) -> BaseException:
 
     The function never swallows a cancellation: the caller must raise the result.
     """
+    if isinstance(error, BaseExceptionGroup) and not isinstance(error, Exception):
+        return _safe_group(error, wrapper)  # (It has a ``BaseException`` leaf.)
+    return _safe_leaf(error, wrapper)
+
+
+def _safe_leaf(error: BaseException, wrapper: type[Exception]) -> BaseException:
     if isinstance(error, Exception):
         return wrapper(exception_summary(error)).with_traceback(error.__traceback__)
-    if isinstance(error, BaseExceptionGroup):  # (Here it is not an ``Exception``: it has a ``BaseException`` leaf.)
-        group = BaseExceptionGroup(exception_summary(error), [safe_error(leaf, wrapper) for leaf in error.exceptions])
-        return group.with_traceback(error.__traceback__)
-    return _without_raw_chain(error, set())
+    return _without_raw_chain(error)
 
 
-def _without_raw_chain(error: BaseException, seen: set[int]) -> BaseException:
-    """Cut the raw chain of a ``BaseException`` that is not an ``Exception`` (it is the same object)."""
-    if id(error) in seen:
-        return error
-    seen.add(id(error))
-    if error.__cause__ is not None:  # (Do not set it for nothing: this also sets ``__suppress_context__``.)
-        error.__cause__ = None
-    with contextlib.suppress(AttributeError):
-        del error.__notes__
-    context = error.__context__
-    if context is None:
-        return error
-    if isinstance(context, asyncio.CancelledError):
-        _without_raw_chain(context, seen)
-    else:
-        error.__context__ = None
+def _safe_group(error: BaseExceptionGroup, wrapper: type[Exception]) -> BaseException:
+    """Build the safe group again, from the leaves up. It does not recurse: a group can be very deep."""
+    safe: dict[int, BaseException] = {}
+    pending: list[tuple[BaseException, bool]] = [(error, False)]
+    while pending:
+        node, children_done = pending.pop()
+        if id(node) in safe:
+            continue
+        if not isinstance(node, BaseExceptionGroup) or isinstance(node, Exception):
+            safe[id(node)] = _safe_leaf(node, wrapper)
+        elif children_done:
+            group = BaseExceptionGroup(exception_summary(node), [safe[id(child)] for child in node.exceptions])
+            safe[id(node)] = group.with_traceback(node.__traceback__)
+        else:
+            pending.append((node, True))
+            pending.extend((child, False) for child in node.exceptions)
+    return safe[id(error)]
+
+
+def _without_raw_chain(error: BaseException) -> BaseException:
+    """Cut the raw chain of a ``BaseException`` that is not an ``Exception`` (it is the same object).
+
+    It walks the chain of cancellation contexts in a loop (a chain can be very deep) and stops at a cycle.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if current.__cause__ is not None:  # (Do not set it for nothing: this also sets ``__suppress_context__``.)
+            current.__cause__ = None
+        with contextlib.suppress(AttributeError):
+            del current.__notes__
+        context = current.__context__
+        if context is not None and not isinstance(context, asyncio.CancelledError):
+            current.__context__ = None
+            context = None
+        current = context
     return error
 
 

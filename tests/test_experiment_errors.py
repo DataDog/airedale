@@ -423,3 +423,150 @@ async def test_a_cancellation_keeps_propagating_without_its_raw_chain(
         [span] = ddtrace_experiment.spans
         assert span.get_tag("error.stack")  # The span has the error (the check above is not empty).
         assert span.get_tag("error.type") == "asyncio.exceptions.CancelledError"
+
+
+# --------------------------------------------------------------------------- #
+# Very deep errors: the guards must not fail with a RecursionError that holds the raw error
+# --------------------------------------------------------------------------- #
+DEPTH = 1500  # More than the recursion limit of Python (1000).
+
+
+def deep_cancellation_chain(marker: str) -> BaseException:
+    """A ``CancelledError`` with ``DEPTH`` cancellation contexts. The last context is ``ValueError(marker)``."""
+    error: BaseException = ValueError(marker)
+    for _ in range(DEPTH):
+        outer = asyncio.CancelledError()
+        outer.__context__ = error
+        error = outer
+    return error
+
+
+def deep_group(marker: str, *, mixed: bool) -> BaseException:
+    """An exception group nested ``DEPTH`` levels. The marker is in each message, in a leaf and in a note."""
+    leaves: list[BaseException] = [ValueError(marker)]
+    if mixed:
+        leaves.append(asyncio.CancelledError())
+    group: BaseException = BaseExceptionGroup(marker, leaves)
+    for _ in range(DEPTH):
+        group = BaseExceptionGroup(marker, [group])
+        group.add_note(marker)
+    return group
+
+
+DEEP_ERRORS = {
+    "cancellation-chain": lambda marker: deep_cancellation_chain(marker),
+    "nested-group": lambda marker: deep_group(marker, mixed=False),
+    "nested-mixed-group": lambda marker: deep_group(marker, mixed=True),
+}
+
+
+@pytest.mark.parametrize("fail_fast", [False, True], ids=["keep-going", "fail-fast"])
+@pytest.mark.parametrize("shape", list(DEEP_ERRORS))
+@pytest.mark.parametrize("where", ["task", "judge"])
+async def test_a_very_deep_error_reaches_ddtrace_as_safe_text(
+    ddtrace_experiment, run_cell, caplog, monkeypatch, where, shape, fail_fast
+):
+    ddtrace_experiment.max_retries = 1
+    marker = TASK_MARKER if where == "task" else JUDGE_MARKER
+    calls: list[int] = []
+
+    def make_error() -> BaseException:
+        calls.append(1)
+        return DEEP_ERRORS[shape](marker)
+
+    class DeepRunner:
+        async def run(self, **kwargs: Any) -> None:
+            error = make_error()
+            raise error
+
+    make_runner: Any = lambda cwd: DeepRunner()  # noqa: E731
+    if where == "judge":
+        evaluator = RubricEvaluator(judge_model="openai/gpt-4.1", openai_client=judge_client([]))
+
+        async def deep_evaluate(_context: EvaluatorContext) -> None:
+            error = make_error()
+            raise error
+
+        monkeypatch.setattr(evaluator, "_evaluate", deep_evaluate)
+        ddtrace_experiment.evaluators = (evaluator,)
+        make_runner = lambda cwd: PassingRunner()  # noqa: E731
+
+    summary = None
+    escaped: BaseException | None = None
+    if fail_fast:
+        with pytest.raises(BaseException) as raised:  # noqa: PT011 (The type depends on the shape.)
+            await run_cell(make_runner, fail_fast=True)
+        escaped = raised.value
+    else:
+        summary = await run_cell(make_runner)
+
+    experiment_summary_record(caplog)  # The record exists.
+    everything = everything_that_ddtrace_has(ddtrace_experiment, caplog, summary)
+    assert marker not in everything
+    assert "RecursionError" not in everything  # The guard did not fail.
+    if escaped is not None:
+        assert marker not in _text(escaped)
+        assert not isinstance(escaped, RecursionError)
+    # The retry behavior does not change: an ``Exception`` is retried, a cancellation or a mixed group is not.
+    assert len(calls) == (2 if shape == "nested-group" else 1)
+    if shape == "nested-mixed-group" and escaped is not None:
+        assert isinstance(escaped, BaseExceptionGroup)
+        assert escaped.subgroup(asyncio.CancelledError) is not None  # The cancellation is still in the group.
+    if shape == "cancellation-chain" and escaped is not None:
+        assert type(escaped) is asyncio.CancelledError
+    if where == "task":
+        [span] = ddtrace_experiment.spans
+        assert span.get_tag("error.stack")  # The span has the error (the checks above are not empty).
+        expected_type = {
+            "cancellation-chain": "asyncio.exceptions.CancelledError",
+            "nested-group": "airedale.experiment.ExperimentTaskError",
+            "nested-mixed-group": "builtins.BaseExceptionGroup",
+        }[shape]
+        assert span.get_tag("error.type") == expected_type
+
+
+@pytest.mark.parametrize("guard", ["task", "judge"])
+async def test_a_failing_helper_does_not_attach_the_raw_error(run_cell, ddtrace_experiment, monkeypatch, guard):
+    """``safe_error`` runs outside the ``except`` block: if it fails, the new error has no raw ``__context__``."""
+    from airedale import experiment as experiment_module
+    from airedale.scoring import rubric as rubric_module
+
+    def failing_helper(error: BaseException, wrapper: type[Exception]) -> BaseException:
+        raise OSError("the helper failed")
+
+    if guard == "task":
+        monkeypatch.setattr(experiment_module, "safe_error", failing_helper)
+        outcome: list[BaseException] = []
+
+        class DirectExperiment:
+            def __init__(self, task: Any) -> None:
+                self.task = task
+
+            async def run(self, jobs: int = 1, raise_errors: bool = False) -> dict[str, Any]:
+                try:
+                    await self.task({"prompt": "hi"}, {})
+                except BaseException as error:  # noqa: BLE001
+                    outcome.append(error)
+                return {"rows": []}
+
+        monkeypatch.setattr(
+            experiment_module.LLMObs,
+            "async_experiment",
+            staticmethod(lambda **kwargs: DirectExperiment(kwargs["task"])),
+        )
+        await run_cell(lambda cwd: FailingRunner())
+        [error] = outcome
+    else:
+        monkeypatch.setattr(rubric_module, "safe_error", failing_helper)
+        evaluator = RubricEvaluator(judge_model="openai/gpt-4.1", openai_client=judge_client([]))
+        context = EvaluatorContext(
+            input_data={"prompt": "q"}, output_data={"answer": "a"}, expected_output={"criteria": ["c"]}
+        )
+        with pytest.raises(OSError) as raised:  # noqa: PT011
+            await evaluator.evaluate(context)
+        error = raised.value
+    assert isinstance(error, OSError)
+    assert error.__context__ is None
+    assert error.__cause__ is None
+    assert TASK_MARKER not in _text(error)
+    assert JUDGE_MARKER not in _text(error)

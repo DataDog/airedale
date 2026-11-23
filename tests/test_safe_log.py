@@ -11,6 +11,7 @@ import contextlib
 import logging
 import os
 import traceback
+from typing import Any
 
 import pytest
 
@@ -512,3 +513,35 @@ def test_safe_error_keeps_the_other_base_exceptions(error):
     assert safe.__context__ is None
     if isinstance(safe, SystemExit):
         assert safe.code == 3
+
+
+def test_safe_error_does_not_recurse_on_a_very_deep_chain_or_group():
+    secret = SECRET
+    depth = 5000  # More than the recursion limit of Python.
+    chain: BaseException = ValueError(secret)
+    for _ in range(depth):
+        outer = asyncio.CancelledError()
+        outer.__context__ = chain
+        chain = outer
+    first = chain
+    assert safe_error(chain, _WrapperError) is first
+    last = first
+    for _ in range(depth - 1):
+        assert isinstance(last.__context__, asyncio.CancelledError)  # The cancellation contexts stay.
+        last = last.__context__
+    assert last.__context__ is None  # The raw error is cut.
+
+    group: Any = BaseExceptionGroup(secret, [ValueError(secret), asyncio.CancelledError()])
+    for _ in range(depth):
+        group = BaseExceptionGroup(secret, [group])
+    safe = safe_error(group, _WrapperError)
+    assert isinstance(safe, BaseExceptionGroup) and not isinstance(safe, Exception)
+    assert str(safe).startswith("CancelledError, ValueError")
+    assert safe.subgroup(asyncio.CancelledError) is not None
+    assert SECRET not in str(safe)
+
+    exceptions: Any = ExceptionGroup(secret, [ValueError(secret)])
+    for _ in range(depth):
+        exceptions = ExceptionGroup(secret, [exceptions])
+    assert type(safe_error(exceptions, _WrapperError)) is _WrapperError
+    assert exception_summary(exceptions) == "ValueError"

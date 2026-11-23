@@ -180,6 +180,11 @@ Rules (`safe_error` in `src/airedale/safe_log.py`, plan amendment v2: G1 = A, G2
    error and of its context. The message text of a cancellation error is out of scope: only code
    writes it (anyio, asyncio, the SIGINT handler), never a runner, a provider or the model.
 2. Raise outside the `except` block (see "Rejected" above).
+   The guard also calls `safe_error` outside the `except` block (it only keeps the caught error in
+   a variable inside it). If the helper failed inside the handler, Python would attach the raw
+   error as `__context__` of the new error. `safe_error`, `exception_summary` and the cleanup of
+   cancellation contexts use loops, not recursion: a chain or a group of 1,500+ levels would
+   otherwise raise a `RecursionError` that holds the raw error.
 3. Keep the frames (`with_traceback`). `error.stack` then keeps the file, line, function and
    source line of each frame. It has no message and no local value. A source line is the code
    text from the file, not a value of the run. Without this call, `error.stack` shows only the

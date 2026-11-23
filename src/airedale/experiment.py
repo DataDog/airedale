@@ -238,8 +238,11 @@ async def _run_cell(
         try:
             return await _task_body(input_data)
         except BaseException as error:  # A cancellation stays a cancellation: ``safe_error`` never swallows it.
-            safe = safe_error(error, ExperimentTaskError)
-        # Raise outside the handler, so the raw error is not in ``__context__``. The frames stay for ``error.stack``.
+            caught = error  # (Only keep it here: ``safe_error`` runs outside the handler, see below.)
+        # Everything after this line runs outside the handler. If ``safe_error`` failed inside it, Python would
+        # attach the raw error as ``__context__`` of the new error. The frames stay for ``error.stack``.
+        safe = safe_error(caught, ExperimentTaskError)
+        del caught
         raise safe
 
     experiment_task.__name__ = "dd_ai_devx_eval_task"
