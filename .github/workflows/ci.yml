@@ -79,11 +79,9 @@ jobs:
       - name: Run tests
         run: uv run pytest
 
-  # Not a required check, so it does not run in the merge queue (which waits only for the required checks).
   test-windows:
     name: test-windows (py3.13)
     runs-on: windows-latest
-    if: github.event_name != 'merge_group'
     timeout-minutes: 30
     env:
       UV_PYTHON: "3.13"
