@@ -27,8 +27,9 @@ with no `encoding`. On Windows this has two effects:
   raise it (it can hold a credential).
 - Newlines: `text=True` uses universal newlines. It turns `\r\n` **and a lone `\r`** into `\n`.
 - Errors: the function collects a fixed `failure` text inside the `except` blocks, leaves the loop, and raises
-  `RuntimeError(failure)` **outside** every handler. So `__cause__` and `__context__` are `None`, and the
-  message has no command, no output and no secret. The caller logs the provider and `exception_summary`
+  `RuntimeError(failure)` **outside** every handler. So no helper exception is in `__cause__` or `__context__`
+  (both are `None` when the caller has no active exception), and the message has no command, no output and no
+  secret. The caller logs the provider and `exception_summary`
   (type names and file:line), not `exc_info`.
 
 ## Approach
@@ -54,9 +55,10 @@ with no `encoding`. On Windows this has two effects:
    review: `errors="replace"` makes the text safe to print, but it is **not** redaction.
    Not chosen: `stderr=subprocess.DEVNULL`. It would keep a secret out of memory, but it changes the pipe the
    helper sees, and the fix does not need it.
-5. Traceback guarantee: no secret appears in a **normally formatted** traceback or exception chain
-   (`traceback.format_exception`, the default hook). It does not cover a reporter that prints frame locals: such a
-   tool can show `result` (the raw bytes) and `command`. This limit was true before this change, and it is stated
+5. Traceback guarantee: no helper output appears in a **normally formatted** traceback or exception chain
+   (`traceback.format_exception`, the default hook). If the caller is handling another exception, Python sets that
+   exception as `__context__`. It is not helper output, so it is outside this guarantee. The guarantee does not
+   cover a reporter that prints frame locals: such a tool can show `result` (the raw bytes) and `command`. This limit was true before this change, and it is stated
    here so nobody reads the guarantee as wider.
 6. No `str` fallback in production code. `_run_credentials_helper` accepts bytes from `subprocess.run` only.
 7. `README.md`: in the credentials section, say that helper output must be UTF-8 (one optional BOM is accepted),
@@ -94,8 +96,10 @@ sequenceDiagram
 - Behavior change on Windows (accepted by Romain): a helper that prints non-ASCII `cp1252` (or OEM code page)
   text now fails with the decode error. A helper that prints ASCII only is not affected (ASCII is valid UTF-8).
 - Line endings: `\n`, `\r\n` and a lone `\r` give the same lines as before the change.
-- No secret in any error, log or normally formatted traceback; `__cause__` and `__context__` stay `None`; no
-  thread traceback.
+- No secret in any error, log or normally formatted traceback. The raise is outside the helper's handlers, so
+  helper exceptions stay out of `__cause__` and `__context__`. Both are `None` when the caller has no active
+  exception; an active caller exception still becomes `__context__` (it is not helper output). No thread
+  traceback.
 - No new dependency. Only the standard library.
 - The timeout (30 s), the retry on non-zero exit, and the 30-minute cache do not change.
 
