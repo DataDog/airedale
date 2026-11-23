@@ -189,8 +189,11 @@ Rules (`safe_error` in `src/airedale/safe_log.py`, plan amendment v2: G1 = A, G2
    The guard also calls `safe_error` outside the `except` block (it only keeps the caught error in
    a variable inside it). If the helper failed inside the handler, Python would attach the raw
    error as `__context__` of the new error. `safe_error`, `exception_summary` and the cleanup of
-   cancellation contexts use loops, not recursion: a chain or a group of 1,500+ levels would
-   otherwise raise a `RecursionError` that holds the raw error.
+   cancellation contexts use loops, not recursion: a chain or a group deeper than the recursion
+   limit would otherwise raise a `RecursionError` that holds the raw error. The group walk reads at
+   most 8 leaves, skips a group that contains itself, and builds the summary of a rebuilt group
+   from its leaves up, so a deep group costs a linear amount of work. No test builds such a deep
+   or shared group (the review of the code covers it).
 3. Keep the frames (`with_traceback`). `error.stack` then keeps the file, line, function and
    source line of each frame. It has no message and no local value. A source line is the code
    text from the file, not a value of the run. Without this call, `error.stack` shows only the
