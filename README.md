@@ -103,8 +103,9 @@ the whole process tree of a run. The required CI checks run on Linux only, so
 the tests of these three parts use a fake Windows API: they only simulate the
 real behavior.
 
-A separate CI job, `test-windows (py3.13, non-blocking)`, runs the test suite on
-`windows-latest`. It cannot block a merge, and it shows what fails there. The
+A separate CI job, `test-windows (py3.13)`, runs the test suite on
+`windows-latest`. It is not a required check and does not run in the merge
+queue, but a failed run is a regression. The
 tests that need POSIX (shell scripts, file modes, process groups) are skipped on
 Windows, and so are the tests of the private report, which Windows does not
 write. The stderr reader of the MCP probe (it stops when a child process keeps
@@ -452,7 +453,7 @@ env-var keys (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`).
 | Key | Type | Description |
 |-----|------|-------------|
 | `providers.<name>.base_url` | string | Gateway base URL for this provider |
-| `providers.<name>.credentials_helper` | string | Shell command yielding a bearer token |
+| `providers.<name>.credentials_helper` | string | Shell command yielding a bearer token (UTF-8 output) |
 | `providers.<name>.api_key_env` | string | Env var holding a static API key (alternative to helper) |
 | `providers.<name>.headers` | table | Static extra headers for every request to this provider |
 | `providers.<name>.pi_models` | array of tables | Pi harness only: extra pi model definitions (pi `models.json` `models` entries, passed as-is) |
@@ -462,6 +463,11 @@ env-var keys (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`).
 Credential resolution priority (per provider):
 
 1. `credentials_helper` → runs the command once, caches for 30 minutes, prefers JWT-shaped output.
+   The output of the command must be UTF-8 on all platforms (on Windows too: the code page of the system is not
+   used). One leading UTF-8 byte order mark is accepted. If the helper exits with 0 and its output is not valid UTF-8,
+   Airedale raises a `RuntimeError` with a fixed decode-error message, and does not retry. A helper that exits with a
+   non-zero code is retried as before, and the error names its exit code. Airedale never reads the error output
+   (`stderr`) of the helper.
 2. `api_key_env` → reads the named environment variable.
 3. Falls back to the provider SDK default (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`).
 
