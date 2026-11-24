@@ -292,9 +292,10 @@ in that line makes the test fail for the wrong reason.
 4. `[integration test]` **`--fail-fast`.** The runner of item 2, with `raise_errors=True`.
    `run()` raises a `RuntimeError` that starts with `Error on record 0: ValueError at`. The
    marker is not in `"".join(traceback.format_exception(error))`.
-5. `[integration test]` **Judge path.** `RubricEvaluator` with a fake provider (httpx
-   `MockTransport`, an error response with the marker in the body) and the real
-   `Experiment._evaluate_record(..., max_retries=1, retry_delay=lambda _: 0)`. The summary record
+5. `[integration test]` **Judge path.** `RubricEvaluator` with a fake provider (httpx2
+   `MockTransport`, an error response with the marker in the body, and the SDK client with
+   `max_retries=0`, so only ddtrace retries) and the real
+   `Experiment.run(max_retries=1)` (zero retry delay). The summary record
    contains `Retries (1)` and no marker. The eval `error.message` and `error.stack` have no
    marker.
 6. `[unit test]` **Wrapper rules.** For the task guard and the judge guard: the raised error

@@ -62,7 +62,8 @@ def _leaves(error: BaseException, limit: int | None = None) -> list[BaseExceptio
     """
     leaves: list[BaseException] = []
     pending = [iter([error])]
-    path: list[int] = []  # The groups that are being walked (to skip a cycle).
+    path: list[int] = []  # The groups that are being walked, from the outside in (to unwind).
+    active: set[int] = set()  # The same ids, for a check in constant time (to skip a cycle).
     while pending:
         for item in pending[-1]:
             members = _group_members(item)
@@ -70,14 +71,15 @@ def _leaves(error: BaseException, limit: int | None = None) -> list[BaseExceptio
                 leaves.append(item)
                 if limit is not None and len(leaves) >= limit:
                     return leaves
-            elif id(item) not in path:
+            elif id(item) not in active:
                 pending.append(iter(members))
                 path.append(id(item))
+                active.add(id(item))
                 break
         else:
             pending.pop()
             if pending:
-                path.pop()
+                active.discard(path.pop())
     return leaves
 
 
