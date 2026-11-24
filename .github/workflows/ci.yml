@@ -79,15 +79,9 @@ jobs:
       - name: Run tests
         run: uv run pytest
 
-  # Windows is not supported yet (see README.md, "Windows support"): pi lookup, spawn and Job Object behaviour were only
-  # simulated on Linux. This job shows what fails there. It must not block a merge: `continue-on-error` keeps the run
-  # green when it fails, and its name must not be a required check (so it also does not run in the merge queue, which
-  # waits only for the required checks).
   test-windows:
-    name: test-windows (py3.13, non-blocking)
+    name: test-windows (py3.13)
     runs-on: windows-latest
-    continue-on-error: true
-    if: github.event_name != 'merge_group'
     timeout-minutes: 30
     env:
       UV_PYTHON: "3.13"

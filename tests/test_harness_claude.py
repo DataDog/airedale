@@ -438,7 +438,7 @@ def test_the_claude_sdk_stdout_debug_log_has_a_fixed_text(caplog):
 async def test_the_ddtrace_retry_summary_has_no_raw_text(
     tmp_path, monkeypatch, caplog, ddtrace_experiment, run_cell, path
 ):
-    """O7 (ROMAIN-65): a real failed Claude run, retried 1 time by ddtrace, leaves no raw text in the retry summary."""
+    """A real failed Claude run, retried once by ddtrace, leaves no raw text in the retry summary."""
     monkeypatch.setenv("AIREDALE_OUTPUT_DIR", str(tmp_path / "reports"))
     ddtrace_experiment.max_retries = 1
     runners = []

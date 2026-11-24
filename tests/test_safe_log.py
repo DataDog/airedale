@@ -394,7 +394,7 @@ def test_a_child_of_a_server_that_keeps_stderr_open_does_not_keep_the_reader_ali
 
 
 # --------------------------------------------------------------------------- #
-# safe_error: the error that a guard raises in place of a raw one (ROMAIN-65, O7)
+# safe_error: the error that a guard raises in place of a raw one
 # --------------------------------------------------------------------------- #
 class _WrapperError(RuntimeError):
     pass

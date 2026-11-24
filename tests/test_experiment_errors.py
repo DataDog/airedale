@@ -2,7 +2,7 @@
 #
 # This product includes software developed at Datadog (https://www.datadoghq.com/) Copyright 2026-present Datadog, Inc.
 
-"""Task and judge errors reach ddtrace only as safe text (ROMAIN-65, O7).
+"""Task and judge errors reach ddtrace only as safe text.
 
 The tests run the real ``Experiment.run`` of ddtrace (a real retry, with ``max_retries=1``) on a fake LLM Obs service
 (``ddtrace_experiment`` in ``conftest.py``). The spans are real ``ddtrace.trace.Span`` objects. A marker is raised from a
@@ -297,7 +297,7 @@ async def test_the_guards_do_not_chain_or_wrap_cancellation(run_cell, ddtrace_ex
 
 
 # --------------------------------------------------------------------------- #
-# A mixed exception group, and a real cancellation (plan amendment v2)
+# A mixed exception group, and a real cancellation
 # --------------------------------------------------------------------------- #
 def mixed_group(marker: str) -> BaseExceptionGroup:
     """A group of an ordinary error and a cancellation. The marker is in the message, in a leaf and in a note."""
