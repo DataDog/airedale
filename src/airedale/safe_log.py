@@ -12,6 +12,7 @@ code, never ``exc_info`` and never ``str(exception)``.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import importlib
 import inspect
@@ -21,7 +22,10 @@ import pkgutil
 import sys
 import threading
 import weakref
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 _MAX_LEAVES = 8
 
@@ -31,21 +35,152 @@ def exception_summary(error: BaseException) -> str:
 
     An exception group is described by the types of its leaves (at most 8). No message, no argument, no local value.
     """
-    names = sorted({type(leaf).__name__ for leaf in _leaves(error)[:_MAX_LEAVES]})
+    return _describe(_leaf_names(error, {}), error)
+
+
+def _describe(leaf_names: list[str], error: BaseException) -> str:
+    """Return the sorted type names, and the innermost frame of ``error`` (see ``exception_summary``)."""
     place = ""
     traceback = error.__traceback__
     if traceback is not None:
         while traceback.tb_next is not None:
             traceback = traceback.tb_next
         place = f" at {os.path.basename(traceback.tb_frame.f_code.co_filename)}:{traceback.tb_lineno}"
-    return ", ".join(names) + place
+    return ", ".join(sorted(set(leaf_names))) + place
 
 
-def _leaves(error: BaseException) -> list[BaseException]:
-    group = getattr(error, "exceptions", None)
-    if isinstance(group, tuple | list) and group and all(isinstance(item, BaseException) for item in group):
-        return [leaf for item in group for leaf in _leaves(item)]
-    return [error]
+def _group_members(item: BaseException) -> tuple[BaseException, ...] | None:
+    """Return group members, or ``None`` for a leaf or a failed custom property."""
+    try:
+        group = getattr(item, "exceptions", None)
+        if isinstance(group, tuple | list) and group and all(isinstance(child, BaseException) for child in group):
+            return tuple(group)
+    except Exception:  # noqa: BLE001 - A failed custom property makes this item a leaf.
+        pass
+    return None
+
+
+def _leaf_names(error: BaseException, cache: dict[int, tuple[BaseException, list[str]]]) -> list[str]:
+    """Return each group's first eight leaf names, walking shared groups once.
+
+    An open group has an empty cache entry, so a cycle adds no names. Each group stops after its own first eight
+    names; a parent takes only the names it needs. The walk uses a loop, not recursion.
+    """
+    frames: list[tuple[int, Iterator[BaseException], list[str]]] = []
+    item: BaseException | None = error
+    result: list[str] = []
+    while True:
+        if item is not None:
+            if id(item) in cache:
+                result = cache[id(item)][1]
+            elif (members := _group_members(item)) is None:
+                result = [type(item).__name__]
+            else:
+                cache[id(item)] = (item, [])
+                frames.append((id(item), iter(members), []))
+                result = []
+        if not frames:
+            return result
+        key, members_left, names = frames[-1]
+        names.extend(result[: _MAX_LEAVES - len(names)])
+        result = []
+        item = next(members_left, None) if len(names) < _MAX_LEAVES else None
+        if item is None:
+            frames.pop()
+            result = names
+            cache[key] = (cache[key][0], names)
+
+
+def safe_error(error: BaseException, wrapper: type[Exception]) -> BaseException:
+    """Return an error that has the control-flow shape of ``error`` and none of its raw text.
+
+    A library (``ddtrace``) copies ``str(error)``, the notes and the whole chain of a failed task to a span, to a row and to
+    the console, so the code that calls the library raises this error instead of ``error``. The rules:
+
+    - An ``Exception`` (also an ``ExceptionGroup``) becomes ``wrapper(exception_summary(error))``, with the frames of
+      ``error``. It is an ``Exception`` like ``error``, so a retry or a ``--fail-fast`` still sees a failure.
+    - A ``BaseExceptionGroup`` that is not an ``Exception`` (it has a ``BaseException`` leaf, a cancellation for example)
+      is built again: a new group with the ``exception_summary`` text and the frames of ``error``. Each leaf is made safe
+      by these rules. The cancellation stays in the group, so the group is still not an ``Exception``.
+    - Any other ``BaseException`` (``CancelledError``, ``KeyboardInterrupt``, ``SystemExit``) is **the same object**, with
+      the same type, message and arguments. Only the raw chain is cut: ``__cause__``, ``__notes__``, and a ``__context__``
+      that is not a ``CancelledError``. A ``CancelledError`` context stays (made safe in the same way), because anyio
+      finds its own cancellations by the message of the error and of its context. The message text of such an error
+      is not changed: only code writes it (anyio, asyncio, the SIGINT handler), never a runner, a provider or a model.
+
+    The function never swallows a cancellation: the caller must raise the result.
+    """
+    if isinstance(error, BaseExceptionGroup) and not isinstance(error, Exception):
+        return _safe_group(error, wrapper)  # (It has a ``BaseException`` leaf.)
+    return _safe_leaf(error, wrapper)
+
+
+def _safe_leaf(error: BaseException, wrapper: type[Exception]) -> BaseException:
+    if isinstance(error, Exception):
+        return wrapper(exception_summary(error)).with_traceback(error.__traceback__)
+    return _without_raw_chain(error)
+
+
+class _SafeGroup(BaseExceptionGroup):
+    """A group that is **not** an ``Exception``, whatever its leaves are (``BaseExceptionGroup`` converts some groups).
+
+    ``safe_error`` uses it for a custom ``BaseExceptionGroup`` subclass that has only ``Exception`` leaves. It has the
+    message and the safe leaves of the new group, and no other attribute of the original. ``subgroup`` and ``split``
+    make groups of the same class, so they stay not an ``Exception`` too.
+    """
+
+    def derive(self, excs: Any) -> _SafeGroup:  # type: ignore[override]
+        return _SafeGroup(self.message, excs)
+
+
+def _safe_group(error: BaseExceptionGroup, wrapper: type[Exception]) -> BaseException:
+    """Build the safe group again, from the leaves up. It does not recurse: a group can be very deep."""
+    names: dict[int, tuple[BaseException, list[str]]] = {}
+    safe: dict[int, BaseException] = {}
+    open_groups: set[int] = set()
+    pending: list[tuple[BaseException, tuple[BaseException, ...] | None]] = [(error, None)]
+    while pending:
+        node, members = pending.pop()
+        if members is not None:
+            open_groups.discard(id(node))
+            summary = _describe(_leaf_names(node, names), node)
+            leaves = [safe[id(member)] for member in members if id(member) in safe] or [wrapper(summary)]
+            # Keep a group that is not an Exception even if all its safe leaves are Exceptions.
+            kind = BaseExceptionGroup if any(not isinstance(leaf, Exception) for leaf in leaves) else _SafeGroup
+            safe[id(node)] = kind(summary, leaves).with_traceback(node.__traceback__)
+        elif id(node) in safe or id(node) in open_groups:
+            continue
+        elif isinstance(node, Exception):
+            safe[id(node)] = wrapper(_describe(_leaf_names(node, names), node)).with_traceback(node.__traceback__)
+        elif isinstance(node, BaseExceptionGroup):
+            open_groups.add(id(node))
+            members = _group_members(node) or BaseExceptionGroup.exceptions.__get__(node)
+            pending.append((node, members))
+            pending.extend((member, None) for member in members)
+        else:
+            safe[id(node)] = _without_raw_chain(node)
+    return safe[id(error)]
+
+
+def _without_raw_chain(error: BaseException) -> BaseException:
+    """Cut the raw chain of a ``BaseException`` that is not an ``Exception`` (it is the same object).
+
+    It walks the chain of cancellation contexts in a loop (a chain can be very deep) and stops at a cycle.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if current.__cause__ is not None:  # (Do not set it for nothing: this also sets ``__suppress_context__``.)
+            current.__cause__ = None
+        with contextlib.suppress(AttributeError):
+            del current.__notes__
+        context = current.__context__
+        if context is not None and not isinstance(context, asyncio.CancelledError):
+            current.__context__ = None
+            context = None
+        current = context
+    return error
 
 
 # --------------------------------------------------------------------------- #

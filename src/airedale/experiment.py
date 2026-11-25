@@ -32,6 +32,7 @@ from airedale.harness import check_scenario_for_pi, create_runner, mcp_system_pr
 from airedale.mcp import McpServerSpec, managed_servers
 from airedale.observability import enable_llmobs
 from airedale.progress import ProgressReporter
+from airedale.safe_log import safe_error
 from airedale.scoring import RubricEvaluator
 from airedale.scoring.decisions import DECISIONS_MODEL, DecisionsRubricEvaluator
 from airedale.summary import ExperimentSummary, print_summary
@@ -41,6 +42,16 @@ from airedale.workdir import WorkspaceManager
 if TYPE_CHECKING:
     from airedale.config.experiment import ExperimentConfig, ScenarioConfig, TaskConfig
     from airedale.config.gateway import GatewayConfig
+
+
+class ExperimentTaskError(RuntimeError):
+    """A task error with a safe message: the type names and the place, never the raw text.
+
+    ``ddtrace`` copies ``str(error)`` of a failed task to the experiment span, to the row, to the status text, to the
+    retry summary log line, and to the ``--fail-fast`` error. The raw text of a runner error can hold model output,
+    tool output, or stderr, so ``experiment_task`` raises this error instead of the original one. A cancellation is not
+    wrapped (see :func:`airedale.safe_log.safe_error`).
+    """
 
 
 @dataclass
@@ -207,7 +218,7 @@ async def _run_cell(
 
     cell_mcp_servers = [McpServerSpec.from_config(server) for server in scenario.mcp_servers]
 
-    async def experiment_task(input_data: dict[str, Any], config: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def _task_body(input_data: dict[str, Any]) -> dict[str, Any]:
         await progress.message(f"running {model.label} / {scenario.name} / {task.id}")
         async with workspace_manager.workspace(scenario.workdir) as cwd:
             runner = create_runner(model, scenario=scenario, gateway=gateway, cwd=str(cwd))
@@ -221,6 +232,18 @@ async def _run_cell(
             )
         _annotate_experiment_usage(result, scenario=scenario.name, model=model.label, task=task.id)
         return result.to_output_data()
+
+    async def experiment_task(input_data: dict[str, Any], config: dict[str, Any] | None = None) -> dict[str, Any]:
+        # ``ddtrace`` reads the parameters of this function, so the signature stays the same.
+        try:
+            return await _task_body(input_data)
+        except BaseException as error:  # A cancellation stays a cancellation: ``safe_error`` never swallows it.
+            caught = error  # (Only keep it here: ``safe_error`` runs outside the handler, see below.)
+        # Everything after this line runs outside the handler. If ``safe_error`` failed inside it, Python would
+        # attach the raw error as ``__context__`` of the new error. The frames stay for ``error.stack``.
+        safe = safe_error(caught, ExperimentTaskError)
+        del caught
+        raise safe
 
     experiment_task.__name__ = "dd_ai_devx_eval_task"
 

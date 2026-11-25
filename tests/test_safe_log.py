@@ -10,13 +10,16 @@ import asyncio
 import contextlib
 import logging
 import os
+import traceback
+import weakref
 
 import pytest
 
 import airedale.mcp as mcp_module
+import airedale.safe_log as safe_log_module
 from airedale.harness.pi_spans import PiSpanRecorder
 from airedale.mcp import McpServerSpec, _mcp_tool_metadata_catalog
-from airedale.safe_log import exception_summary
+from airedale.safe_log import exception_summary, safe_error
 from airedale.skills import _pi_settings_skill_paths
 
 SECRET = "sk-ADVERTISED-SECRET-0123456789"
@@ -390,3 +393,375 @@ def test_a_child_of_a_server_that_keeps_stderr_open_does_not_keep_the_reader_ali
         if child_pid is not None:
             with contextlib.suppress(OSError):
                 os.kill(child_pid, signal.SIGTERM)
+
+
+# --------------------------------------------------------------------------- #
+# safe_error: the error that a guard raises in place of a raw one
+# --------------------------------------------------------------------------- #
+class _WrapperError(RuntimeError):
+    pass
+
+
+def _raised(error: BaseException) -> BaseException:
+    """Give ``error`` a traceback (a frame, and a source line without the marker)."""
+    try:
+        _raise_in_helper(error)
+    except BaseException as raised:  # noqa: BLE001
+        return raised
+    raise AssertionError  # pragma: no cover
+
+
+def _text(error: BaseException) -> str:
+    """Everything that a library can copy from ``error``: ``str``, ``repr``, ``args``, notes, and the whole chain."""
+    return "\n".join(
+        [
+            str(error),
+            repr(error),
+            repr(error.args),
+            repr(getattr(error, "__notes__", None)),
+            "".join(traceback.format_exception(error)),
+        ]
+    )
+
+
+def test_safe_error_wraps_an_exception_with_its_notes_and_chain():
+    secret = SECRET
+    cause = ValueError(secret)
+    error = _raised(KeyError(secret))
+    error.__cause__ = cause
+    error.add_note(secret)
+    safe = safe_error(error, _WrapperError)
+    assert type(safe) is _WrapperError
+    assert str(safe) == "KeyError at test_safe_log.py:" + str(safe).rsplit(":", 1)[1]
+    assert (safe.__cause__, safe.__context__, getattr(safe, "__notes__", None)) == (None, None, None)
+    assert SECRET not in _text(safe)
+    assert "raise error" in _text(safe)  # The frames stay.
+
+
+def test_safe_error_wraps_an_exception_group_of_exceptions():
+    secret = SECRET
+    group = _raised(ExceptionGroup(secret, [ValueError(secret), ExceptionGroup("h", [KeyError(secret)])]))
+    safe = safe_error(group, _WrapperError)
+    assert type(safe) is _WrapperError
+    assert str(safe).startswith("KeyError, ValueError at ")
+    assert SECRET not in _text(safe)
+
+
+def test_safe_error_collapses_shared_nested_exception_groups(monkeypatch):
+    shared = ExceptionGroup(SECRET, [ValueError(SECRET), KeyError(SECRET)])
+    left = _raised(ExceptionGroup(SECRET, [shared, OSError(SECRET)]))
+    right = _raised(ExceptionGroup(SECRET, [shared, TypeError(SECRET)]))
+    assert isinstance(left, ExceptionGroup) and isinstance(right, ExceptionGroup)
+    expected = [exception_summary(left), exception_summary(right)]
+    cancellation = asyncio.CancelledError()
+    group = BaseExceptionGroup(SECRET, [left, right, cancellation])
+
+    visited = []
+    described = []
+    wrappers = []
+    original_members = safe_log_module._group_members
+    original_describe = safe_log_module._describe
+
+    def record_members(error):
+        visited.append(error)
+        return original_members(error)
+
+    def record_description(names, error):
+        described.append(error)
+        return original_describe(names, error)
+
+    class RecordingWrapperError(_WrapperError):
+        def __init__(self, message):
+            super().__init__(message)
+            wrappers.append(self)
+
+    monkeypatch.setattr(safe_log_module, "_group_members", record_members)
+    monkeypatch.setattr(safe_log_module, "_describe", record_description)
+    safe = safe_error(group, RecordingWrapperError)
+
+    assert isinstance(safe, BaseExceptionGroup) and not isinstance(safe, Exception)
+    safe_left, safe_right, safe_cancellation = safe.exceptions
+    assert type(safe_left) is RecordingWrapperError and type(safe_right) is RecordingWrapperError
+    assert [str(safe_left), str(safe_right)] == expected
+    assert safe_left.__traceback__ is left.__traceback__
+    assert safe_right.__traceback__ is right.__traceback__
+    assert safe_cancellation is cancellation
+    assert sum(error is shared for error in visited) == 1
+    assert all(error is not shared for error in described)
+    assert len(wrappers) == 2
+    assert SECRET not in _text(safe)
+
+
+def test_a_shared_group_gives_each_parent_its_own_first_8_names(monkeypatch):
+    shared = ExceptionGroup("shared", [ArithmeticError(), EOFError()])
+    first = ExceptionGroup(
+        "first", [ValueError(), KeyError(), OSError(), TypeError(), RuntimeError(), IndexError(), LookupError(), shared]
+    )
+    second = ExceptionGroup("second", [shared, NameError()])
+    expected = [exception_summary(first), exception_summary(second)]
+    visited = []
+    original_members = safe_log_module._group_members
+
+    def record_members(error):
+        visited.append(error)
+        return original_members(error)
+
+    monkeypatch.setattr(safe_log_module, "_group_members", record_members)
+    cancelled = asyncio.CancelledError()
+    safe = safe_error(BaseExceptionGroup("mixed", [first, second, cancelled]), _WrapperError)
+
+    assert isinstance(safe, BaseExceptionGroup)
+    wrapped_first, wrapped_second, kept = safe.exceptions
+    assert [str(wrapped_first), str(wrapped_second)] == expected
+    assert "EOFError" not in str(wrapped_first) and "EOFError" in str(wrapped_second)
+    assert kept is cancelled
+    assert sum(error is shared for error in visited) == 1
+
+
+class _RecordedError(Exception):
+    def __init__(self, marker):
+        super().__init__(marker)
+        self.reads = 0
+        self.marker = marker
+
+    @property
+    def exceptions(self):
+        self.reads += 1
+        raise RuntimeError(self.marker)
+
+
+def test_the_9th_leaf_of_a_flat_group_is_not_read():
+    marker = SECRET
+    recorded = _RecordedError(marker)
+    group = ExceptionGroup(
+        "flat",
+        [
+            ValueError(),
+            KeyError(),
+            OSError(),
+            TypeError(),
+            RuntimeError(),
+            IndexError(),
+            LookupError(),
+            ArithmeticError(),
+            recorded,
+        ],
+    )
+    cancelled = asyncio.CancelledError()
+    safe = safe_error(BaseExceptionGroup("mixed", [group, cancelled]), _WrapperError)
+
+    assert isinstance(safe, BaseExceptionGroup) and not isinstance(safe, Exception)
+    wrapped, kept = safe.exceptions
+    assert recorded.reads == 0 and "_RecordedError" not in str(wrapped)
+    assert kept is cancelled
+    assert marker not in _text(safe)
+
+
+def test_a_leaf_after_the_8th_in_a_nested_group_is_read_once_and_cannot_break_the_result():
+    marker = SECRET
+    recorded = _RecordedError(marker)
+    first = ExceptionGroup(
+        "first", [ValueError(), KeyError(), OSError(), TypeError(), RuntimeError(), IndexError(), LookupError()]
+    )
+    second = ExceptionGroup("second", [ArithmeticError(), recorded])
+    group = ExceptionGroup("nested", [first, second])
+    cancelled = asyncio.CancelledError()
+    safe = safe_error(BaseExceptionGroup("mixed", [group, cancelled]), _WrapperError)
+
+    assert isinstance(safe, BaseExceptionGroup) and not isinstance(safe, Exception)
+    wrapped, kept = safe.exceptions
+    assert recorded.reads == 1
+    assert "ArithmeticError" in str(wrapped) and "_RecordedError" not in str(wrapped)
+    assert kept is cancelled
+    assert marker not in _text(safe)
+
+
+def test_a_group_that_contains_itself_terminates():
+    marker = SECRET
+    cancelled = asyncio.CancelledError()
+
+    class CyclicExceptionGroup(ExceptionGroup):
+        @property
+        def exceptions(self):
+            return (self, ValueError(marker))
+
+    class CyclicBaseGroup(BaseExceptionGroup):
+        @property
+        def exceptions(self):
+            return (self, cancelled)
+
+    ordinary = CyclicExceptionGroup(marker, [ValueError(marker)])
+    safe = safe_error(BaseExceptionGroup("mixed", [ordinary, cancelled]), _WrapperError)
+    assert isinstance(safe, BaseExceptionGroup) and not isinstance(safe, Exception)
+    wrapped, kept = safe.exceptions
+    assert type(wrapped) is _WrapperError and str(wrapped) == "ValueError"
+    assert kept is cancelled and marker not in _text(safe)
+
+    cyclic = CyclicBaseGroup(marker, [cancelled])
+    safe_cyclic = safe_error(cyclic, _WrapperError)
+    assert isinstance(safe_cyclic, BaseExceptionGroup) and not isinstance(safe_cyclic, Exception)
+    assert safe_cyclic.exceptions == (cancelled,)
+    assert marker not in _text(safe_cyclic)
+
+
+def test_safe_error_uses_stored_members_when_a_group_property_fails():
+    marker = SECRET
+    cancelled = asyncio.CancelledError()
+
+    class BrokenGroup(BaseExceptionGroup):
+        @property
+        def exceptions(self):
+            raise RuntimeError(marker)
+
+    group = BrokenGroup("group", [ValueError(marker), cancelled])
+    safe = safe_error(group, _WrapperError)
+
+    assert isinstance(safe, BaseExceptionGroup) and not isinstance(safe, Exception)
+    wrapped, kept = safe.exceptions
+    assert type(wrapped) is _WrapperError and str(wrapped) == "ValueError"
+    assert str(safe).startswith("BrokenGroup")
+    assert kept is cancelled
+    assert marker not in _text(safe)
+
+
+def test_summary_keeps_short_lived_groups_in_the_cache():
+    references = []
+    alive = []
+
+    class DynamicError(Exception):
+        def __init__(self, kind):
+            super().__init__()
+            self.kind = kind
+
+        @property
+        def exceptions(self):
+            alive.append(all(reference() is not None for reference in references))
+            group = ExceptionGroup("temporary", [self.kind()])
+            references.append(weakref.ref(group))
+            return (group,)
+
+    group = ExceptionGroup("root", [DynamicError(kind) for kind in (ValueError, KeyError, TypeError, OSError)])
+    assert exception_summary(group) == "KeyError, OSError, TypeError, ValueError"
+    assert alive == [True, True, True, True]
+
+
+def test_safe_error_keeps_the_shape_of_a_mixed_group():
+    secret = SECRET
+    leaf = ValueError(secret)
+    leaf.add_note(secret)
+    cancelled = asyncio.CancelledError()
+    inner = BaseExceptionGroup(secret, [KeyError(secret), KeyboardInterrupt()])
+    inner.add_note(secret)
+    group = _raised(BaseExceptionGroup(secret, [leaf, cancelled, inner]))
+    group.add_note(secret)
+    group.__cause__ = ValueError(secret)
+
+    safe = safe_error(group, _WrapperError)
+
+    assert type(safe) is BaseExceptionGroup
+    assert not isinstance(safe, Exception)  # (Still not retried, still not caught by ``except Exception``.)
+    assert str(safe) == "CancelledError, KeyError, KeyboardInterrupt, ValueError at " + str(safe).split(" at ")[1]
+    wrapped, kept, safe_inner = safe.exceptions
+    assert type(wrapped) is _WrapperError
+    assert kept is cancelled  # The same object.
+    assert type(safe_inner) is BaseExceptionGroup
+    assert [type(item) for item in safe_inner.exceptions] == [_WrapperError, KeyboardInterrupt]
+    assert safe.__cause__ is None and safe.__context__ is None and getattr(safe, "__notes__", None) is None
+    assert SECRET not in _text(safe)
+    assert SECRET not in _text(safe_inner)
+
+
+def test_safe_error_keeps_a_cancellation_and_cuts_its_raw_chain():
+    secret = SECRET
+    error = _raised(asyncio.CancelledError("Cancelled via cancel scope 0x1"))
+    error.__cause__ = ValueError(secret)
+    error.__context__ = ValueError(secret)
+    error.add_note(secret)
+    safe = safe_error(error, _WrapperError)
+    assert safe is error  # The same object: asyncio, anyio and ddtrace see a cancellation.
+    assert safe.args == ("Cancelled via cancel scope 0x1",)  # The message is not changed.
+    assert safe.__cause__ is None and safe.__context__ is None and getattr(safe, "__notes__", None) is None
+    assert SECRET not in _text(safe)
+
+
+def test_safe_error_keeps_a_cancellation_context_for_anyio_and_cuts_its_raw_context():
+    secret = SECRET
+    inner = asyncio.CancelledError("Cancelled via cancel scope 0x2")
+    inner.__context__ = ValueError(secret)
+    inner.add_note(secret)
+    error = asyncio.CancelledError("Cancelled via cancel scope 0x1")
+    error.__context__ = inner
+    safe = safe_error(error, _WrapperError)
+    assert safe is error and safe.__context__ is inner
+    assert inner.args == ("Cancelled via cancel scope 0x2",)
+    assert inner.__context__ is None and getattr(inner, "__notes__", None) is None
+    assert SECRET not in _text(safe)
+
+
+def test_safe_error_does_not_loop_on_a_cycle_of_cancellation_contexts():
+    first, second = asyncio.CancelledError("a"), asyncio.CancelledError("b")
+    first.__context__, second.__context__ = second, first
+    assert safe_error(first, _WrapperError) is first
+
+
+@pytest.mark.parametrize("error", [SystemExit(3), KeyboardInterrupt()], ids=["system-exit", "keyboard-interrupt"])
+def test_safe_error_keeps_the_other_base_exceptions(error):
+    error.__context__ = ValueError(SECRET)
+    safe = safe_error(error, _WrapperError)
+    assert safe is error
+    assert safe.__context__ is None
+    if isinstance(safe, SystemExit):
+        assert safe.code == 3
+
+
+class _CustomGroup(BaseExceptionGroup):
+    """A legal group that is not an ``Exception``, though all its leaves are."""
+
+
+def test_safe_error_keeps_a_custom_group_of_exceptions_out_of_exception():
+    secret = SECRET
+    custom = _CustomGroup(secret, [ValueError(secret), KeyError(secret)])
+    assert not isinstance(custom, Exception)  # (``BaseExceptionGroup(...)`` alone would make an ``ExceptionGroup``.)
+    custom.add_note(secret)
+    custom.extra = secret  # type: ignore[attr-defined]
+    nested = _CustomGroup(secret, [_CustomGroup(secret, [OSError(secret)])])
+    outer = _raised(BaseExceptionGroup(secret, [custom, ValueError(secret), nested]))
+
+    for original in (_raised(custom), nested, outer):
+        safe = safe_error(original, _WrapperError)
+        assert isinstance(safe, BaseExceptionGroup) and not isinstance(safe, Exception)
+        assert SECRET not in _text(safe)
+        assert not hasattr(safe, "extra") and getattr(safe, "__notes__", None) is None
+    safe = safe_error(custom, _WrapperError)
+    assert [type(leaf) for leaf in safe.exceptions] == [_WrapperError, _WrapperError]  # type: ignore[attr-defined]
+    assert str(safe).startswith("KeyError, ValueError") and str(safe).endswith("(2 sub-exceptions)")
+    # ``subgroup`` and ``split`` make groups that are not an ``Exception`` either.
+    part = safe.subgroup(_WrapperError)  # type: ignore[attr-defined]
+    assert isinstance(part, BaseExceptionGroup) and not isinstance(part, Exception)
+    matching, rest = safe.split(_WrapperError)  # type: ignore[attr-defined]
+    assert not isinstance(matching, Exception) and rest is None
+    # The outer group keeps the shape of its leaves: a safe group, a wrapper, and a safe group.
+    safe_outer = safe_error(outer, _WrapperError)
+    kinds = [isinstance(leaf, Exception) for leaf in safe_outer.exceptions]  # type: ignore[attr-defined]
+    assert kinds == [False, True, False]
+
+
+def test_the_summary_names_at_most_8_leaves_in_order():
+    types = [ValueError, KeyError, OSError, TypeError, RuntimeError, IndexError, LookupError, ArithmeticError, EOFError]
+    group = BaseExceptionGroup(
+        "g", [BaseExceptionGroup("h", [t("x") for t in types[:5]]), *[t("x") for t in types[5:]]]
+    )
+    summary = exception_summary(group)
+    assert summary == "ArithmeticError, IndexError, KeyError, LookupError, OSError, RuntimeError, TypeError, ValueError"
+    assert "EOFError" not in summary  # The 9th leaf.
+    safe = safe_error(BaseExceptionGroup("g", [group, asyncio.CancelledError()]), _WrapperError)
+    assert str(safe).startswith("ArithmeticError, IndexError, KeyError, LookupError, OSError, RuntimeError, TypeError")
+
+
+def test_the_summary_skips_a_group_that_contains_itself():
+    class OddError(Exception):
+        """Not a real group: its ``exceptions`` list holds itself and a leaf."""
+
+    odd = OddError("x")
+    odd.exceptions = [odd, ValueError(SECRET)]  # type: ignore[attr-defined]
+    assert exception_summary(odd) == "ValueError"

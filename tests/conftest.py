@@ -8,11 +8,14 @@ from __future__ import annotations
 
 import json
 import locale
+import logging
 import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -192,3 +195,148 @@ def pi_reference():
                 "cases": dict(sorted(data["cases"].items())),
             }
             (PI_REFERENCE_FIXTURES / f"{action}.json").write_text(json.dumps(document, indent=1, sort_keys=True) + "\n")
+
+
+# --------------------------------------------------------------------------- #
+# A real ddtrace experiment on a fake LLM Obs service (no network)
+# --------------------------------------------------------------------------- #
+class FakeExperimentService:
+    """The LLM Obs service that ``ddtrace.llmobs._experiment.Experiment`` needs, with no network.
+
+    It follows the ``_ExperimentService`` contract of ddtrace. The spans are **real** ``ddtrace.trace.Span`` objects, so
+    ``set_exc_info`` and ``get_tag`` are the code of ddtrace (that is how ``error.message``, ``error.stack`` and
+    ``error.type`` are made). The backend client is a ``MagicMock``: ``repr(service.backend_calls)`` holds everything
+    that ddtrace sends to LLM Obs (rows, evaluations, status text).
+    """
+
+    enabled = True
+
+    def __init__(self, *, max_retries: int = 1, evaluators: tuple[Any, ...] = ()) -> None:
+        from ddtrace.llmobs._experiment import Dataset
+
+        self.max_retries = max_retries  #: Retries of ``Experiment.run`` (the airedale code never sets it).
+        self.evaluators = evaluators  #: The evaluators that replace the real judge of the cell.
+        self.spans: list[Any] = []
+        self.annotations: list[dict[str, Any]] = []
+        self._dne_client = MagicMock(name="dne_client")
+        self._dne_client.project_create_or_get.return_value = {"_id": "project", "name": "p"}
+        self._dne_client.experiment_create.return_value = ("experiment-id", "experiment-name")
+        self.dataset = Dataset(
+            name="dataset",
+            project={"_id": "project", "name": "p"},
+            dataset_id="dataset-id",
+            records=[
+                {
+                    "record_id": "record-0",
+                    "input_data": {"prompt": "hi"},
+                    "expected_output": {"criteria": ["c"]},
+                    "metadata": {},
+                }
+            ],
+            description="",
+            latest_version=1,
+            version=1,
+            _dne_client=self._dne_client,
+        )
+
+    @property
+    def backend_calls(self) -> list[Any]:
+        """Every call that ddtrace made to the LLM Obs backend client."""
+        return list(self._dne_client.mock_calls)
+
+    def _experiment(self, **kwargs: Any) -> Any:
+        from ddtrace.trace import Span
+
+        span = Span(kwargs.get("name") or "experiment")
+        self.spans.append(span)
+        return span
+
+    def annotate(self, span: Any = None, **kwargs: Any) -> None:
+        self.annotations.append(kwargs)
+
+    def export_span(self, span: Any = None) -> None:
+        return None
+
+    def flush(self) -> None:
+        pass
+
+
+@pytest.fixture
+def ddtrace_experiment(monkeypatch, caplog) -> FakeExperimentService:
+    """Make ``_run_cell`` run the real ddtrace ``Experiment.run`` (retries included) on a ``FakeExperimentService``.
+
+    Set ``service.max_retries`` and ``service.evaluators`` before the run. The logger of the experiment is at DEBUG:
+    ddtrace rate-limits its log records (one for each message every 60 s, except at DEBUG), so a test must see the
+    summary record before it can say that a marker is absent from the records.
+    """
+    from ddtrace.llmobs._experiment import Experiment
+
+    from airedale import experiment as experiment_module
+
+    service = FakeExperimentService()
+
+    class RetryingExperiment(Experiment):
+        async def run(  # type: ignore[override]
+            self, jobs: int = 10, raise_errors: bool = False, *args: Any, **kwargs: Any
+        ) -> Any:
+            return await super().run(
+                jobs=jobs, raise_errors=raise_errors, max_retries=service.max_retries, retry_delay=lambda _: 0
+            )
+
+    class FakeLLMObs:
+        enabled = False
+
+        @staticmethod
+        def async_experiment(*, evaluators: Any, **kwargs: Any) -> Experiment:
+            return RetryingExperiment(**kwargs, evaluators=service.evaluators, _llmobs_instance=service)
+
+        @staticmethod
+        def flush() -> None:
+            pass
+
+        @staticmethod
+        def annotate(**kwargs: Any) -> None:
+            pass
+
+    monkeypatch.setattr(experiment_module, "LLMObs", FakeLLMObs)
+    monkeypatch.setattr(experiment_module.dataset_module, "dataset_for_task", lambda dataset, task: service.dataset)
+    caplog.set_level(logging.DEBUG, logger="ddtrace.llmobs._experiment")
+    return service
+
+
+@pytest.fixture
+def run_cell(ddtrace_experiment, monkeypatch, tmp_path):
+    """Return ``run(make_runner, fail_fast=False)``: run one real ``_run_cell`` whose runners come from ``make_runner``.
+
+    ``make_runner(cwd)`` is called once for each attempt (a runner or a transport can be single-use). The cell uses the
+    real ``experiment_task``, a real ``WorkspaceManager``, and the real ddtrace ``Experiment.run`` with
+    ``ddtrace_experiment.max_retries`` retries.
+    """
+    from airedale import experiment as experiment_module
+    from airedale.config.experiment import ExperimentConfig, ScenarioConfig, TaskConfig
+    from airedale.progress import ProgressReporter
+    from airedale.types import ModelSpec
+    from airedale.workdir import WorkspaceManager
+
+    async def run(make_runner: Any, *, fail_fast: bool = False) -> Any:
+        monkeypatch.setattr(
+            experiment_module, "create_runner", lambda model, *, scenario, gateway, cwd: make_runner(Path(cwd))
+        )
+        model = ModelSpec.parse("anthropic/claude-3-haiku-20240307")
+        scenario = ScenarioConfig(name="s1")  # (No workdir: an empty temporary directory for each attempt.)
+        task = TaskConfig(id="t1", prompt="Q", criteria=("c",))
+        config = ExperimentConfig(project="p", models=(model.label,), scenarios=(scenario,), tasks=(task,))
+        async with WorkspaceManager(config_dir=tmp_path) as workspace_manager:
+            return await experiment_module._run_cell(
+                (model, scenario, task),
+                config=config,
+                gateway=None,
+                dataset=None,
+                judge_model="openai/gpt-4.1",
+                runs=1,
+                fail_fast=fail_fast,
+                progress=ProgressReporter(enabled=False),
+                workspace_manager=workspace_manager,
+            )
+
+    return run

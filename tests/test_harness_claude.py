@@ -16,6 +16,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import stat
 from types import SimpleNamespace
 from typing import Any
@@ -158,7 +159,6 @@ STDERR_MARKER = "sk-STDERR-MARKER"
 RESULT_MARKER = "sk-RESULT-MARKER"
 READER_MARKER = "sk-READER-MARKER"
 STDOUT_MARKER = "sk-STDOUT-MARKER"
-RETRY_MARKER = "sk-RETRY-MARKER"
 API_RETRY_MARKER = "sk-API-RETRY-MARKER"
 DENIAL_MARKER = "sk-DENIAL-MARKER"
 DEFERRED_MARKER = "sk-DEFERRED-MARKER"
@@ -434,20 +434,36 @@ def test_the_claude_sdk_stdout_debug_log_has_a_fixed_text(caplog):
     assert record.getMessage().endswith("(details hidden)")
 
 
-def test_the_ddtrace_retry_summary_is_not_changed(caplog):
-    """O7 (accepted): the experiment summary of ddtrace has the text of the retries. Airedale does not change it."""
-    from ddtrace.llmobs._experiment import Experiment
+@pytest.mark.parametrize("path", [1, 2], ids=["exception-in-the-stream", "error-result-message"])
+async def test_the_ddtrace_retry_summary_has_no_raw_text(
+    tmp_path, monkeypatch, caplog, ddtrace_experiment, run_cell, path
+):
+    """A real failed Claude run, retried once by ddtrace, leaves no raw text in the retry summary."""
+    monkeypatch.setenv("AIREDALE_OUTPUT_DIR", str(tmp_path / "reports"))
+    ddtrace_experiment.max_retries = 1
+    runners = []
 
-    experiment = object.__new__(Experiment)
-    experiment.name = "experiment"
-    experiment._runs = 1
-    experiment._interrupted = False
-    experiment._retries = [f"task row 0: attempt 1/2 failed: {RETRY_MARKER}"]
-    with caplog.at_level(logging.DEBUG):
-        experiment._log_experiment_summary({"summary_evaluations": {}, "rows": [], "runs": []})
-    assert any(
-        RETRY_MARKER in record.getMessage() and record.name == "ddtrace.llmobs._experiment" for record in caplog.records
+    def make_runner(cwd):
+        runner, _transport = _claude_runner(
+            cwd, path=path
+        )  # (A transport is single-use: a new runner for each attempt.)
+        runners.append(runner)
+        return runner
+
+    summary = await run_cell(make_runner)
+
+    assert len(runners) == 2  # A real retry.
+    [retries] = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "ddtrace.llmobs._experiment" and "Retries (" in record.getMessage()
+    ]
+    assert "Retries (1)" in retries
+    _assert_absent(
+        [_records_text(caplog), caplog.text, repr(summary.rows)], READER_MARKER, RESULT_MARKER, STDERR_MARKER
     )
+    [row] = summary.rows
+    assert re.match(r"^\w+(, \w+)* at \S+:\d+$", row["error"]["message"])
 
 
 class _FailsToConnect(_FakeTransport):

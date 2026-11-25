@@ -17,6 +17,7 @@ import openai
 from ddtrace.llmobs import BaseAsyncEvaluator, EvaluatorContext, EvaluatorResult
 
 from airedale.gateway import resolve_provider_config
+from airedale.safe_log import safe_error
 from airedale.types import ModelSpec
 
 if TYPE_CHECKING:
@@ -25,6 +26,10 @@ if TYPE_CHECKING:
 DEFAULT_JUDGE_MODEL = "anthropic/claude-sonnet-4-6"
 
 _JUDGE_SYSTEM_PROMPT = "You are a strict technical-answer evaluator. Return only JSON."
+
+
+class RubricJudgeError(RuntimeError):
+    """A judge error with a safe message: the type names and the place, never the raw text."""
 
 
 @dataclass(frozen=True)
@@ -123,7 +128,23 @@ class RubricEvaluator(BaseAsyncEvaluator):
         return resolved.base_url, api_key, headers
 
     async def evaluate(self, context: EvaluatorContext) -> EvaluatorResult:
-        """Score the output against all criteria from ``expected_output``."""
+        """Score the output against all criteria from ``expected_output``.
+
+        A judge failure is raised as :class:`RubricJudgeError`: ``ddtrace`` copies the message of an evaluator error to
+        LLM Obs and to the retry summary log line, and the raw message of a provider error can hold a copy of the
+        prompt (the model answer). A cancellation is not wrapped (see :func:`airedale.safe_log.safe_error`).
+        """
+        try:
+            return await self._evaluate(context)
+        except BaseException as error:  # A cancellation stays a cancellation: ``safe_error`` never swallows it.
+            caught = error  # (Only keep it here: ``safe_error`` runs outside the handler, see below.)
+        # Everything after this line runs outside the handler. If ``safe_error`` failed inside it, Python would
+        # attach the raw error as ``__context__`` of the new error. The frames stay for ``error.stack``.
+        safe = safe_error(caught, RubricJudgeError)
+        del caught
+        raise safe
+
+    async def _evaluate(self, context: EvaluatorContext) -> EvaluatorResult:
         criteria = _extract_criteria(context.expected_output)
         answer = _extract_answer(context.output_data)
         question = _extract_question(context.input_data)
