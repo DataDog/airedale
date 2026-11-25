@@ -15,6 +15,7 @@ import traceback
 import pytest
 
 import airedale.mcp as mcp_module
+import airedale.safe_log as safe_log_module
 from airedale.harness.pi_spans import PiSpanRecorder
 from airedale.mcp import McpServerSpec, _mcp_tool_metadata_catalog
 from airedale.safe_log import exception_summary, safe_error
@@ -442,6 +443,36 @@ def test_safe_error_wraps_an_exception_group_of_exceptions():
     safe = safe_error(group, _WrapperError)
     assert type(safe) is _WrapperError
     assert str(safe).startswith("KeyError, ValueError at ")
+    assert SECRET not in _text(safe)
+
+
+def test_safe_error_collapses_shared_nested_exception_groups(monkeypatch):
+    shared = ExceptionGroup(SECRET, [ValueError(SECRET), KeyError(SECRET)])
+    left = _raised(ExceptionGroup(SECRET, [shared, OSError(SECRET)]))
+    right = _raised(ExceptionGroup(SECRET, [shared, TypeError(SECRET)]))
+    assert isinstance(left, ExceptionGroup) and isinstance(right, ExceptionGroup)
+    expected = [exception_summary(left), exception_summary(right)]
+    cancellation = asyncio.CancelledError()
+    group = BaseExceptionGroup(SECRET, [left, right, cancellation])
+
+    described = []
+    original_describe = safe_log_module._describe
+
+    def record_description(names, error):
+        described.append(error)
+        return original_describe(names, error)
+
+    monkeypatch.setattr(safe_log_module, "_describe", record_description)
+    safe = safe_error(group, _WrapperError)
+
+    assert isinstance(safe, BaseExceptionGroup) and not isinstance(safe, Exception)
+    safe_left, safe_right, safe_cancellation = safe.exceptions
+    assert type(safe_left) is _WrapperError and type(safe_right) is _WrapperError
+    assert [str(safe_left), str(safe_right)] == expected
+    assert safe_left.__traceback__ is left.__traceback__
+    assert safe_right.__traceback__ is right.__traceback__
+    assert safe_cancellation is cancellation
+    assert sum(error is shared for error in described) == 1
     assert SECRET not in _text(safe)
 
 

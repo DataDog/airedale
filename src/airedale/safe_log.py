@@ -134,17 +134,23 @@ def _safe_group(error: BaseExceptionGroup, wrapper: type[Exception]) -> BaseExce
         node, children_done = pending.pop()
         if id(node) in safe:
             continue
-        if not isinstance(node, BaseExceptionGroup) or isinstance(node, Exception):
-            safe[id(node)] = _safe_leaf(node, wrapper)
+        if not isinstance(node, BaseExceptionGroup):
             names[id(node)] = [type(leaf).__name__ for leaf in _leaves(node, _MAX_LEAVES)]
+            if isinstance(node, Exception):
+                safe[id(node)] = wrapper(_describe(names[id(node)], node)).with_traceback(node.__traceback__)
+            else:
+                safe[id(node)] = _without_raw_chain(node)
         elif children_done:
-            leaves = [safe[id(child)] for child in node.exceptions]
             names[id(node)] = [name for child in node.exceptions for name in names[id(child)]][:_MAX_LEAVES]
-            # ``BaseExceptionGroup(...)`` makes an ``ExceptionGroup`` (an ``Exception``, so a retry) when all leaves are
-            # ``Exception``. The original group is not an ``Exception`` (a custom subclass), so keep it that way.
-            kind = BaseExceptionGroup if any(not isinstance(leaf, Exception) for leaf in leaves) else _SafeGroup
             summary = _describe(names[id(node)], node)  # (The same text as ``exception_summary(node)``.)
-            safe[id(node)] = kind(summary, leaves).with_traceback(node.__traceback__)
+            if isinstance(node, Exception):
+                safe[id(node)] = wrapper(summary).with_traceback(node.__traceback__)
+            else:
+                leaves = [safe[id(child)] for child in node.exceptions]
+                # ``BaseExceptionGroup(...)`` makes an ``ExceptionGroup`` when all leaves are ``Exception``.
+                # The original group is not an ``Exception`` (a custom subclass), so keep it that way.
+                kind = BaseExceptionGroup if any(not isinstance(leaf, Exception) for leaf in leaves) else _SafeGroup
+                safe[id(node)] = kind(summary, leaves).with_traceback(node.__traceback__)
         else:
             pending.append((node, True))
             pending.extend((child, False) for child in node.exceptions)
