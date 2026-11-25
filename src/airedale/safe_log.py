@@ -22,7 +22,10 @@ import pkgutil
 import sys
 import threading
 import weakref
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 _MAX_LEAVES = 8
 
@@ -32,7 +35,7 @@ def exception_summary(error: BaseException) -> str:
 
     An exception group is described by the types of its leaves (at most 8). No message, no argument, no local value.
     """
-    return _describe([type(leaf).__name__ for leaf in _leaves(error, _MAX_LEAVES)], error)
+    return _describe(_leaf_names(error, {}), error)
 
 
 def _describe(leaf_names: list[str], error: BaseException) -> str:
@@ -46,41 +49,45 @@ def _describe(leaf_names: list[str], error: BaseException) -> str:
     return ", ".join(sorted(set(leaf_names))) + place
 
 
-def _group_members(item: BaseException) -> tuple[BaseException, ...] | list[BaseException] | None:
-    """Return the members of an exception group, or ``None`` if ``item`` is a leaf."""
-    group = getattr(item, "exceptions", None)
-    if isinstance(group, tuple | list) and group and all(isinstance(child, BaseException) for child in group):
-        return group
+def _group_members(item: BaseException) -> tuple[BaseException, ...] | None:
+    """Return group members, or ``None`` for a leaf or a failed custom property."""
+    try:
+        group = getattr(item, "exceptions", None)
+        if isinstance(group, tuple | list) and group and all(isinstance(child, BaseException) for child in group):
+            return tuple(group)
+    except Exception:  # noqa: BLE001 - A failed custom property makes this item a leaf.
+        pass
     return None
 
 
-def _leaves(error: BaseException, limit: int | None = None) -> list[BaseException]:
-    """Return the first ``limit`` leaves of an exception group, in order (all of them without ``limit``).
+def _leaf_names(error: BaseException, cache: dict[int, list[str]]) -> list[str]:
+    """Return each group's first eight leaf names, walking shared groups once.
 
-    It does not recurse (a group can be very deep), it stops as soon as it has ``limit`` leaves (a group can be
-    shared, so the number of paths can be huge), and it skips a group that contains itself.
+    An open group has an empty cache entry, so a cycle adds no names. Each group stops after its own first eight
+    names; a parent takes only the names it needs. The walk uses a loop, not recursion.
     """
-    leaves: list[BaseException] = []
-    pending = [iter([error])]
-    path: list[int] = []  # The groups that are being walked, from the outside in (to unwind).
-    active: set[int] = set()  # The same ids, for a check in constant time (to skip a cycle).
-    while pending:
-        for item in pending[-1]:
-            members = _group_members(item)
-            if members is None:
-                leaves.append(item)
-                if limit is not None and len(leaves) >= limit:
-                    return leaves
-            elif id(item) not in active:
-                pending.append(iter(members))
-                path.append(id(item))
-                active.add(id(item))
-                break
-        else:
-            pending.pop()
-            if pending:
-                active.discard(path.pop())
-    return leaves
+    frames: list[tuple[int, Iterator[BaseException], list[str]]] = []
+    item: BaseException | None = error
+    result: list[str] = []
+    while True:
+        if item is not None:
+            if id(item) in cache:
+                result = cache[id(item)]
+            elif (members := _group_members(item)) is None:
+                result = [type(item).__name__]
+            else:
+                cache[id(item)] = []
+                frames.append((id(item), iter(members), []))
+                result = []
+        if not frames:
+            return result
+        key, members_left, names = frames[-1]
+        names.extend(result[: _MAX_LEAVES - len(names)])
+        result = []
+        item = next(members_left, None) if len(names) < _MAX_LEAVES else None
+        if item is None:
+            frames.pop()
+            cache[key] = result = names
 
 
 def safe_error(error: BaseException, wrapper: type[Exception]) -> BaseException:
@@ -127,33 +134,30 @@ class _SafeGroup(BaseExceptionGroup):
 
 def _safe_group(error: BaseExceptionGroup, wrapper: type[Exception]) -> BaseException:
     """Build the safe group again, from the leaves up. It does not recurse: a group can be very deep."""
+    names: dict[int, list[str]] = {}
     safe: dict[int, BaseException] = {}
-    names: dict[int, list[str]] = {}  # For each node: the type names of its first leaves, from the leaves up.
-    pending: list[tuple[BaseException, bool]] = [(error, False)]
+    open_groups: set[int] = set()
+    pending: list[tuple[BaseException, tuple[BaseException, ...] | None]] = [(error, None)]
     while pending:
-        node, children_done = pending.pop()
-        if id(node) in safe:
+        node, members = pending.pop()
+        if members is not None:
+            open_groups.discard(id(node))
+            summary = _describe(_leaf_names(node, names), node)
+            leaves = [safe[id(member)] for member in members if id(member) in safe] or [wrapper(summary)]
+            # Keep a group that is not an Exception even if all its safe leaves are Exceptions.
+            kind = BaseExceptionGroup if any(not isinstance(leaf, Exception) for leaf in leaves) else _SafeGroup
+            safe[id(node)] = kind(summary, leaves).with_traceback(node.__traceback__)
+        elif id(node) in safe or id(node) in open_groups:
             continue
-        if not isinstance(node, BaseExceptionGroup):
-            names[id(node)] = [type(leaf).__name__ for leaf in _leaves(node, _MAX_LEAVES)]
-            if isinstance(node, Exception):
-                safe[id(node)] = wrapper(_describe(names[id(node)], node)).with_traceback(node.__traceback__)
-            else:
-                safe[id(node)] = _without_raw_chain(node)
-        elif children_done:
-            names[id(node)] = [name for child in node.exceptions for name in names[id(child)]][:_MAX_LEAVES]
-            summary = _describe(names[id(node)], node)  # (The same text as ``exception_summary(node)``.)
-            if isinstance(node, Exception):
-                safe[id(node)] = wrapper(summary).with_traceback(node.__traceback__)
-            else:
-                leaves = [safe[id(child)] for child in node.exceptions]
-                # ``BaseExceptionGroup(...)`` makes an ``ExceptionGroup`` when all leaves are ``Exception``.
-                # The original group is not an ``Exception`` (a custom subclass), so keep it that way.
-                kind = BaseExceptionGroup if any(not isinstance(leaf, Exception) for leaf in leaves) else _SafeGroup
-                safe[id(node)] = kind(summary, leaves).with_traceback(node.__traceback__)
+        elif isinstance(node, Exception):
+            safe[id(node)] = wrapper(_describe(_leaf_names(node, names), node)).with_traceback(node.__traceback__)
+        elif isinstance(node, BaseExceptionGroup):
+            open_groups.add(id(node))
+            members = tuple(node.exceptions)
+            pending.append((node, members))
+            pending.extend((member, None) for member in members)
         else:
-            pending.append((node, True))
-            pending.extend((child, False) for child in node.exceptions)
+            safe[id(node)] = _without_raw_chain(node)
     return safe[id(error)]
 
 

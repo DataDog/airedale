@@ -16,7 +16,7 @@ For a `BaseExceptionGroup` that is not an `Exception`, the helper rebuilds the g
 
 For a cancellation or another non-group `BaseException`, the helper retains the original object and message. It removes the cause and notes, and removes any context that is not a cancellation. Cancellation contexts are retained and cleaned in the same way because anyio uses their messages. The message text of these control-flow exceptions is outside the sanitization scope.
 
-The group and cancellation walks use loops. The summary reads at most eight leaves, in order, and skips active ancestors to avoid cycles. Group summaries are built from child names as the safe groups are rebuilt. The retained traceback contains source locations and source lines, not local values.
+The group and cancellation walks use loops. The summary walks each group at most once, takes its first eight leaf names, skips cycles, and treats a failed custom `exceptions` property as a leaf. A parent takes only the names it needs from each child. The retained traceback contains source locations and source lines, not local values.
 
 `DecisionsRubricEvaluator` is not wrapped: it already raises a fixed error outside its exception handler. No ddtrace configuration or default retry count changes.
 
@@ -24,6 +24,6 @@ The group and cancellation walks use loops. The summary reads at most eight leav
 
 Offline tests run the real ddtrace experiment retry and span code with a fake LLM Obs service. They check that a retry summary exists before checking that it has no marker. They also check the task span, row, status text, fail-fast error, and evaluator error, along with retry counts and retained frames.
 
-The judge tests use `httpx2.MockTransport` with an error response and set the SDK client's `max_retries=0`. They run `Experiment.run(max_retries=1)` with zero retry delay, so ddtrace controls the retry. Other tests cover cancellation chains, mixed and custom groups, the eight-leaf limit, a small cycle, and failures in the sanitization helper. No test constructs a synthetic deep chain or shared group.
+The judge tests use `httpx2.MockTransport` with an error response and set the SDK client's `max_retries=0`. They run `Experiment.run(max_retries=1)` with zero retry delay, so ddtrace controls the retry. Other tests cover cancellation chains, mixed and custom groups, the eight-leaf limit, a small cycle, and failures in the sanitization helper. The tests cover a small shared group. They do not construct deep chains or large groups.
 
 The implementation is tested against the project's pinned ddtrace version, currently 4.17.0. Run `uv run ruff format --check .`, `uv run ruff check --no-fix .`, `uv run pyright`, and `uv run pytest` for local verification.

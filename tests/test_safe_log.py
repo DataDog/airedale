@@ -455,25 +455,152 @@ def test_safe_error_collapses_shared_nested_exception_groups(monkeypatch):
     cancellation = asyncio.CancelledError()
     group = BaseExceptionGroup(SECRET, [left, right, cancellation])
 
+    visited = []
     described = []
+    wrappers = []
+    original_members = safe_log_module._group_members
     original_describe = safe_log_module._describe
+
+    def record_members(error):
+        visited.append(error)
+        return original_members(error)
 
     def record_description(names, error):
         described.append(error)
         return original_describe(names, error)
 
+    class RecordingWrapperError(_WrapperError):
+        def __init__(self, message):
+            super().__init__(message)
+            wrappers.append(self)
+
+    monkeypatch.setattr(safe_log_module, "_group_members", record_members)
     monkeypatch.setattr(safe_log_module, "_describe", record_description)
-    safe = safe_error(group, _WrapperError)
+    safe = safe_error(group, RecordingWrapperError)
 
     assert isinstance(safe, BaseExceptionGroup) and not isinstance(safe, Exception)
     safe_left, safe_right, safe_cancellation = safe.exceptions
-    assert type(safe_left) is _WrapperError and type(safe_right) is _WrapperError
+    assert type(safe_left) is RecordingWrapperError and type(safe_right) is RecordingWrapperError
     assert [str(safe_left), str(safe_right)] == expected
     assert safe_left.__traceback__ is left.__traceback__
     assert safe_right.__traceback__ is right.__traceback__
     assert safe_cancellation is cancellation
-    assert sum(error is shared for error in described) == 1
+    assert sum(error is shared for error in visited) == 1
+    assert all(error is not shared for error in described)
+    assert len(wrappers) == 2
     assert SECRET not in _text(safe)
+
+
+def test_a_shared_group_gives_each_parent_its_own_first_8_names(monkeypatch):
+    shared = ExceptionGroup("shared", [ArithmeticError(), EOFError()])
+    first = ExceptionGroup(
+        "first", [ValueError(), KeyError(), OSError(), TypeError(), RuntimeError(), IndexError(), LookupError(), shared]
+    )
+    second = ExceptionGroup("second", [shared, NameError()])
+    expected = [exception_summary(first), exception_summary(second)]
+    visited = []
+    original_members = safe_log_module._group_members
+
+    def record_members(error):
+        visited.append(error)
+        return original_members(error)
+
+    monkeypatch.setattr(safe_log_module, "_group_members", record_members)
+    cancelled = asyncio.CancelledError()
+    safe = safe_error(BaseExceptionGroup("mixed", [first, second, cancelled]), _WrapperError)
+
+    assert isinstance(safe, BaseExceptionGroup)
+    wrapped_first, wrapped_second, kept = safe.exceptions
+    assert [str(wrapped_first), str(wrapped_second)] == expected
+    assert "EOFError" not in str(wrapped_first) and "EOFError" in str(wrapped_second)
+    assert kept is cancelled
+    assert sum(error is shared for error in visited) == 1
+
+
+class _RecordedError(Exception):
+    def __init__(self, marker):
+        super().__init__(marker)
+        self.reads = 0
+        self.marker = marker
+
+    @property
+    def exceptions(self):
+        self.reads += 1
+        raise RuntimeError(self.marker)
+
+
+def test_the_9th_leaf_of_a_flat_group_is_not_read():
+    marker = SECRET
+    recorded = _RecordedError(marker)
+    group = ExceptionGroup(
+        "flat",
+        [
+            ValueError(),
+            KeyError(),
+            OSError(),
+            TypeError(),
+            RuntimeError(),
+            IndexError(),
+            LookupError(),
+            ArithmeticError(),
+            recorded,
+        ],
+    )
+    cancelled = asyncio.CancelledError()
+    safe = safe_error(BaseExceptionGroup("mixed", [group, cancelled]), _WrapperError)
+
+    assert isinstance(safe, BaseExceptionGroup) and not isinstance(safe, Exception)
+    wrapped, kept = safe.exceptions
+    assert recorded.reads == 0 and "_RecordedError" not in str(wrapped)
+    assert kept is cancelled
+    assert marker not in _text(safe)
+
+
+def test_a_leaf_after_the_8th_in_a_nested_group_is_read_once_and_cannot_break_the_result():
+    marker = SECRET
+    recorded = _RecordedError(marker)
+    first = ExceptionGroup(
+        "first", [ValueError(), KeyError(), OSError(), TypeError(), RuntimeError(), IndexError(), LookupError()]
+    )
+    second = ExceptionGroup("second", [ArithmeticError(), recorded])
+    group = ExceptionGroup("nested", [first, second])
+    cancelled = asyncio.CancelledError()
+    safe = safe_error(BaseExceptionGroup("mixed", [group, cancelled]), _WrapperError)
+
+    assert isinstance(safe, BaseExceptionGroup) and not isinstance(safe, Exception)
+    wrapped, kept = safe.exceptions
+    assert recorded.reads == 1
+    assert "ArithmeticError" in str(wrapped) and "_RecordedError" not in str(wrapped)
+    assert kept is cancelled
+    assert marker not in _text(safe)
+
+
+def test_a_group_that_contains_itself_terminates():
+    marker = SECRET
+    cancelled = asyncio.CancelledError()
+
+    class CyclicExceptionGroup(ExceptionGroup):
+        @property
+        def exceptions(self):
+            return (self, ValueError(marker))
+
+    class CyclicBaseGroup(BaseExceptionGroup):
+        @property
+        def exceptions(self):
+            return (self, cancelled)
+
+    ordinary = CyclicExceptionGroup(marker, [ValueError(marker)])
+    safe = safe_error(BaseExceptionGroup("mixed", [ordinary, cancelled]), _WrapperError)
+    assert isinstance(safe, BaseExceptionGroup) and not isinstance(safe, Exception)
+    wrapped, kept = safe.exceptions
+    assert type(wrapped) is _WrapperError and str(wrapped) == "ValueError"
+    assert kept is cancelled and marker not in _text(safe)
+
+    cyclic = CyclicBaseGroup(marker, [cancelled])
+    safe_cyclic = safe_error(cyclic, _WrapperError)
+    assert isinstance(safe_cyclic, BaseExceptionGroup) and not isinstance(safe_cyclic, Exception)
+    assert safe_cyclic.exceptions == (cancelled,)
+    assert marker not in _text(safe_cyclic)
 
 
 def test_safe_error_keeps_the_shape_of_a_mixed_group():
