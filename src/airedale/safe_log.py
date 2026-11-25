@@ -60,7 +60,7 @@ def _group_members(item: BaseException) -> tuple[BaseException, ...] | None:
     return None
 
 
-def _leaf_names(error: BaseException, cache: dict[int, list[str]]) -> list[str]:
+def _leaf_names(error: BaseException, cache: dict[int, tuple[BaseException, list[str]]]) -> list[str]:
     """Return each group's first eight leaf names, walking shared groups once.
 
     An open group has an empty cache entry, so a cycle adds no names. Each group stops after its own first eight
@@ -72,11 +72,11 @@ def _leaf_names(error: BaseException, cache: dict[int, list[str]]) -> list[str]:
     while True:
         if item is not None:
             if id(item) in cache:
-                result = cache[id(item)]
+                result = cache[id(item)][1]
             elif (members := _group_members(item)) is None:
                 result = [type(item).__name__]
             else:
-                cache[id(item)] = []
+                cache[id(item)] = (item, [])
                 frames.append((id(item), iter(members), []))
                 result = []
         if not frames:
@@ -87,7 +87,8 @@ def _leaf_names(error: BaseException, cache: dict[int, list[str]]) -> list[str]:
         item = next(members_left, None) if len(names) < _MAX_LEAVES else None
         if item is None:
             frames.pop()
-            cache[key] = result = names
+            result = names
+            cache[key] = (cache[key][0], names)
 
 
 def safe_error(error: BaseException, wrapper: type[Exception]) -> BaseException:
@@ -134,7 +135,7 @@ class _SafeGroup(BaseExceptionGroup):
 
 def _safe_group(error: BaseExceptionGroup, wrapper: type[Exception]) -> BaseException:
     """Build the safe group again, from the leaves up. It does not recurse: a group can be very deep."""
-    names: dict[int, list[str]] = {}
+    names: dict[int, tuple[BaseException, list[str]]] = {}
     safe: dict[int, BaseException] = {}
     open_groups: set[int] = set()
     pending: list[tuple[BaseException, tuple[BaseException, ...] | None]] = [(error, None)]
@@ -153,7 +154,7 @@ def _safe_group(error: BaseExceptionGroup, wrapper: type[Exception]) -> BaseExce
             safe[id(node)] = wrapper(_describe(_leaf_names(node, names), node)).with_traceback(node.__traceback__)
         elif isinstance(node, BaseExceptionGroup):
             open_groups.add(id(node))
-            members = tuple(node.exceptions)
+            members = _group_members(node) or BaseExceptionGroup.exceptions.__get__(node)
             pending.append((node, members))
             pending.extend((member, None) for member in members)
         else:

@@ -11,6 +11,7 @@ import contextlib
 import logging
 import os
 import traceback
+import weakref
 
 import pytest
 
@@ -601,6 +602,47 @@ def test_a_group_that_contains_itself_terminates():
     assert isinstance(safe_cyclic, BaseExceptionGroup) and not isinstance(safe_cyclic, Exception)
     assert safe_cyclic.exceptions == (cancelled,)
     assert marker not in _text(safe_cyclic)
+
+
+def test_safe_error_uses_stored_members_when_a_group_property_fails():
+    marker = SECRET
+    cancelled = asyncio.CancelledError()
+
+    class BrokenGroup(BaseExceptionGroup):
+        @property
+        def exceptions(self):
+            raise RuntimeError(marker)
+
+    group = BrokenGroup("group", [ValueError(marker), cancelled])
+    safe = safe_error(group, _WrapperError)
+
+    assert isinstance(safe, BaseExceptionGroup) and not isinstance(safe, Exception)
+    wrapped, kept = safe.exceptions
+    assert type(wrapped) is _WrapperError and str(wrapped) == "ValueError"
+    assert str(safe).startswith("BrokenGroup")
+    assert kept is cancelled
+    assert marker not in _text(safe)
+
+
+def test_summary_keeps_short_lived_groups_in_the_cache():
+    references = []
+    alive = []
+
+    class DynamicError(Exception):
+        def __init__(self, kind):
+            super().__init__()
+            self.kind = kind
+
+        @property
+        def exceptions(self):
+            alive.append(all(reference() is not None for reference in references))
+            group = ExceptionGroup("temporary", [self.kind()])
+            references.append(weakref.ref(group))
+            return (group,)
+
+    group = ExceptionGroup("root", [DynamicError(kind) for kind in (ValueError, KeyError, TypeError, OSError)])
+    assert exception_summary(group) == "KeyError, OSError, TypeError, ValueError"
+    assert alive == [True, True, True, True]
 
 
 def test_safe_error_keeps_the_shape_of_a_mixed_group():
